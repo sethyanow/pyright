@@ -26,3 +26,5 @@
 {"timestamp":"2026-04-01T16:40:09.027074+00:00","actor":"Seth","event_type":"dep_added","task_id":"pyr-1lc","details":{"kind":"blocks","to":"pyr-yay"}}
 {"timestamp":"2026-04-01T16:40:09.051787+00:00","actor":"Seth","event_type":"dep_added","task_id":"pyr-p1w","details":{"kind":"blocks","to":"pyr-1lc"}}
 {"timestamp":"2026-04-01T16:40:09.086024+00:00","actor":"Seth","event_type":"dep_added","task_id":"pyr-8b1","details":{"kind":"blocks","to":"pyr-p1w"}}
+{"timestamp":"2026-04-01T17:17:55.052388+00:00","actor":"Seth","event_type":"claimed","task_id":"pyr-wru","details":{"actor":"Seth"}}
+{"timestamp":"2026-04-01T18:45:01.993018+00:00","actor":"Seth","event_type":"created","task_id":"pyr-742","details":{}}

@@ -14,17 +14,17 @@ defaults:
     priority: 1
 gates:
   implement_to_review:
-  - type: has_owner
+    - type: has_owner
   design_to_plan:
-  - type: has_section
-    param: Requirements
+    - type: has_section
+      param: Requirements
   close:
-  - type: all_criteria_checked
+    - type: all_criteria_checked
   plan_to_implement:
-  - type: has_section
-    param: Plan
-  - type: has_section
-    param: Success Criteria
+    - type: has_section
+      param: Plan
+    - type: has_section
+      param: Success Criteria
 formats:
   list: compact
   show: detailed

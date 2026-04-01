@@ -28,7 +28,6 @@ import { convertOffsetsToRange, convertOffsetToPosition } from '../common/positi
 import {
     PythonVersion,
     pythonVersion3_13,
-    pythonVersion3_14,
     pythonVersion3_6,
     pythonVersion3_7,
     pythonVersion3_9,
@@ -130,6 +129,7 @@ import {
     ResolvedAliasInfo,
     synthesizeAliasDeclaration,
 } from './declarationUtils';
+import { populateTypeRegistry, TypeRegistry } from './typeRegistry';
 import {
     addOverloadsToFunctionType,
     applyClassDecorator,
@@ -211,7 +211,6 @@ import {
     maxInferredContainerDepth,
     maxSubtypesForInferredType,
     MemberAccessDeprecationInfo,
-    PrefetchedTypes,
     PrintTypeOptions,
     Reachability,
     ResolveAliasOptions,
@@ -662,7 +661,8 @@ export function createTypeEvaluator(
     const returnTypeInferenceContextStack: ReturnTypeInferenceContext[] = [];
     let returnTypeInferenceTypeCache: Map<number, TypeCacheEntry> | undefined;
     const signatureTrackerStack: SignatureTrackerStackEntry[] = [];
-    let prefetched: Partial<PrefetchedTypes> | undefined;
+    let registry!: TypeRegistry;
+    let registryInitialized = false;
 
     function runWithCancellationToken<T>(token: CancellationToken, callback: () => T): T;
     function runWithCancellationToken<T>(token: CancellationToken, callback: () => Promise<T>): Promise<T>;
@@ -900,7 +900,7 @@ export function createTypeEvaluator(
     // context, logging any errors in the process. This may require the
     // type of surrounding statements to be evaluated.
     function getType(node: ExpressionNode): Type | undefined {
-        initializePrefetchedTypes(node);
+        ensureRegistryInitialized(node);
 
         let type = evaluateTypeForSubnode(node, () => {
             evaluateTypesForExpressionInContext(node);
@@ -977,7 +977,7 @@ export function createTypeEvaluator(
         // This is a primary entry point called by language server providers,
         // and it might be called before any other type evaluation has occurred.
         // Use this opportunity to do some initialization.
-        initializePrefetchedTypes(node);
+        ensureRegistryInitialized(node);
 
         // Scan up the parse tree to find the top-most expression node
         // so we can evaluate the entire expression.
@@ -1016,86 +1016,14 @@ export function createTypeEvaluator(
         return undefined;
     }
 
-    function initializePrefetchedTypes(node: ParseNode) {
-        if (!prefetched) {
-            // Some of these types have cyclical dependencies on each other,
-            // so don't re-enter this block once we start executing it.
-            prefetched = {};
-
-            const fileInfo = AnalyzerNodeInfo.getFileInfo(node);
-
-            prefetched.objectClass = getBuiltInType(node, 'object');
-            prefetched.typeClass = getBuiltInType(node, 'type');
-            prefetched.functionClass = getTypesType(node, 'FunctionType') ?? getBuiltInType(node, 'function');
-            prefetched.methodClass = getTypesType(node, 'MethodType');
-
-            prefetched.unionTypeClass = getTypesType(node, 'UnionType');
-            if (prefetched.unionTypeClass && isClass(prefetched.unionTypeClass)) {
-                prefetched.unionTypeClass.shared.flags |= ClassTypeFlags.SpecialFormClass;
-            }
-
-            // Initialize and cache "Collection" to break a cyclical dependency
-            // that occurs when resolving tuple below.
-            getTypingType(node, 'Collection');
-
-            prefetched.noneTypeClass = getTypeshedType(node, 'NoneType') ?? UnknownType.create();
-            prefetched.tupleClass = getBuiltInType(node, 'tuple');
-            prefetched.boolClass = getBuiltInType(node, 'bool');
-            prefetched.intClass = getBuiltInType(node, 'int');
-            prefetched.strClass = getBuiltInType(node, 'str');
-            prefetched.dictClass = getBuiltInType(node, 'dict');
-            prefetched.moduleTypeClass = getTypingType(node, 'ModuleType');
-            prefetched.typedDictPrivateClass =
-                getTypeCheckerInternalsType(node, 'TypedDictFallback') ?? getTypingType(node, '_TypedDict');
-            prefetched.typedDictClass = getTypingType(node, 'TypedDict');
-            prefetched.awaitableClass = getTypingType(node, 'Awaitable');
-            prefetched.mappingClass = getTypingType(node, 'Mapping');
-
-            // Don't attempt to resolve the string.templatelib if pyright is configured for
-            // Python 3.13 or older. Doing so will either fail to resolve (if running on Python 3.13
-            // or older) or resolve to the templatelib.py source file (if running on Python 3.14).
-            if (PythonVersion.isGreaterOrEqualTo(fileInfo.executionEnvironment.pythonVersion, pythonVersion3_14)) {
-                prefetched.templateClass = getTypeOfModule(node, 'Template', ['string', 'templatelib']);
-            } else {
-                prefetched.templateClass = UnknownType.create();
-            }
-
-            prefetched.supportsKeysAndGetItemClass = getTypeshedType(node, 'SupportsKeysAndGetItem');
-            if (!prefetched.supportsKeysAndGetItemClass) {
-                // Fall back on 'Mapping' if 'SupportsKeysAndGetItem' is not available.
-                prefetched.supportsKeysAndGetItemClass = prefetched.mappingClass;
-            }
-
-            // Wire up the `Any` class to the special-form version of our internal AnyType.
-            if (
-                prefetched.objectClass &&
-                isInstantiableClass(prefetched.objectClass) &&
-                prefetched.typeClass &&
-                isInstantiableClass(prefetched.typeClass)
-            ) {
-                const anyClass = ClassType.createInstantiable(
-                    'Any',
-                    'typing.Any',
-                    'typing',
-                    Uri.empty(),
-                    ClassTypeFlags.BuiltIn | ClassTypeFlags.SpecialFormClass | ClassTypeFlags.IllegalIsinstanceClass,
-                    /* typeSourceId */ -1,
-                    /* declaredMetaclass */ undefined,
-                    /* effectiveMetaclass */ prefetched.typeClass
-                );
-                anyClass.shared.baseClasses.push(prefetched.objectClass);
-                computeMroLinearization(anyClass);
-                const anySpecialForm = AnyType.createSpecialForm();
-
-                if (isAny(anySpecialForm)) {
-                    TypeBase.setSpecialForm(anySpecialForm, anyClass);
-
-                    if (isTypeFormSupported(node)) {
-                        TypeBase.setTypeForm(anySpecialForm, convertToInstance(anySpecialForm));
-                    }
-                }
-            }
-        }
+    function ensureRegistryInitialized(node: ParseNode): void {
+        if (registryInitialized) return;
+        registryInitialized = true;
+        // Set empty object before factory call so re-entrant evaluator
+        // calls that access registry fields get undefined (not a crash),
+        // matching original pattern where prefetched = {} before resolution.
+        registry = {} as TypeRegistry;
+        populateTypeRegistry(registry, evaluatorInterface, importLookup, node);
     }
 
     function getTypeOfExpression(
@@ -1160,7 +1088,7 @@ export function createTypeEvaluator(
         // typeshed stubs, do so here. It would be better to fetch this when it's
         // needed in assignType, but we don't have access to the parse tree
         // at that point.
-        initializePrefetchedTypes(node);
+        ensureRegistryInitialized(node);
 
         let typeResult = getTypeOfExpressionCore(node, flags, inferenceContext);
 
@@ -1685,8 +1613,8 @@ export function createTypeEvaluator(
 
         if (isTemplate) {
             const templateType =
-                prefetched?.templateClass && isInstantiableClass(prefetched?.templateClass)
-                    ? ClassType.cloneAsInstance(prefetched.templateClass)
+                registry.templateClass && isInstantiableClass(registry.templateClass)
+                    ? ClassType.cloneAsInstance(registry.templateClass)
                     : UnknownType.create();
 
             typeResult = { type: templateType, isIncomplete };
@@ -1864,8 +1792,8 @@ export function createTypeEvaluator(
 
             if (isTemplateString) {
                 const templateType =
-                    prefetched?.templateClass && isInstantiableClass(prefetched?.templateClass)
-                        ? ClassType.cloneAsInstance(prefetched.templateClass)
+                    registry.templateClass && isInstantiableClass(registry.templateClass)
+                        ? ClassType.cloneAsInstance(registry.templateClass)
                         : UnknownType.create();
 
                 typeResult = { type: templateType, isIncomplete };
@@ -1912,8 +1840,8 @@ export function createTypeEvaluator(
 
                 if (ClassType.isBuiltIn(subtype, 'LiteralString')) {
                     // Handle "LiteralString" specially.
-                    if (prefetched?.strClass && isInstantiableClass(prefetched.strClass)) {
-                        let strInstance = ClassType.cloneAsInstance(prefetched.strClass);
+                    if (registry.strClass && isInstantiableClass(registry.strClass)) {
+                        let strInstance = ClassType.cloneAsInstance(registry.strClass);
                         strInstance = TypeBase.cloneForCondition(strInstance, getTypeCondition(subtype));
                         return strInstance;
                     }
@@ -2296,7 +2224,7 @@ export function createTypeEvaluator(
     function stripTypeGuard(type: Type): Type {
         return mapSubtypes(type, (subtype) => {
             if (isClassInstance(subtype) && ClassType.isBuiltIn(subtype, ['TypeGuard', 'TypeIs'])) {
-                return prefetched?.boolClass ? convertToInstance(prefetched.boolClass) : UnknownType.create();
+                return registry.boolClass ? convertToInstance(registry.boolClass) : UnknownType.create();
             }
 
             return subtype;
@@ -3018,14 +2946,14 @@ export function createTypeEvaluator(
     // If errorNode is undefined, no errors are reported.
     function getTypeOfAwaitable(typeResult: TypeResult, errorNode?: ExpressionNode): TypeResult {
         if (
-            !prefetched?.awaitableClass ||
-            !isInstantiableClass(prefetched.awaitableClass) ||
-            prefetched.awaitableClass.shared.typeParams.length !== 1
+            !registry.awaitableClass ||
+            !isInstantiableClass(registry.awaitableClass) ||
+            registry.awaitableClass.shared.typeParams.length !== 1
         ) {
             return { type: UnknownType.create(), isIncomplete: typeResult.isIncomplete };
         }
 
-        const awaitableProtocolObj = ClassType.cloneAsInstance(prefetched.awaitableClass);
+        const awaitableProtocolObj = ClassType.cloneAsInstance(registry.awaitableClass);
         const isIncomplete = !!typeResult.isIncomplete;
 
         const type = mapSubtypes(typeResult.type, (subtype) => {
@@ -3124,8 +3052,8 @@ export function createTypeEvaluator(
                             [
                                 {
                                     type:
-                                        prefetched?.intClass && isInstantiableClass(prefetched.intClass)
-                                            ? ClassType.cloneAsInstance(prefetched.intClass)
+                                        registry.intClass && isInstantiableClass(registry.intClass)
+                                            ? ClassType.cloneAsInstance(registry.intClass)
                                             : UnknownType.create(),
                                 },
                             ],
@@ -3301,38 +3229,38 @@ export function createTypeEvaluator(
     }
 
     function getTypedDictClassType(): ClassType | undefined {
-        return prefetched?.typedDictPrivateClass && isInstantiableClass(prefetched.typedDictPrivateClass)
-            ? prefetched.typedDictPrivateClass
+        return registry.typedDictPrivateClass && isInstantiableClass(registry.typedDictPrivateClass)
+            ? registry.typedDictPrivateClass
             : undefined;
     }
 
     function getTupleClassType(): ClassType | undefined {
-        return prefetched?.tupleClass && isInstantiableClass(prefetched.tupleClass) ? prefetched.tupleClass : undefined;
+        return registry.tupleClass && isInstantiableClass(registry.tupleClass) ? registry.tupleClass : undefined;
     }
 
     function getDictClassType(): ClassType | undefined {
-        return prefetched?.dictClass && isInstantiableClass(prefetched.dictClass) ? prefetched.dictClass : undefined;
+        return registry.dictClass && isInstantiableClass(registry.dictClass) ? registry.dictClass : undefined;
     }
 
     function getStrClassType(): ClassType | undefined {
-        return prefetched?.strClass && isInstantiableClass(prefetched.strClass) ? prefetched.strClass : undefined;
+        return registry.strClass && isInstantiableClass(registry.strClass) ? registry.strClass : undefined;
     }
 
     function getObjectType(): Type {
-        return prefetched?.objectClass ? convertToInstance(prefetched.objectClass) : UnknownType.create();
+        return registry.objectClass ? convertToInstance(registry.objectClass) : UnknownType.create();
     }
 
     function getNoneType(): Type {
-        return prefetched?.noneTypeClass ? convertToInstance(prefetched.noneTypeClass) : UnknownType.create();
+        return registry.noneTypeClass ? convertToInstance(registry.noneTypeClass) : UnknownType.create();
     }
 
     function getUnionClassType(): Type {
-        return prefetched?.unionTypeClass ?? UnknownType.create();
+        return registry.unionTypeClass ?? UnknownType.create();
     }
 
     function getTypeClassType(): ClassType | undefined {
-        if (prefetched?.typeClass && isInstantiableClass(prefetched.typeClass)) {
-            return prefetched.typeClass;
+        if (registry.typeClass && isInstantiableClass(registry.typeClass)) {
+            return registry.typeClass;
         }
         return undefined;
     }
@@ -3349,10 +3277,6 @@ export function createTypeEvaluator(
 
     function getTypesType(node: ParseNode, symbolName: string): Type | undefined {
         return getTypeOfModule(node, symbolName, ['types']);
-    }
-
-    function getTypeshedType(node: ParseNode, symbolName: string): Type | undefined {
-        return getTypeOfModule(node, symbolName, ['_typeshed']);
     }
 
     function getTypeOfModule(node: ParseNode, symbolName: string, nameParts: string[]) {
@@ -4190,14 +4114,14 @@ export function createTypeEvaluator(
                     return makeTupleObject(evaluatorInterface, [{ type: getObjectType(), isUnbounded: true }]);
                 } else if (subtype.priv.paramSpecAccess === 'kwargs') {
                     if (
-                        prefetched?.dictClass &&
-                        isInstantiableClass(prefetched.dictClass) &&
-                        prefetched?.strClass &&
-                        isInstantiableClass(prefetched.strClass)
+                        registry.dictClass &&
+                        isInstantiableClass(registry.dictClass) &&
+                        registry.strClass &&
+                        isInstantiableClass(registry.strClass)
                     ) {
                         return ClassType.cloneAsInstance(
-                            ClassType.specialize(prefetched.dictClass, [
-                                convertToInstance(prefetched.strClass),
+                            ClassType.specialize(registry.dictClass, [
+                                convertToInstance(registry.strClass),
                                 getObjectType(),
                             ])
                         );
@@ -4220,8 +4144,8 @@ export function createTypeEvaluator(
                 // If it's in a union, convert to type or object.
                 if (subtype.priv.isInUnion) {
                     if (TypeBase.isInstantiable(subtype)) {
-                        if (prefetched?.typeClass && isInstantiableClass(prefetched.typeClass)) {
-                            return prefetched.typeClass;
+                        if (registry.typeClass && isInstantiableClass(registry.typeClass)) {
+                            return registry.typeClass;
                         }
                     } else {
                         return getObjectType();
@@ -5092,10 +5016,10 @@ export function createTypeEvaluator(
         if (
             convertModule &&
             isModule(type) &&
-            prefetched?.moduleTypeClass &&
-            isInstantiableClass(prefetched.moduleTypeClass)
+            registry.moduleTypeClass &&
+            isInstantiableClass(registry.moduleTypeClass)
         ) {
-            return ClassType.cloneAsInstance(prefetched.moduleTypeClass);
+            return ClassType.cloneAsInstance(registry.moduleTypeClass);
         }
 
         // Isinstance treats traditional (non-PEP 695) type aliases that are unions
@@ -5851,10 +5775,10 @@ export function createTypeEvaluator(
                 if (
                     ClassType.isNewTypeClass(baseType) &&
                     !baseType.priv.includeSubclasses &&
-                    prefetched?.functionClass &&
-                    isClass(prefetched.functionClass)
+                    registry.functionClass &&
+                    isClass(registry.functionClass)
                 ) {
-                    baseType = ClassType.cloneAsInstance(prefetched.functionClass);
+                    baseType = ClassType.cloneAsInstance(registry.functionClass);
                 }
 
                 const enumMemberResult = getTypeOfEnumMember(
@@ -5939,8 +5863,8 @@ export function createTypeEvaluator(
                 // see if it's defined in the `ModuleType` class. This is
                 // needed for modules that are synthesized for namespace
                 // packages.
-                if (!symbol && prefetched?.moduleTypeClass && isInstantiableClass(prefetched.moduleTypeClass)) {
-                    symbol = ClassType.getSymbolTable(prefetched.moduleTypeClass).get(memberName);
+                if (!symbol && registry.moduleTypeClass && isInstantiableClass(registry.moduleTypeClass)) {
+                    symbol = ClassType.getSymbolTable(registry.moduleTypeClass).get(memberName);
                 }
 
                 if (symbol && !symbol.isExternallyHidden()) {
@@ -6122,7 +6046,7 @@ export function createTypeEvaluator(
 
                     type = functionType?.priv.boundToType;
                 } else {
-                    const altType = hasSelf ? prefetched?.methodClass : prefetched?.functionClass;
+                    const altType = hasSelf ? registry.methodClass : registry.functionClass;
                     type = getTypeOfMemberAccessWithBaseType(
                         node,
                         { type: altType ? convertToInstance(altType) : UnknownType.create() },
@@ -6982,8 +6906,8 @@ export function createTypeEvaluator(
             argCategory: ArgCategory.Simple,
             typeResult: {
                 type:
-                    prefetched?.strClass && isInstantiableClass(prefetched.strClass)
-                        ? ClassType.cloneWithLiteral(ClassType.cloneAsInstance(prefetched.strClass), memberName)
+                    registry.strClass && isInstantiableClass(registry.strClass)
+                        ? ClassType.cloneWithLiteral(ClassType.cloneAsInstance(registry.strClass), memberName)
                         : AnyType.create(),
             },
         });
@@ -7322,7 +7246,7 @@ export function createTypeEvaluator(
                         tupleClassType: getTupleClassType(),
                     },
                 });
-            } else if (isTypeVarTuple(param) && prefetched?.tupleClass && isInstantiableClass(prefetched.tupleClass)) {
+            } else if (isTypeVarTuple(param) && registry.tupleClass && isInstantiableClass(registry.tupleClass)) {
                 defaultType = makeTupleObject(
                     evaluatorInterface,
                     [{ type: UnknownType.create(), isUnbounded: true }],
@@ -8505,13 +8429,11 @@ export function createTypeEvaluator(
             setTypeResultForNode(node, { type: UnknownType.create() });
         } else if (node.nodeType === ParseNodeType.Dictionary && supportsDictExpression) {
             const inlinedTypeDict =
-                prefetched?.typedDictClass && isInstantiableClass(prefetched.typedDictClass)
-                    ? createTypedDictTypeInlined(evaluatorInterface, node, prefetched.typedDictClass)
+                registry.typedDictClass && isInstantiableClass(registry.typedDictClass)
+                    ? createTypedDictTypeInlined(evaluatorInterface, node, registry.typedDictClass)
                     : undefined;
             const keyTypeFallback =
-                prefetched?.strClass && isInstantiableClass(prefetched.strClass)
-                    ? prefetched.strClass
-                    : UnknownType.create();
+                registry.strClass && isInstantiableClass(registry.strClass) ? registry.strClass : UnknownType.create();
 
             typeResult = {
                 type: keyTypeFallback,
@@ -9224,7 +9146,7 @@ export function createTypeEvaluator(
                 !isAnyOrUnknown(effectiveTargetClass) &&
                 !derivesFromAnyOrUnknown(effectiveTargetClass)
             ) {
-                resultType = prefetched?.objectClass ?? UnknownType.create();
+                resultType = registry.objectClass ?? UnknownType.create();
             } else {
                 resultType = UnknownType.create();
             }
@@ -9297,9 +9219,9 @@ export function createTypeEvaluator(
                 }
 
                 // There's not much we can say about the type. Simply return object or type.
-                if (prefetched?.typeClass && isInstantiableClass(prefetched.typeClass)) {
+                if (registry.typeClass && isInstantiableClass(registry.typeClass)) {
                     return {
-                        type: resultIsInstance ? getObjectType() : convertToInstance(prefetched.typeClass),
+                        type: resultIsInstance ? getObjectType() : convertToInstance(registry.typeClass),
                     };
                 }
             } else {
@@ -10472,8 +10394,8 @@ export function createTypeEvaluator(
                                 ClassType.isNewTypeClass(subtype) &&
                                 !subtype.priv.includeSubclasses
                             ) {
-                                if (prefetched?.functionClass) {
-                                    return prefetched.functionClass;
+                                if (registry.functionClass) {
+                                    return registry.functionClass;
                                 }
                             }
 
@@ -10853,7 +10775,7 @@ export function createTypeEvaluator(
                 // type which will be a union of all element types.
                 const combinedArgType = combineSameSizedTuples(
                     makeTopLevelTypeVarsConcrete(argType),
-                    prefetched?.tupleClass
+                    registry.tupleClass
                 );
 
                 if (isClassInstance(combinedArgType) && isTupleClass(combinedArgType)) {
@@ -11521,8 +11443,8 @@ export function createTypeEvaluator(
                         const strObjType = getBuiltInObject(errorNode, 'str');
 
                         if (
-                            prefetched?.supportsKeysAndGetItemClass &&
-                            isInstantiableClass(prefetched.supportsKeysAndGetItemClass) &&
+                            registry.supportsKeysAndGetItemClass &&
+                            isInstantiableClass(registry.supportsKeysAndGetItemClass) &&
                             strObjType &&
                             isClassInstance(strObjType)
                         ) {
@@ -11535,14 +11457,14 @@ export function createTypeEvaluator(
                                 isValidMappingType = true;
                             } else if (
                                 assignType(
-                                    ClassType.cloneAsInstance(prefetched.supportsKeysAndGetItemClass),
+                                    ClassType.cloneAsInstance(registry.supportsKeysAndGetItemClass),
                                     argType,
                                     /* diag */ undefined,
                                     mappingConstraints
                                 )
                             ) {
                                 const specializedMapping = solveAndApplyConstraints(
-                                    prefetched.supportsKeysAndGetItemClass,
+                                    registry.supportsKeysAndGetItemClass,
                                     mappingConstraints
                                 ) as ClassType;
                                 const typeArgs = specializedMapping.priv.typeArgs;
@@ -13669,7 +13591,7 @@ export function createTypeEvaluator(
         let isBaseClassAny = false;
 
         if (isAnyOrUnknown(baseClass)) {
-            baseClass = prefetched?.objectClass ?? UnknownType.create();
+            baseClass = registry.objectClass ?? UnknownType.create();
 
             addDiagnostic(
                 DiagnosticRule.reportGeneralTypeIssues,
@@ -13818,11 +13740,11 @@ export function createTypeEvaluator(
         let type: Type | undefined;
 
         if (node.d.constType === KeywordType.None) {
-            if (prefetched?.noneTypeClass) {
+            if (registry.noneTypeClass) {
                 type =
                     (flags & EvalFlags.InstantiableType) !== 0
-                        ? prefetched.noneTypeClass
-                        : convertToInstance(prefetched.noneTypeClass);
+                        ? registry.noneTypeClass
+                        : convertToInstance(registry.noneTypeClass);
 
                 if (isTypeFormSupported(node)) {
                     type = TypeBase.cloneWithTypeForm(type, convertToInstance(type));
@@ -13947,16 +13869,16 @@ export function createTypeEvaluator(
             }
 
             if (isNoneInstance(subtype)) {
-                if (prefetched?.objectClass && isInstantiableClass(prefetched.objectClass)) {
+                if (registry.objectClass && isInstantiableClass(registry.objectClass)) {
                     // Use 'object' for 'None'.
-                    return handleSubtype(ClassType.cloneAsInstance(prefetched.objectClass));
+                    return handleSubtype(ClassType.cloneAsInstance(registry.objectClass));
                 }
             }
 
             if (isNoneTypeClass(subtype)) {
-                if (prefetched?.typeClass && isInstantiableClass(prefetched.typeClass)) {
+                if (registry.typeClass && isInstantiableClass(registry.typeClass)) {
                     // Use 'type' for 'type[None]'.
-                    return handleSubtype(ClassType.cloneAsInstance(prefetched.typeClass));
+                    return handleSubtype(ClassType.cloneAsInstance(registry.typeClass));
                 }
             }
 
@@ -14416,11 +14338,11 @@ export function createTypeEvaluator(
                 let expectedType: Type | undefined;
                 if (expectedKeyType && expectedValueType) {
                     if (
-                        prefetched?.supportsKeysAndGetItemClass &&
-                        isInstantiableClass(prefetched.supportsKeysAndGetItemClass)
+                        registry.supportsKeysAndGetItemClass &&
+                        isInstantiableClass(registry.supportsKeysAndGetItemClass)
                     ) {
                         expectedType = ClassType.cloneAsInstance(
-                            ClassType.specialize(prefetched.supportsKeysAndGetItemClass, [
+                            ClassType.specialize(registry.supportsKeysAndGetItemClass, [
                                 expectedKeyType,
                                 expectedValueType,
                             ])
@@ -14465,8 +14387,8 @@ export function createTypeEvaluator(
                     addUnknown = false;
                 } else if (isClassInstance(unexpandedType) && ClassType.isTypedDictClass(unexpandedType)) {
                     // Handle dictionary expansion for a TypedDict.
-                    if (prefetched?.strClass && isInstantiableClass(prefetched.strClass)) {
-                        const strObject = ClassType.cloneAsInstance(prefetched.strClass);
+                    if (registry.strClass && isInstantiableClass(registry.strClass)) {
+                        const strObject = ClassType.cloneAsInstance(registry.strClass);
                         const tdEntries = getTypedDictMembersForClass(
                             evaluatorInterface,
                             unexpandedType,
@@ -14494,12 +14416,12 @@ export function createTypeEvaluator(
                         addUnknown = false;
                     }
                 } else if (
-                    prefetched?.supportsKeysAndGetItemClass &&
-                    isInstantiableClass(prefetched.supportsKeysAndGetItemClass)
+                    registry.supportsKeysAndGetItemClass &&
+                    isInstantiableClass(registry.supportsKeysAndGetItemClass)
                 ) {
                     const mappingConstraints = new ConstraintTracker();
 
-                    const supportsKeysAndGetItemClass = selfSpecializeClass(prefetched.supportsKeysAndGetItemClass);
+                    const supportsKeysAndGetItemClass = selfSpecializeClass(registry.supportsKeysAndGetItemClass);
 
                     if (
                         assignType(
@@ -15735,18 +15657,18 @@ export function createTypeEvaluator(
             typeArg0Type = UnknownType.create();
         }
 
-        let optionalType = combineTypes([typeArg0Type, prefetched?.noneTypeClass ?? UnknownType.create()]);
-        if (prefetched?.unionTypeClass && isInstantiableClass(prefetched.unionTypeClass)) {
+        let optionalType = combineTypes([typeArg0Type, registry.noneTypeClass ?? UnknownType.create()]);
+        if (registry.unionTypeClass && isInstantiableClass(registry.unionTypeClass)) {
             optionalType = TypeBase.cloneAsSpecialForm(
                 optionalType,
-                ClassType.cloneAsInstance(prefetched.unionTypeClass)
+                ClassType.cloneAsInstance(registry.unionTypeClass)
             );
         }
 
         if (typeArg0Type.props?.typeForm) {
             const typeFormType = combineTypes([
                 typeArg0Type.props.typeForm,
-                convertToInstance(prefetched?.noneTypeClass ?? UnknownType.create()),
+                convertToInstance(registry.noneTypeClass ?? UnknownType.create()),
             ]);
             optionalType = TypeBase.cloneWithTypeForm(optionalType, typeFormType);
         }
@@ -15846,7 +15768,7 @@ export function createTypeEvaluator(
                 } else if (itemExpr.d.constType === KeywordType.False) {
                     type = cloneBuiltinClassWithLiteral(node, classType, 'bool', false);
                 } else if (itemExpr.d.constType === KeywordType.None) {
-                    type = prefetched?.noneTypeClass ?? UnknownType.create();
+                    type = registry.noneTypeClass ?? UnknownType.create();
                 }
             } else if (itemExpr.nodeType === ParseNodeType.UnaryOperation) {
                 if (itemExpr.d.operator === OperatorType.Subtract || itemExpr.d.operator === OperatorType.Add) {
@@ -15911,8 +15833,8 @@ export function createTypeEvaluator(
 
         let result = combineTypes(literalTypes, { skipElideRedundantLiterals: true });
 
-        if (isUnion(result) && prefetched?.unionTypeClass && isInstantiableClass(prefetched.unionTypeClass)) {
-            result = TypeBase.cloneAsSpecialForm(result, ClassType.cloneAsInstance(prefetched.unionTypeClass));
+        if (isUnion(result) && registry.unionTypeClass && isInstantiableClass(registry.unionTypeClass)) {
+            result = TypeBase.cloneAsSpecialForm(result, ClassType.cloneAsInstance(registry.unionTypeClass));
         }
 
         if (isTypeFormSupported(node) && isValidTypeForm) {
@@ -16617,8 +16539,8 @@ export function createTypeEvaluator(
         }
 
         let unionType = combineTypes(types, { skipElideRedundantLiterals: true });
-        if (prefetched?.unionTypeClass && isInstantiableClass(prefetched.unionTypeClass)) {
-            unionType = TypeBase.cloneAsSpecialForm(unionType, ClassType.cloneAsInstance(prefetched.unionTypeClass));
+        if (registry.unionTypeClass && isInstantiableClass(registry.unionTypeClass)) {
+            unionType = TypeBase.cloneAsSpecialForm(unionType, ClassType.cloneAsInstance(registry.unionTypeClass));
         }
 
         if (!isValidTypeForm || types.some((t) => !t.props?.typeForm)) {
@@ -16866,7 +16788,7 @@ export function createTypeEvaluator(
         } else if (aliasMapEntry.module === 'internals') {
             // Handle TypedDict specially.
             assert(baseClassName === 'TypedDictFallback');
-            baseClass = prefetched?.typedDictPrivateClass;
+            baseClass = registry.typedDictPrivateClass;
             if (baseClass) {
                 // The TypedDictFallback class is marked as abstract, but the
                 // methods that are abstract are overridden and shouldn't
@@ -16983,7 +16905,7 @@ export function createTypeEvaluator(
             // Handle 'LiteralString' specially because we want it to act as
             // though it derives from 'str'.
             if (assignedName === 'LiteralString') {
-                specialType.shared.baseClasses.push(prefetched?.strClass ?? AnyType.create());
+                specialType.shared.baseClasses.push(registry.strClass ?? AnyType.create());
                 computeMroLinearization(specialType);
 
                 if (isTypeFormSupported(node)) {
@@ -17428,7 +17350,7 @@ export function createTypeEvaluator(
     }
 
     function getTypeOfClass(node: ClassNode): ClassTypeResult | undefined {
-        initializePrefetchedTypes(node);
+        ensureRegistryInitialized(node);
 
         // Is this type already cached?
         const cachedClassType = readTypeCache(node.d.name, EvalFlags.None);
@@ -18509,7 +18431,7 @@ export function createTypeEvaluator(
         if (!effectiveMetaclass || isInstantiableClass(effectiveMetaclass)) {
             for (const baseClass of classType.shared.baseClasses) {
                 if (isInstantiableClass(baseClass)) {
-                    const baseClassMeta = baseClass.shared.effectiveMetaclass ?? prefetched?.typeClass;
+                    const baseClassMeta = baseClass.shared.effectiveMetaclass ?? registry.typeClass;
                     if (baseClassMeta && isInstantiableClass(baseClassMeta)) {
                         // Make sure there is no metaclass conflict.
                         if (!effectiveMetaclass) {
@@ -18824,7 +18746,7 @@ export function createTypeEvaluator(
     }
 
     function getTypeOfFunction(node: FunctionNode): FunctionTypeResult | undefined {
-        initializePrefetchedTypes(node);
+        ensureRegistryInitialized(node);
 
         // Is this predecorated function type cached?
         let functionType = readTypeCache(node.d.name, EvalFlags.None);
@@ -20924,7 +20846,7 @@ export function createTypeEvaluator(
     // be evaluated to provide sufficient context for the type. Evaluated types
     // are written back to the type cache for later retrieval.
     function evaluateTypesForStatement(node: ParseNode): void {
-        initializePrefetchedTypes(node);
+        ensureRegistryInitialized(node);
 
         let curNode: ParseNode | undefined = node;
 
@@ -21370,9 +21292,9 @@ export function createTypeEvaluator(
                     }
                 }
 
-                if (prefetched?.typeClass && isInstantiableClass(prefetched.typeClass)) {
+                if (registry.typeClass && isInstantiableClass(registry.typeClass)) {
                     let typeType = createSpecialType(
-                        prefetched.typeClass,
+                        registry.typeClass,
                         typeArgs,
                         1,
                         /* allowParamSpec */ undefined,
@@ -24075,13 +23997,13 @@ export function createTypeEvaluator(
 
                 if (
                     mappingValueType &&
-                    prefetched?.mappingClass &&
-                    isInstantiableClass(prefetched.mappingClass) &&
-                    prefetched?.strClass &&
-                    isInstantiableClass(prefetched.strClass)
+                    registry.mappingClass &&
+                    isInstantiableClass(registry.mappingClass) &&
+                    registry.strClass &&
+                    isInstantiableClass(registry.strClass)
                 ) {
-                    srcType = ClassType.specialize(prefetched.mappingClass, [
-                        ClassType.cloneAsInstance(prefetched.strClass),
+                    srcType = ClassType.specialize(registry.mappingClass, [
+                        ClassType.cloneAsInstance(registry.strClass),
                         mappingValueType,
                     ]);
                 }
@@ -24090,13 +24012,13 @@ export function createTypeEvaluator(
 
                 if (
                     dictValueType &&
-                    prefetched?.dictClass &&
-                    isInstantiableClass(prefetched.dictClass) &&
-                    prefetched.strClass &&
-                    isInstantiableClass(prefetched.strClass)
+                    registry.dictClass &&
+                    isInstantiableClass(registry.dictClass) &&
+                    registry.strClass &&
+                    isInstantiableClass(registry.strClass)
                 ) {
-                    srcType = ClassType.specialize(prefetched.dictClass, [
-                        ClassType.cloneAsInstance(prefetched.strClass),
+                    srcType = ClassType.specialize(registry.dictClass, [
+                        ClassType.cloneAsInstance(registry.strClass),
                         dictValueType,
                     ]);
                 }
@@ -24698,8 +24620,8 @@ export function createTypeEvaluator(
         // as a FunctionClass instance rather than an instantiable class for
         // purposes of assignability. This reflects its actual runtime type.
         if (isInstantiableClass(srcType) && ClassType.isNewTypeClass(srcType) && !srcType.priv.includeSubclasses) {
-            if (prefetched?.functionClass && isInstantiableClass(prefetched?.functionClass)) {
-                srcType = ClassType.cloneAsInstance(prefetched.functionClass);
+            if (registry.functionClass && isInstantiableClass(registry.functionClass)) {
+                srcType = ClassType.cloneAsInstance(registry.functionClass);
             }
         }
 
@@ -25196,11 +25118,11 @@ export function createTypeEvaluator(
                     }
                 } else if (
                     ClassType.isBuiltIn(concreteSrcType, 'LiteralString') &&
-                    prefetched?.strClass &&
-                    isInstantiableClass(prefetched.strClass) &&
+                    registry.strClass &&
+                    isInstantiableClass(registry.strClass) &&
                     (flags & AssignTypeFlags.Invariant) === 0
                 ) {
-                    concreteSrcType = ClassType.cloneAsInstance(prefetched.strClass);
+                    concreteSrcType = ClassType.cloneAsInstance(registry.strClass);
                 }
 
                 if (
@@ -25226,7 +25148,7 @@ export function createTypeEvaluator(
                 }
 
                 // All functions are considered instances of "types.FunctionType" or "types.MethodType".
-                const altClass = isMethodType(concreteSrcType) ? prefetched?.methodClass : prefetched?.functionClass;
+                const altClass = isMethodType(concreteSrcType) ? registry.methodClass : registry.functionClass;
                 if (altClass) {
                     return assignType(destType, convertToInstance(altClass), diag, constraints, flags, recursionCount);
                 }
@@ -25462,11 +25384,11 @@ export function createTypeEvaluator(
 
         // Are we trying to assign None to a protocol?
         if (isNoneInstance(srcType) && isClassInstance(destType) && ClassType.isProtocolClass(destType)) {
-            if (prefetched?.noneTypeClass && isInstantiableClass(prefetched.noneTypeClass)) {
+            if (registry.noneTypeClass && isInstantiableClass(registry.noneTypeClass)) {
                 return assignClassToProtocol(
                     evaluatorInterface,
                     ClassType.cloneAsInstantiable(destType),
-                    ClassType.cloneAsInstance(prefetched.noneTypeClass),
+                    ClassType.cloneAsInstance(registry.noneTypeClass),
                     diag,
                     constraints,
                     flags,
@@ -26368,8 +26290,8 @@ export function createTypeEvaluator(
 
                     let fieldIsPartOfFunction = false;
 
-                    if (prefetched?.functionClass && isClass(prefetched.functionClass)) {
-                        if (ClassType.getSymbolTable(prefetched.functionClass).has(field[0])) {
+                    if (registry.functionClass && isClass(registry.functionClass)) {
+                        if (ClassType.getSymbolTable(registry.functionClass).has(field[0])) {
                             fieldIsPartOfFunction = true;
                         }
                     }
@@ -27382,13 +27304,13 @@ export function createTypeEvaluator(
                     if (
                         isClassInstance(srcReturnType) &&
                         ClassType.isBuiltIn(srcReturnType, ['TypeGuard', 'TypeIs']) &&
-                        prefetched?.boolClass &&
-                        isInstantiableClass(prefetched.boolClass)
+                        registry.boolClass &&
+                        isInstantiableClass(registry.boolClass)
                     ) {
                         if (
                             assignType(
                                 destReturnType,
-                                ClassType.cloneAsInstance(prefetched.boolClass),
+                                ClassType.cloneAsInstance(registry.boolClass),
                                 returnDiag?.createAddendum(),
                                 constraints,
                                 flags,

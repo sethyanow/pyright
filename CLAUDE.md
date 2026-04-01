@@ -12,7 +12,7 @@ bun install
 cd packages/pyright-internal && bun run build
 
 # Run all tests (builds test server first)
-cd packages/pyright-internal && bun test
+cd packages/pyright-internal && bun run test
 
 # Run all tests without rebuilding the test server (faster iteration)
 cd packages/pyright-internal && bun run test:norebuild
