@@ -27610,6 +27610,8 @@ export function createTypeEvaluator(
         getTypeClassType,
         getBuiltInObject,
         getTypingType,
+        getTypesType,
+        getTypeOfModule,
         getTypeCheckerInternalsType,
         assignTypeArgs,
         reportMissingTypeArgs,
