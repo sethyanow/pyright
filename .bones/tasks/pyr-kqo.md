@@ -1,12 +1,14 @@
 ---
 id: pyr-kqo
 title: Extract TypeEvaluatorState from closure internals
-status: open
+status: active
 type: task
 priority: 2
+owner: Seth
 depends_on: [pyr-wru]
 parent: pyr-a56
 ---
+
 
 ## Context
 

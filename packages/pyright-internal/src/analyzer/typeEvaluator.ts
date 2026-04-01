@@ -16,15 +16,14 @@
 
 import { CancellationToken } from 'vscode-languageserver';
 
-import { invalidateTypeCacheIfCanceled, throwIfCancellationRequested } from '../common/cancellationUtils';
+import { invalidateTypeCacheIfCanceled } from '../common/cancellationUtils';
 import { appendArray } from '../common/collectionUtils';
 import { DiagnosticLevel } from '../common/configOptions';
 import { ConsoleInterface } from '../common/console';
-import { isThenable } from '../common/core';
 import { assert, assertNever, fail } from '../common/debug';
 import { DiagnosticAddendum } from '../common/diagnostic';
 import { DiagnosticRule } from '../common/diagnosticRules';
-import { convertOffsetsToRange, convertOffsetToPosition } from '../common/positionUtils';
+import { convertOffsetsToRange } from '../common/positionUtils';
 import {
     PythonVersion,
     pythonVersion3_13,
@@ -129,6 +128,7 @@ import {
     ResolvedAliasInfo,
     synthesizeAliasDeclaration,
 } from './declarationUtils';
+import { TypeCacheEntry, TypeEvaluatorState } from './typeEvaluatorState';
 import { populateTypeRegistry, TypeRegistry } from './typeRegistry';
 import {
     addOverloadsToFunctionType,
@@ -175,7 +175,7 @@ import { indeterminateSymbolId, Symbol, SymbolFlags, SynthesizedTypeInfo } from 
 import { isConstantName, isPrivateName, isPrivateOrProtectedName } from './symbolNameUtils';
 import { getLastTypedDeclarationForSymbol, isEffectivelyClassVar } from './symbolUtils';
 import { assignTupleTypeArgs, expandTuple, getSlicedTupleType, getTypeOfTuple, makeTupleObject } from './tuples';
-import { SpeculativeModeOptions, SpeculativeTypeTracker } from './typeCacheUtils';
+import { SpeculativeModeOptions } from './typeCacheUtils';
 import {
     assignToTypedDict,
     assignTypedDictToTypedDict,
@@ -306,7 +306,6 @@ import {
     derivesFromClassRecursive,
     derivesFromStdlibClass,
     doForEachSubtype,
-    ensureSignaturesAreUnique,
     explodeGenericClass,
     getContainerDepth,
     getDeclaredGeneratorReturnType,
@@ -371,7 +370,6 @@ import {
     synthesizeTypeVarForSelfCls,
     transformExpectedType,
     transformPossibleRecursiveTypeAlias,
-    UniqueSignatureTracker,
     validateTypeVarDefault,
 } from './typeUtils';
 
@@ -430,11 +428,6 @@ interface AliasMapEntry {
     typeParamVariance?: Variance;
 }
 
-interface AssignClassToSelfInfo {
-    class: ClassType;
-    assumedVariance: Variance;
-}
-
 interface MatchedOverloadInfo {
     overload: FunctionType;
     matchResults: MatchArgsToParamsResult;
@@ -452,11 +445,6 @@ interface ValidateArgTypeOptions {
 
 interface EffectiveReturnTypeOptions {
     callSiteInfo?: CallSiteEvaluationInfo;
-}
-
-interface SignatureTrackerStackEntry {
-    tracker: UniqueSignatureTracker;
-    rootNode: ParseNode;
 }
 
 // This table contains the names of several built-in types that
@@ -489,25 +477,6 @@ const typePromotions: Map<string, string[]> = new Map([
     ['builtins.complex', ['builtins.float', 'builtins.int']],
     ['builtins.bytes', ['builtins.bytearray', 'builtins.memoryview']],
 ]);
-
-interface SymbolResolutionStackEntry {
-    // The symbol ID and declaration being resolved.
-    symbolId: number;
-    declaration: Declaration;
-
-    // Initially true, it's set to false if a recursion
-    // is detected.
-    isResultValid: boolean;
-
-    // Some limited forms of recursion are allowed. In these
-    // cases, a partially-constructed type can be registered.
-    partialType?: Type | undefined;
-}
-
-interface ReturnTypeInferenceContext {
-    functionNode: FunctionNode;
-    codeFlowAnalyzer: CodeFlowAnalyzer;
-}
 
 interface ParamSpecArgResult {
     argumentErrors: boolean;
@@ -585,11 +554,6 @@ const maxRecursiveTypeAliasRecursionCount = 10;
 // type declarations we consider to avoid excessive computation.
 const maxTypedDeclsPerSymbol = 16;
 
-// This switch enables a special debug mode that attempts to catch
-// bugs due to inconsistent evaluation flags used when reading types
-// from the type cache.
-const verifyTypeCacheEvaluatorFlags = false;
-
 // This debugging option prints each expression and its evaluated type.
 const printExpressionTypes = false;
 
@@ -611,158 +575,41 @@ export interface EvaluatorOptions {
 // fully created and the "PartiallyEvaluated" flag has just been cleared.
 // This allows us to properly compute information like the MRO which
 // depends on a full understanding of base classes.
-interface DeferredClassCompletion {
-    dependsUpon: ClassType;
-    classesToComplete: ClassNode[];
-}
-
-interface TypeCacheEntry {
-    typeResult: TypeResult;
-    incompleteGenCount: number;
-    flags: EvalFlags | undefined;
-}
-
-interface CodeFlowAnalyzerCacheEntry {
-    typeAtStart: TypeResult | undefined;
-    codeFlowAnalyzer: CodeFlowAnalyzer;
-}
-
-interface FunctionRecursionInfo {
-    callerNode: ExpressionNode | undefined;
-}
-
 type LogWrapper = <T extends (...args: any[]) => any>(func: T) => (...args: Parameters<T>) => ReturnType<T>;
-
-interface SuppressedNodeStackEntry {
-    node: ParseNode;
-    suppressedDiags: string[] | undefined;
-}
 
 export function createTypeEvaluator(
     importLookup: ImportLookup,
     evaluatorOptions: EvaluatorOptions,
     wrapWithLogger: LogWrapper
 ): TypeEvaluator {
-    const symbolResolutionStack: SymbolResolutionStackEntry[] = [];
-    const speculativeTypeTracker = new SpeculativeTypeTracker();
-    const suppressedNodeStack: SuppressedNodeStackEntry[] = [];
-    const assignClassToSelfStack: AssignClassToSelfInfo[] = [];
-
-    let functionRecursionMap = new Map<number, FunctionRecursionInfo[]>();
-    let codeFlowAnalyzerCache = new Map<number, CodeFlowAnalyzerCacheEntry[]>();
-    let typeCache = new Map<number, TypeCacheEntry>();
-    let effectiveTypeCache = new Map<number, Map<string, EffectiveTypeResult>>();
-    let expectedTypeCache = new Map<number, Type>();
-    let asymmetricAccessorAssignmentCache = new Set<number>();
-    let deferredClassCompletions: DeferredClassCompletion[] = [];
-    let cancellationToken: CancellationToken | undefined;
-    let printExpressionSpaceCount = 0;
-    let incompleteGenCount = 0;
-    const returnTypeInferenceContextStack: ReturnTypeInferenceContext[] = [];
-    let returnTypeInferenceTypeCache: Map<number, TypeCacheEntry> | undefined;
-    const signatureTrackerStack: SignatureTrackerStackEntry[] = [];
+    const state = new TypeEvaluatorState(evaluatorOptions);
     let registry!: TypeRegistry;
     let registryInitialized = false;
 
+    // Infrastructure functions delegated to state.
     function runWithCancellationToken<T>(token: CancellationToken, callback: () => T): T;
     function runWithCancellationToken<T>(token: CancellationToken, callback: () => Promise<T>): Promise<T>;
     function runWithCancellationToken<T>(token: CancellationToken, callback: () => T | Promise<T>): T | Promise<T> {
-        // Save the current token and restore it after the callback to support nested calls
-        const oldToken = cancellationToken;
-        let result: T | Promise<T> | undefined = undefined;
-        try {
-            cancellationToken = token;
-            result = callback();
-
-            if (!isThenable(result)) {
-                return result;
-            }
-
-            return result.finally(() => {
-                cancellationToken = oldToken;
-            });
-        } finally {
-            if (!isThenable(result)) {
-                cancellationToken = oldToken;
-            }
-        }
+        return state.runWithCancellationToken(token, callback);
     }
-
     function checkForCancellation() {
-        if (cancellationToken) {
-            throwIfCancellationRequested(cancellationToken);
-        }
+        state.checkForCancellation();
     }
-
-    function getTypeCacheEntryCount(): number {
-        return typeCache.size;
+    function getTypeCacheEntryCount() {
+        return state.getTypeCacheEntryCount();
     }
-
-    // This function should be called immediately prior to discarding
-    // the type evaluator. It forcibly replaces existing cache maps
-    // with empty equivalents. This shouldn't be necessary, but there
-    // is apparently a bug in the v8 GC where it is unable to detect
-    // circular references in complex data structures, so it fails
-    // to clean up the objects if we don't help it out.
     function disposeEvaluator() {
-        functionRecursionMap = new Map<number, FunctionRecursionInfo[]>();
-        codeFlowAnalyzerCache = new Map<number, CodeFlowAnalyzerCacheEntry[]>();
-        typeCache = new Map<number, TypeCacheEntry>();
-        effectiveTypeCache = new Map<number, Map<string, EffectiveTypeResult>>();
-        expectedTypeCache = new Map<number, Type>();
-        asymmetricAccessorAssignmentCache = new Set<number>();
+        state.disposeEvaluator();
     }
-
     function readTypeCacheEntry(node: ParseNode) {
-        // Should we use a temporary cache associated with a contextual
-        // analysis of a function, contextualized based on call-site argument types?
-        if (returnTypeInferenceTypeCache && isNodeInReturnTypeInferenceContext(node)) {
-            return returnTypeInferenceTypeCache.get(node.id);
-        } else {
-            return typeCache.get(node.id);
-        }
+        return state.readTypeCacheEntry(node);
     }
-
     function isTypeCached(node: ParseNode) {
-        const cacheEntry = readTypeCacheEntry(node);
-        if (!cacheEntry) {
-            return false;
-        }
-
-        return !cacheEntry.typeResult.isIncomplete || cacheEntry.incompleteGenCount === incompleteGenCount;
+        return state.isTypeCached(node);
     }
-
-    function readTypeCache(node: ParseNode, flags: EvalFlags | undefined): Type | undefined {
-        const cacheEntry = readTypeCacheEntry(node);
-        if (!cacheEntry || cacheEntry.typeResult.isIncomplete) {
-            return undefined;
-        }
-
-        if (evaluatorOptions.verifyTypeCacheEvaluatorFlags || verifyTypeCacheEvaluatorFlags) {
-            if (flags !== undefined) {
-                const expectedFlags = cacheEntry.flags;
-
-                if (expectedFlags !== undefined && flags !== expectedFlags) {
-                    const fileInfo = AnalyzerNodeInfo.getFileInfo(node);
-                    const position = convertOffsetToPosition(node.start, fileInfo.lines);
-
-                    const message =
-                        `Type cache flag mismatch for node type ${node.nodeType} ` +
-                        `(parent ${node.parent?.nodeType ?? 'none'}): ` +
-                        `cached flags = ${expectedFlags}, access flags = ${flags}, ` +
-                        `file = {${fileInfo.fileUri} [${position.line + 1}:${position.character + 1}]}`;
-                    if (evaluatorOptions.verifyTypeCacheEvaluatorFlags) {
-                        fail(message);
-                    } else {
-                        console.log(message);
-                    }
-                }
-            }
-        }
-
-        return cacheEntry.typeResult.type;
+    function readTypeCache(node: ParseNode, flags: EvalFlags | undefined) {
+        return state.readTypeCache(node, flags);
     }
-
     function writeTypeCache(
         node: ParseNode,
         typeResult: TypeResult,
@@ -770,130 +617,37 @@ export function createTypeEvaluator(
         inferenceContext?: InferenceContext,
         allowSpeculativeCaching = false
     ) {
-        // Should we use a temporary cache associated with a contextual
-        // analysis of a function, contextualized based on call-site argument types?
-        const typeCacheToUse =
-            returnTypeInferenceTypeCache && isNodeInReturnTypeInferenceContext(node)
-                ? returnTypeInferenceTypeCache
-                : typeCache;
-
-        if (!typeResult.isIncomplete) {
-            incompleteGenCount++;
-        } else {
-            const oldValue = typeCacheToUse.get(node.id);
-            if (oldValue !== undefined && !isTypeSame(typeResult.type, oldValue.typeResult.type)) {
-                incompleteGenCount++;
-            }
-        }
-
-        typeCacheToUse.set(node.id, { typeResult, flags, incompleteGenCount });
-
-        // If the entry is located within a part of the parse tree that is currently being
-        // "speculatively" evaluated, track it so we delete the cached entry when we leave
-        // this speculative context.
-        if (isSpeculativeModeInUse(node)) {
-            speculativeTypeTracker.trackEntry(typeCacheToUse, node.id);
-            if (allowSpeculativeCaching) {
-                speculativeTypeTracker.addSpeculativeType(
-                    node,
-                    typeResult,
-                    incompleteGenCount,
-                    inferenceContext?.expectedType
-                );
-            }
-        }
+        state.writeTypeCache(node, typeResult, flags, inferenceContext, allowSpeculativeCaching);
     }
-
     function setTypeResultForNode(node: ParseNode, typeResult: TypeResult, flags = EvalFlags.None) {
-        writeTypeCache(node, typeResult, flags);
+        state.writeTypeCache(node, typeResult, flags);
     }
-
     function setAsymmetricDescriptorAssignment(node: ParseNode) {
-        if (isSpeculativeModeInUse(/* node */ undefined)) {
-            return;
-        }
-
-        asymmetricAccessorAssignmentCache.add(node.id);
+        state.setAsymmetricDescriptorAssignment(node);
     }
-
     function isAsymmetricAccessorAssignment(node: ParseNode) {
-        return asymmetricAccessorAssignmentCache.has(node.id);
+        return state.isAsymmetricAccessorAssignment(node);
     }
-
-    // Determines whether the specified node is contained within
-    // the function node corresponding to the function that we
-    // are currently analyzing in the context of parameter types
-    // defined by a call site.
     function isNodeInReturnTypeInferenceContext(node: ParseNode) {
-        const stackSize = returnTypeInferenceContextStack.length;
-        if (stackSize === 0) {
-            return false;
-        }
-
-        const contextNode = returnTypeInferenceContextStack[stackSize - 1];
-
-        let curNode: ParseNode | undefined = node;
-        while (curNode) {
-            if (curNode === contextNode.functionNode) {
-                return true;
-            }
-            curNode = curNode.parent;
-        }
-
-        return false;
+        return state.isNodeInReturnTypeInferenceContext(node);
     }
-
     function getCodeFlowAnalyzerForReturnTypeInferenceContext() {
-        const stackSize = returnTypeInferenceContextStack.length;
-        assert(stackSize > 0);
-        const contextNode = returnTypeInferenceContextStack[stackSize - 1];
-        return contextNode.codeFlowAnalyzer;
+        return state.getCodeFlowAnalyzerForReturnTypeInferenceContext();
     }
-
     function getIndexOfSymbolResolution(symbol: Symbol, declaration: Declaration) {
-        return symbolResolutionStack.findIndex(
-            (entry) => entry.symbolId === symbol.id && entry.declaration === declaration
-        );
+        return state.getIndexOfSymbolResolution(symbol, declaration);
     }
-
     function pushSymbolResolution(symbol: Symbol, declaration: Declaration) {
-        const index = getIndexOfSymbolResolution(symbol, declaration);
-        if (index >= 0) {
-            // Mark all of the entries between these two as invalid.
-            for (let i = index + 1; i < symbolResolutionStack.length; i++) {
-                symbolResolutionStack[i].isResultValid = false;
-            }
-            return false;
-        }
-
-        symbolResolutionStack.push({
-            symbolId: symbol.id,
-            declaration,
-            isResultValid: true,
-        });
-        return true;
+        return state.pushSymbolResolution(symbol, declaration);
     }
-
     function popSymbolResolution(symbol: Symbol) {
-        const poppedEntry = symbolResolutionStack.pop()!;
-        assert(poppedEntry.symbolId === symbol.id);
-        return poppedEntry.isResultValid;
+        return state.popSymbolResolution(symbol);
     }
-
     function setSymbolResolutionPartialType(symbol: Symbol, declaration: Declaration, type: Type) {
-        const index = getIndexOfSymbolResolution(symbol, declaration);
-        if (index >= 0) {
-            symbolResolutionStack[index].partialType = type;
-        }
+        state.setSymbolResolutionPartialType(symbol, declaration, type);
     }
-
-    function getSymbolResolutionPartialType(symbol: Symbol, declaration: Declaration): Type | undefined {
-        const index = getIndexOfSymbolResolution(symbol, declaration);
-        if (index >= 0) {
-            return symbolResolutionStack[index].partialType;
-        }
-
-        return undefined;
+    function getSymbolResolutionPartialType(symbol: Symbol, declaration: Declaration) {
+        return state.getSymbolResolutionPartialType(symbol, declaration);
     }
 
     // Determines the type of the specified node by evaluating it in
@@ -998,7 +752,7 @@ export function createTypeEvaluator(
         // Look for the resulting expected type by scanning up the parse tree.
         curNode = node;
         while (curNode) {
-            const expectedType = expectedTypeCache.get(curNode.id);
+            const expectedType = state.expectedTypeCache.get(curNode.id);
             if (expectedType) {
                 return {
                     type: expectedType,
@@ -1034,7 +788,7 @@ export function createTypeEvaluator(
         // Is this type already cached?
         const cacheEntry = readTypeCacheEntry(node);
         if (cacheEntry) {
-            if (!cacheEntry.typeResult.isIncomplete || cacheEntry.incompleteGenCount === incompleteGenCount) {
+            if (!cacheEntry.typeResult.isIncomplete || cacheEntry.incompleteGenCount === state.incompleteGenCount) {
                 if (printExpressionTypes) {
                     console.log(
                         `${getPrintExpressionTypesSpaces()}${ParseTreeUtils.printExpression(node)} (${getLineNum(
@@ -1050,11 +804,11 @@ export function createTypeEvaluator(
         }
 
         // Is it cached in the speculative type cache?
-        const specCacheEntry = speculativeTypeTracker.getSpeculativeType(node, inferenceContext?.expectedType);
+        const specCacheEntry = state.speculativeTypeTracker.getSpeculativeType(node, inferenceContext?.expectedType);
         if (specCacheEntry) {
             if (
                 !specCacheEntry.typeResult.isIncomplete ||
-                specCacheEntry.incompleteGenerationCount === incompleteGenCount
+                specCacheEntry.incompleteGenerationCount === state.incompleteGenCount
             ) {
                 if (printExpressionTypes) {
                     console.log(
@@ -1072,7 +826,7 @@ export function createTypeEvaluator(
             console.log(
                 `${getPrintExpressionTypesSpaces()}${ParseTreeUtils.printExpression(node)} (${getLineNum(node)}): Pre`
             );
-            printExpressionSpaceCount++;
+            state.printExpressionSpaceCount++;
         }
 
         // This is a frequently-called routine, so it's a good place to call
@@ -1130,7 +884,7 @@ export function createTypeEvaluator(
             !isAnyOrUnknown(inferenceContext.expectedType) &&
             !isNever(inferenceContext.expectedType)
         ) {
-            expectedTypeCache.set(node.id, inferenceContext.expectedType);
+            state.expectedTypeCache.set(node.id, inferenceContext.expectedType);
 
             if (!typeResult.isIncomplete && !typeResult.expectedTypeDiagAddendum) {
                 const diag = new DiagnosticAddendum();
@@ -1156,7 +910,7 @@ export function createTypeEvaluator(
         }
 
         if (printExpressionTypes) {
-            printExpressionSpaceCount--;
+            state.printExpressionSpaceCount--;
             console.log(
                 `${getPrintExpressionTypesSpaces()}${ParseTreeUtils.printExpression(node)} (${getLineNum(
                     node
@@ -3450,53 +3204,13 @@ export function createTypeEvaluator(
         node: ParseNode,
         range?: TextRange
     ) {
-        if (isDiagnosticSuppressedForNode(node)) {
-            // See if this node is suppressed but the diagnostic should be generated
-            // anyway so it can be used by the caller that requested the suppression.
-            const suppressionEntry = suppressedNodeStack.find(
-                (suppressedNode) =>
-                    ParseTreeUtils.isNodeContainedWithin(node, suppressedNode.node) && suppressedNode.suppressedDiags
-            );
-            suppressionEntry?.suppressedDiags?.push(message);
-
-            return undefined;
-        }
-
-        if (isNodeReachable(node)) {
-            const fileInfo = AnalyzerNodeInfo.getFileInfo(node);
-            return fileInfo.diagnosticSink.addDiagnosticWithTextRange(diagLevel, message, range ?? node);
-        }
-
-        return undefined;
+        return state.addDiagnosticWithSuppressionCheck(diagLevel, message, node, range);
     }
-
     function isDiagnosticSuppressedForNode(node: ParseNode) {
-        if (speculativeTypeTracker.isSpeculative(node, /* ignoreIfDiagnosticsAllowed */ true)) {
-            return true;
-        }
-
-        return suppressedNodeStack.some((suppressedNode) =>
-            ParseTreeUtils.isNodeContainedWithin(node, suppressedNode.node)
-        );
+        return state.isDiagnosticSuppressedForNode(node);
     }
-
-    // This function is similar to isDiagnosticSuppressedForNode except that it
-    // returns false if diagnostics are suppressed for the node but the caller
-    // has requested that diagnostics be generated anyway.
     function canSkipDiagnosticForNode(node: ParseNode) {
-        if (speculativeTypeTracker.isSpeculative(node, /* ignoreIfDiagnosticsAllowed */ true)) {
-            return true;
-        }
-
-        const suppressedEntries = suppressedNodeStack.filter((suppressedNode) =>
-            ParseTreeUtils.isNodeContainedWithin(node, suppressedNode.node)
-        );
-
-        if (suppressedEntries.length === 0) {
-            return false;
-        }
-
-        return suppressedEntries.every((entry) => !entry.suppressedDiags);
+        return state.canSkipDiagnosticForNode(node);
     }
 
     function addDiagnostic(rule: DiagnosticRule, message: string, node: ParseNode, range?: TextRange) {
@@ -18523,16 +18237,16 @@ export function createTypeEvaluator(
     function registerDeferredClassCompletion(classToComplete: ClassNode, dependsUpon: ClassType | undefined) {
         if (dependsUpon) {
             // See if there is an existing entry for this dependency.
-            const entry = deferredClassCompletions.find((e) =>
+            const entry = state.deferredClassCompletions.find((e) =>
                 ClassType.isSameGenericClass(e.dependsUpon, dependsUpon)
             );
             if (entry) {
                 entry.classesToComplete.push(classToComplete);
             } else {
-                deferredClassCompletions.push({ dependsUpon, classesToComplete: [classToComplete] });
+                state.deferredClassCompletions.push({ dependsUpon, classesToComplete: [classToComplete] });
             }
         } else {
-            deferredClassCompletions.forEach((e) => {
+            state.deferredClassCompletions.forEach((e) => {
                 e.classesToComplete.push(classToComplete);
             });
         }
@@ -18542,7 +18256,7 @@ export function createTypeEvaluator(
     // class type. This allows us to complete any work that requires dependent classes
     // to be completed.
     function runDeferredClassCompletions(type: ClassType) {
-        deferredClassCompletions.forEach((e) => {
+        state.deferredClassCompletions.forEach((e) => {
             if (ClassType.isSameGenericClass(e.dependsUpon, type)) {
                 e.classesToComplete.forEach((classNode) => {
                     const classType = readTypeCache(classNode.d.name, EvalFlags.None);
@@ -18554,7 +18268,7 @@ export function createTypeEvaluator(
         });
 
         // Remove any completions that depend on this type.
-        deferredClassCompletions = deferredClassCompletions.filter(
+        state.deferredClassCompletions = state.deferredClassCompletions.filter(
             (e) => !ClassType.isSameGenericClass(e.dependsUpon, type)
         );
     }
@@ -19605,9 +19319,9 @@ export function createTypeEvaluator(
             return { type: inferredReturnType, isIncomplete };
         }
 
-        const recursionEntry = functionRecursionMap.get(node.id) ?? [];
+        const recursionEntry = state.functionRecursionMap.get(node.id) ?? [];
 
-        if (functionRecursionMap.size >= maxInferFunctionReturnRecursionCount) {
+        if (state.functionRecursionMap.size >= maxInferFunctionReturnRecursionCount) {
             inferredReturnType = UnknownType.create();
             isIncomplete = true;
         } else if (recursionEntry.some((entry) => entry.callerNode === callerNode)) {
@@ -19615,7 +19329,7 @@ export function createTypeEvaluator(
             isIncomplete = true;
         } else {
             recursionEntry.push({ callerNode });
-            functionRecursionMap.set(node.id, recursionEntry);
+            state.functionRecursionMap.set(node.id, recursionEntry);
 
             try {
                 let functionDecl: FunctionDeclaration | undefined;
@@ -19804,7 +19518,7 @@ export function createTypeEvaluator(
             } finally {
                 recursionEntry.pop();
                 if (recursionEntry.length === 0) {
-                    functionRecursionMap.delete(node.id);
+                    state.functionRecursionMap.delete(node.id);
                 }
             }
         }
@@ -21001,7 +20715,7 @@ export function createTypeEvaluator(
         node: ExecutionScopeNode,
         typeAtStart: TypeResult | undefined
     ): CodeFlowAnalyzer {
-        let entries = codeFlowAnalyzerCache.get(node.id);
+        let entries = state.codeFlowAnalyzerCache.get(node.id);
 
         if (entries) {
             const cachedEntry = entries.find((entry) => {
@@ -21027,7 +20741,7 @@ export function createTypeEvaluator(
             entries.push({ typeAtStart, codeFlowAnalyzer: analyzer });
         } else {
             entries = [{ typeAtStart, codeFlowAnalyzer: analyzer }];
-            codeFlowAnalyzerCache.set(node.id, entries);
+            state.codeFlowAnalyzerCache.set(node.id, entries);
         }
 
         return analyzer;
@@ -21944,129 +21658,31 @@ export function createTypeEvaluator(
         return symbolWithScope;
     }
 
-    // Disables recording of errors and warnings.
     function suppressDiagnostics<T>(
         node: ParseNode,
         callback: () => T,
         diagCallback?: (suppressedDiags: string[]) => void
     ) {
-        suppressedNodeStack.push({ node, suppressedDiags: diagCallback ? [] : undefined });
-
-        try {
-            const result = callback();
-            const poppedNode = suppressedNodeStack.pop();
-            if (diagCallback && poppedNode?.suppressedDiags) {
-                diagCallback(poppedNode.suppressedDiags);
-            }
-            return result;
-        } catch (e) {
-            // We don't use finally here because the TypeScript debugger doesn't
-            // handle finally well when single stepping.
-            suppressedNodeStack.pop();
-            throw e;
-        }
+        return state.suppressDiagnostics(node, callback, diagCallback);
     }
-
-    function getSignatureTrackerForNode(node: ParseNode): UniqueSignatureTracker | undefined {
-        for (let i = signatureTrackerStack.length - 1; i >= 0; i--) {
-            const rootNode = signatureTrackerStack[i].rootNode;
-            if (ParseTreeUtils.isNodeContainedWithin(node, rootNode)) {
-                return signatureTrackerStack[i].tracker;
-            }
-        }
-
-        return undefined;
+    function useSignatureTracker<T>(node: ParseNode, callback: () => T) {
+        return state.useSignatureTracker(node, callback);
     }
-
-    function useSignatureTracker<T>(node: ParseNode, callback: () => T): T {
-        const tracker = getSignatureTrackerForNode(node);
-
-        try {
-            // If a signature tracker doesn't already exist, allocate one.
-            if (!tracker) {
-                signatureTrackerStack.push({
-                    tracker: new UniqueSignatureTracker(),
-                    rootNode: node,
-                });
-            }
-
-            const result = callback();
-
-            if (!tracker) {
-                signatureTrackerStack.pop();
-            }
-
-            return result;
-        } catch (e) {
-            // We don't use finally here because the TypeScript debugger doesn't
-            // handle finally well when single stepping.
-            if (!tracker) {
-                signatureTrackerStack.pop();
-            }
-
-            throw e;
-        }
+    function ensureSignatureIsUnique<T extends Type>(type: T, node: ParseNode) {
+        return state.ensureSignatureIsUnique(type, node);
     }
-
-    function ensureSignatureIsUnique<T extends Type>(type: T, node: ParseNode): T {
-        const tracker = getSignatureTrackerForNode(node);
-        if (!tracker) {
-            return type;
-        }
-
-        if (isFunctionOrOverloaded(type)) {
-            return ensureSignaturesAreUnique(type, tracker, node.start);
-        }
-
-        return type;
-    }
-
-    // Disables recording of errors and warnings and disables any caching of
-    // types, under the assumption that we're performing speculative evaluations.
-    // If speculativeNode is undefined, speculative mode is not used. This is
-    // useful in cases where we conditionally want to use speculative mode.
     function useSpeculativeMode<T>(
         speculativeNode: ParseNode | undefined,
         callback: () => T,
         options?: SpeculativeModeOptions
     ) {
-        if (!speculativeNode) {
-            return callback();
-        }
-
-        speculativeTypeTracker.enterSpeculativeContext(speculativeNode, options);
-
-        try {
-            const result = callback();
-            speculativeTypeTracker.leaveSpeculativeContext();
-            return result;
-        } catch (e) {
-            // We don't use finally here because the TypeScript debugger doesn't
-            // handle finally well when single stepping.
-            speculativeTypeTracker.leaveSpeculativeContext();
-            throw e;
-        }
+        return state.useSpeculativeMode(speculativeNode, callback, options);
     }
-
     function disableSpeculativeMode(callback: () => void) {
-        const stack = speculativeTypeTracker.disableSpeculativeMode();
-
-        try {
-            callback();
-            speculativeTypeTracker.enableSpeculativeMode(stack);
-        } catch (e) {
-            // We don't use finally here because the TypeScript debugger doesn't
-            // handle finally well when single stepping.
-            speculativeTypeTracker.enableSpeculativeMode(stack);
-            throw e;
-        }
+        state.disableSpeculativeMode(callback);
     }
-
-    // Indicates whether the specified node is within a context that
-    // is currently being evaluated speculative. If node is undefined,
-    // returns true if any node is being evaluated speculatively.
     function isSpeculativeModeInUse(node: ParseNode | undefined) {
-        return speculativeTypeTracker.isSpeculative(node);
+        return state.isSpeculativeModeInUse(node);
     }
 
     function getDeclarationFromKeywordParam(type: FunctionType, paramName: string): Declaration | undefined {
@@ -23079,7 +22695,7 @@ export function createTypeEvaluator(
                 const isRecursiveDefinition =
                     !declaredType &&
                     !declaredTypeInfo.exceedsMaxDecls &&
-                    !speculativeTypeTracker.isSpeculative(/* node */ undefined);
+                    !state.speculativeTypeTracker.isSpeculative(/* node */ undefined);
 
                 const result: EffectiveTypeResult = {
                     type: declaredType ?? UnknownType.create(),
@@ -23121,7 +22737,7 @@ export function createTypeEvaluator(
 
     function inferTypeOfSymbolForUsage(symbol: Symbol, usageNode?: NameNode, useLastDecl = false): EffectiveTypeResult {
         // Look in the inferred type cache to see if we've computed this already.
-        let cacheEntries = effectiveTypeCache.get(symbol.id);
+        let cacheEntries = state.effectiveTypeCache.get(symbol.id);
         const usageNodeId = usageNode ? usageNode.id : undefined;
         const effectiveTypeCacheKey = `${usageNodeId === undefined ? '.' : usageNodeId.toString()}${
             useLastDecl ? '*' : ''
@@ -23280,7 +22896,7 @@ export function createTypeEvaluator(
             // Add the entry to the cache so we don't need to compute it next time.
             if (!cacheEntries) {
                 cacheEntries = new Map<string, EffectiveTypeResult>();
-                effectiveTypeCache.set(symbol.id, cacheEntries);
+                state.effectiveTypeCache.set(symbol.id, cacheEntries);
             }
 
             cacheEntries.set(effectiveTypeCacheKey, result);
@@ -23360,7 +22976,7 @@ export function createTypeEvaluator(
         });
 
         // How many times have we already attempted to evaluate this declaration already?
-        const cacheEntries = effectiveTypeCache.get(symbol.id);
+        const cacheEntries = state.effectiveTypeCache.get(symbol.id);
         const evaluationAttempts = (cacheEntries?.get(typeCacheKey)?.evaluationAttempts ?? 0) + 1;
 
         let type: Type;
@@ -23686,7 +23302,7 @@ export function createTypeEvaluator(
         // Detect recurrence. If a function invokes itself either directly
         // or indirectly, we won't attempt to infer contextual return
         // types any further.
-        if (returnTypeInferenceContextStack.some((context) => context.functionNode === functionNode)) {
+        if (state.returnTypeInferenceContextStack.some((context) => context.functionNode === functionNode)) {
             return undefined;
         }
 
@@ -23703,7 +23319,7 @@ export function createTypeEvaluator(
         }
 
         // Don't explore arbitrarily deep in the call graph.
-        if (returnTypeInferenceContextStack.length >= maxReturnTypeInferenceStackSize) {
+        if (state.returnTypeInferenceContextStack.length >= maxReturnTypeInferenceStackSize) {
             return undefined;
         }
 
@@ -23719,14 +23335,14 @@ export function createTypeEvaluator(
             // Allocate a new temporary type cache for the context of just
             // this function so we can analyze it separately without polluting
             // the main type cache.
-            const prevTypeCache = returnTypeInferenceTypeCache;
-            returnTypeInferenceContextStack.push({
+            const prevTypeCache = state.returnTypeInferenceTypeCache;
+            state.returnTypeInferenceContextStack.push({
                 functionNode,
                 codeFlowAnalyzer: codeFlowEngine.createCodeFlowAnalyzer(),
             });
 
             try {
-                returnTypeInferenceTypeCache = new Map<number, TypeCacheEntry>();
+                state.returnTypeInferenceTypeCache = new Map<number, TypeCacheEntry>();
 
                 let allArgTypesAreUnknown = true;
                 functionNode.d.params.forEach((param, index) => {
@@ -23802,8 +23418,8 @@ export function createTypeEvaluator(
                     }
                 }
             } finally {
-                returnTypeInferenceContextStack.pop();
-                returnTypeInferenceTypeCache = prevTypeCache;
+                state.returnTypeInferenceContextStack.pop();
+                state.returnTypeInferenceTypeCache = prevTypeCache;
             }
         });
 
@@ -24156,7 +23772,7 @@ export function createTypeEvaluator(
         try {
             // Stash the current class type so any references to it are treated
             // as though all type parameters are invariant.
-            assignClassToSelfStack.push({ class: destType, assumedVariance });
+            state.assignClassToSelfStack.push({ class: destType, assumedVariance });
 
             ClassType.getSymbolTable(destType).forEach((symbol, name) => {
                 if (!isAssignable || symbol.isIgnoredForProtocolMatch()) {
@@ -24304,7 +23920,7 @@ export function createTypeEvaluator(
 
             return isAssignable;
         } finally {
-            assignClassToSelfStack.pop();
+            state.assignClassToSelfStack.pop();
         }
     }
 
@@ -24467,7 +24083,7 @@ export function createTypeEvaluator(
         // Are we performing protocol variance validation for this class? If so,
         // treat all of the type parameters as invariant even if they are declared
         // otherwise.
-        const assignClassToSelfInfo = assignClassToSelfStack.find((info) =>
+        const assignClassToSelfInfo = state.assignClassToSelfStack.find((info) =>
             ClassType.isSameGenericClass(info.class, destType)
         );
         const assumedVariance = assignClassToSelfInfo?.assumedVariance;
@@ -28662,7 +28278,7 @@ export function createTypeEvaluator(
     }
 
     function getPrintExpressionTypesSpaces() {
-        return ' '.repeat(printExpressionSpaceCount);
+        return state.getPrintExpressionTypesSpaces();
     }
 
     function getLineNum(node: ParseNode) {
@@ -28796,7 +28412,11 @@ export function createTypeEvaluator(
         printControlFlowGraph,
     };
 
-    const codeFlowEngine = getCodeFlowEngine(evaluatorInterface, speculativeTypeTracker);
+    // Wire post-construction dependency: addDiagnosticWithSuppressionCheck
+    // needs isNodeReachable, which uses codeFlowEngine (created below).
+    state.setIsNodeReachable(isNodeReachable);
+
+    const codeFlowEngine = getCodeFlowEngine(evaluatorInterface, state.speculativeTypeTracker);
 
     return evaluatorInterface;
 }
