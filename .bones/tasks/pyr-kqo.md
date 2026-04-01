@@ -11,6 +11,7 @@ parent: pyr-a56
 
 
 
+
 ## Context
 
 After the TypeRegistry extraction (pyr-wru), 17 mutable closure variables remain in `createTypeEvaluator()` (plus 2 registry-related variables from pyr-wru: `registry` and `registryInitialized`). Only ~29 infrastructure functions directly touch the 17 state variables — the remaining ~170 functions access state only transitively. This task extracts those 17 variables and their infrastructure functions into a `TypeEvaluatorState` class, breaking the closure's gravity well and enabling all subsequent domain extractions.
@@ -207,3 +208,7 @@ cd /Volumes/code/pyright && bun run check
 - **Don't make the state class generic or abstract.** One concrete class, no interfaces, no generics. REASON: there's exactly one implementation and no need for polymorphism.
 - **Don't pull domain logic into the state class.** If a function touches state AND does domain logic (e.g., a cache function that also resolves types), split it — state method handles the cache operation, domain function calls the method and does the rest. REASON: the state class should be boring plumbing.
 - **Don't use property getters/setters for fields.** Direct field access is fine — pyright's style is explicit, not encapsulated. REASON: this is a performance-sensitive codebase; getter overhead on hot paths matters.
+
+## Log
+
+- [2026-04-01T20:17:46Z] [Seth] Debrief: TypeEvaluatorState extracted successfully. 17 vars + 28 methods moved to class. Thin wrappers preserve call sites. isNodeReachable via post-construction setter. Bulk sed needed manual fixup for interface members and property chains. Reflections: skeleton was accurate, bulk-sed-needs-fixup is generic tool quirk. No user corrections. Next: pyr-5hl needs SRE in fresh session.

@@ -31,3 +31,4 @@
 {"timestamp":"2026-04-01T19:03:55.426615+00:00","actor":"Seth","event_type":"closed","task_id":"pyr-wru","details":{"notes":null}}
 {"timestamp":"2026-04-01T19:47:14.856982+00:00","actor":"Seth","event_type":"claimed","task_id":"pyr-kqo","details":{"actor":"Seth"}}
 {"timestamp":"2026-04-01T20:17:01.569673+00:00","actor":"Seth","event_type":"closed","task_id":"pyr-kqo","details":{"notes":null}}
+{"timestamp":"2026-04-01T20:17:46.763256+00:00","actor":"Seth","event_type":"logged","task_id":"pyr-kqo","details":{"message":"Debrief: TypeEvaluatorState extracted successfully. 17 vars + 28 methods moved to class. Thin wrappers preserve call sites. isNodeReachable via post-construction setter. Bulk sed needed manual fixup for interface members and property chains. Reflections: skeleton was accurate, bulk-sed-needs-fixup is generic tool quirk. No user corrections. Next: pyr-5hl needs SRE in fresh session."}}
