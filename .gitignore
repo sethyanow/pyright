@@ -126,3 +126,8 @@ Thumbs.db
 
 # Potential venv
 .venv
+
+.chunkhound.json
+.chunkhound/
+.bones/cache/
+.mcp.json
