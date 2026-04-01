@@ -168,6 +168,7 @@ import { assignTypeToPatternTargets, checkForUnusedPattern, narrowTypeBasedOnPat
 import { assignProperty } from './properties';
 import { assignClassToProtocol, assignModuleToProtocol } from './protocols';
 import { Scope, ScopeType, SymbolWithScope } from './scope';
+import * as specialForms from './specialForms';
 import * as ScopeUtils from './scopeUtils';
 import { createSentinelType } from './sentinel';
 import { evaluateStaticBoolExpression } from './staticExpressions';
@@ -15558,43 +15559,6 @@ export function createTypeEvaluator(
         return result;
     }
 
-    // Creates a ClassVar type.
-    function createClassVarType(
-        classType: ClassType,
-        errorNode: ParseNode,
-        typeArgs: TypeResultWithNode[] | undefined,
-        flags: EvalFlags
-    ): Type {
-        if (flags & EvalFlags.NoClassVar) {
-            addDiagnostic(DiagnosticRule.reportInvalidTypeForm, LocMessage.classVarNotAllowed(), errorNode);
-            return AnyType.create();
-        }
-
-        if (!typeArgs) {
-            return classType;
-        } else if (typeArgs.length === 0) {
-            addDiagnostic(DiagnosticRule.reportInvalidTypeForm, LocMessage.classVarFirstArgMissing(), errorNode);
-            return UnknownType.create();
-        } else if (typeArgs.length > 1) {
-            addDiagnostic(DiagnosticRule.reportInvalidTypeForm, LocMessage.classVarTooManyArgs(), typeArgs[1].node);
-            return UnknownType.create();
-        }
-
-        const type = typeArgs[0].type;
-
-        // A ClassVar should not allow TypeVars or generic types parameterized
-        // by TypeVars.
-        if (requiresSpecialization(type, { ignorePseudoGeneric: true, ignoreSelf: true })) {
-            addDiagnostic(
-                DiagnosticRule.reportGeneralTypeIssues,
-                LocMessage.classVarWithTypeVar(),
-                typeArgs[0].node ?? errorNode
-            );
-        }
-
-        return type;
-    }
-
     function createTypeFormType(
         classType: ClassType,
         errorNode: ExpressionNode,
@@ -15899,31 +15863,6 @@ export function createTypeEvaluator(
         }
         addDiagnostic(DiagnosticRule.reportGeneralTypeIssues, LocMessage.unpackNotAllowed(), errorNode);
         return UnknownType.create();
-    }
-
-    // Creates a "Final" type.
-    function createFinalType(
-        classType: ClassType,
-        errorNode: ParseNode,
-        typeArgs: TypeResultWithNode[] | undefined,
-        flags: EvalFlags
-    ): Type {
-        if (flags & EvalFlags.NoFinal) {
-            if ((flags & EvalFlags.TypeExpression) !== 0) {
-                addDiagnostic(DiagnosticRule.reportInvalidTypeForm, LocMessage.finalContext(), errorNode);
-            }
-            return classType;
-        }
-
-        if ((flags & EvalFlags.TypeExpression) === 0 || !typeArgs || typeArgs.length === 0) {
-            return classType;
-        }
-
-        if (typeArgs.length > 1) {
-            addDiagnostic(DiagnosticRule.reportInvalidTypeForm, LocMessage.finalTooManyArgs(), errorNode);
-        }
-
-        return TypeBase.cloneAsSpecialForm(typeArgs[0].type, classType);
     }
 
     function createConcatenateType(
@@ -20818,7 +20757,11 @@ export function createTypeEvaluator(
             const aliasedName = classType.priv.aliasName || classType.shared.name;
             switch (aliasedName) {
                 case 'Callable': {
-                    return { type: createCallableType(classType, typeArgs, errorNode) };
+                    return {
+                        type: specialForms.createCallableType(
+                            evaluatorInterface, classType, typeArgs, errorNode
+                        ),
+                    };
                 }
 
                 case 'Never':
@@ -20841,7 +20784,11 @@ export function createTypeEvaluator(
                 }
 
                 case 'Optional': {
-                    return { type: createOptionalType(classType, errorNode, typeArgs, flags) };
+                    return {
+                        type: specialForms.createOptionalType(
+                            evaluatorInterface, classType, errorNode, typeArgs, flags, registry
+                        ),
+                    };
                 }
 
                 case 'Type': {
@@ -20865,7 +20812,9 @@ export function createTypeEvaluator(
                 }
 
                 case 'ClassVar': {
-                    return { type: createClassVarType(classType, errorNode, typeArgs, flags) };
+                    return {
+                        type: specialForms.createClassVarType(evaluatorInterface, classType, errorNode, typeArgs, flags),
+                    };
                 }
 
                 case 'Protocol': {
@@ -20884,7 +20833,8 @@ export function createTypeEvaluator(
                     });
 
                     return {
-                        type: createSpecialType(
+                        type: specialForms.createSpecialType(
+                            evaluatorInterface,
                             classType,
                             typeArgs,
                             /* paramLimit */ undefined,
@@ -20921,7 +20871,8 @@ export function createTypeEvaluator(
 
                 case 'Tuple': {
                     return {
-                        type: createSpecialType(
+                        type: specialForms.createSpecialType(
+                            evaluatorInterface,
                             classType,
                             typeArgs,
                             /* paramLimit */ undefined,
@@ -20932,53 +20883,87 @@ export function createTypeEvaluator(
                 }
 
                 case 'Union': {
-                    return { type: createUnionType(classType, errorNode, typeArgs, flags) };
+                    return {
+                        type: specialForms.createUnionType(
+                            evaluatorInterface, classType, errorNode, typeArgs, flags, registry
+                        ),
+                    };
                 }
 
                 case 'Generic': {
-                    return { type: createGenericType(classType, errorNode, typeArgs, flags) };
+                    return {
+                        type: specialForms.createGenericType(evaluatorInterface, classType, errorNode, typeArgs, flags),
+                    };
                 }
 
                 case 'Final': {
-                    return { type: createFinalType(classType, errorNode, typeArgs, flags) };
+                    return {
+                        type: specialForms.createFinalType(evaluatorInterface, classType, errorNode, typeArgs, flags),
+                    };
                 }
 
                 case 'Annotated': {
-                    return createAnnotatedType(classType, errorNode, typeArgs, flags);
+                    return specialForms.createAnnotatedType(
+                        evaluatorInterface, classType, errorNode, typeArgs, flags
+                    );
                 }
 
                 case 'Concatenate': {
-                    return { type: createConcatenateType(classType, errorNode, typeArgs, flags) };
+                    return {
+                        type: specialForms.createConcatenateType(
+                            evaluatorInterface, classType, errorNode, typeArgs, flags
+                        ),
+                    };
                 }
 
                 case 'TypeGuard':
                 case 'TypeIs': {
-                    return { type: createTypeGuardType(classType, errorNode, typeArgs, flags) };
+                    return {
+                        type: specialForms.createTypeGuardType(
+                            evaluatorInterface, classType, errorNode, typeArgs, flags
+                        ),
+                    };
                 }
 
                 case 'Unpack': {
-                    return { type: createUnpackType(classType, errorNode, typeArgs, flags) };
+                    return {
+                        type: specialForms.createUnpackType(
+                            evaluatorInterface, classType, errorNode, typeArgs, flags
+                        ),
+                    };
                 }
 
                 case 'Required':
                 case 'NotRequired': {
-                    return createRequiredOrReadOnlyType(classType, errorNode, typeArgs, flags);
+                    return specialForms.createRequiredOrReadOnlyType(
+                        evaluatorInterface, classType, errorNode, typeArgs, flags
+                    );
                 }
 
                 case 'ReadOnly': {
-                    return createRequiredOrReadOnlyType(classType, errorNode, typeArgs, flags);
+                    return specialForms.createRequiredOrReadOnlyType(
+                        evaluatorInterface, classType, errorNode, typeArgs, flags
+                    );
                 }
 
                 case 'Self': {
-                    return { type: createSelfType(classType, errorNode, typeArgs, flags) };
+                    return {
+                        type: specialForms.createSelfType(
+                            evaluatorInterface, classType, errorNode, typeArgs, flags
+                        ),
+                    };
                 }
 
                 case 'LiteralString': {
-                    return { type: createSpecialType(classType, typeArgs, 0) };
+                    return {
+                        type: specialForms.createSpecialType(evaluatorInterface, classType, typeArgs, 0),
+                    };
                 }
 
                 case 'TypeForm': {
-                    return { type: createTypeFormType(classType, errorNode, typeArgs) };
+                    return {
+                        type: specialForms.createTypeFormType(evaluatorInterface, classType, errorNode, typeArgs),
+                    };
                 }
             }
         }

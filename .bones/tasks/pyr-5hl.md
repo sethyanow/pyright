@@ -1,12 +1,14 @@
 ---
 id: pyr-5hl
 title: Extract Special Form Creation functions
-status: open
+status: active
 type: task
 priority: 2
+owner: Seth
 depends_on: [pyr-kqo]
 parent: pyr-a56
 ---
+
 
 
 ## Context
