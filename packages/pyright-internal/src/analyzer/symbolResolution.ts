@@ -36,6 +36,7 @@ import { getLastTypedDeclarationForSymbol } from './symbolUtils';
 import { TypeEvaluatorState } from './typeEvaluatorState';
 import {
     AbstractSymbol,
+    DeclaredSymbolTypeInfo,
     SymbolDeclInfo,
     TypeEvaluator,
 } from './typeEvaluatorTypes';
@@ -52,6 +53,7 @@ import {
     AnyType,
     OverloadedType,
     Type,
+    UnboundType,
     UnknownType,
 } from './types';
 import {
@@ -616,4 +618,114 @@ export function getAliasedSymbolTypeForName(
     }
 
     return evaluator.getInferredTypeOfDeclaration(symbolWithScope.symbol, aliasDecl);
+}
+
+const maxDeclarationsToUseForInference = 64;
+const maxTypedDeclsPerSymbol = 16;
+
+export function getDeclaredTypeOfSymbol(
+    evaluator: TypeEvaluator,
+    state: TypeEvaluatorState,
+    symbol: Symbol,
+    usageNode?: NameNode
+): DeclaredSymbolTypeInfo {
+    const synthesizedType = symbol.getSynthesizedType()?.type;
+    if (synthesizedType) {
+        return { type: synthesizedType };
+    }
+
+    let typedDecls = symbol.getTypedDeclarations();
+
+    if (typedDecls.length === 0) {
+        // If the symbol has no type declaration but is assigned many times,
+        // treat it as though it has an explicit type annotation of "Unknown".
+        // This will avoid a pathological performance condition for unannotated
+        // code that reassigns the same variable hundreds of times. If the symbol
+        // effectively has an "Any" annotation, it won't be narrowed.
+        if (symbol.getDeclarations().length > maxDeclarationsToUseForInference) {
+            return { type: UnknownType.create() };
+        }
+
+        // There was no declaration with a defined type.
+        return { type: undefined };
+    }
+
+    // If there is more than one typed decl, filter out any that are not
+    // reachable from the usage node (if specified). This can happen in
+    // cases where a property symbol is redefined to add a setter, deleter,
+    // etc.
+    let exceedsMaxDecls = false;
+    if (usageNode && typedDecls.length > 1) {
+        if (typedDecls.length > maxTypedDeclsPerSymbol) {
+            // If there are too many typed decls, don't bother filtering them
+            // because this can be very expensive. Simply use the last one
+            // in this case.
+            typedDecls = [typedDecls[typedDecls.length - 1]];
+            exceedsMaxDecls = true;
+        } else {
+            const filteredTypedDecls = typedDecls.filter((decl) => {
+                if (decl.type !== DeclarationType.Alias) {
+                    // Is the declaration in the same execution scope as the "usageNode" node?
+                    const usageScope = ParseTreeUtils.getExecutionScopeNode(usageNode);
+                    const declScope = ParseTreeUtils.getExecutionScopeNode(decl.node);
+
+                    if (usageScope === declScope) {
+                        if (!evaluator.isFlowPathBetweenNodes(decl.node, usageNode, /* allowSelf */ false)) {
+                            return false;
+                        }
+                    }
+                }
+                return true;
+            });
+
+            if (filteredTypedDecls.length === 0) {
+                return { type: UnboundType.create() };
+            }
+
+            typedDecls = filteredTypedDecls;
+        }
+    }
+
+    // Start with the last decl. If that's already being resolved,
+    // use the next-to-last decl, etc. This can happen when resolving
+    // property methods. Often the setter method is defined in reference to
+    // the initial property, which defines the getter method with the same
+    // symbol name.
+    let declIndex = typedDecls.length - 1;
+    while (declIndex >= 0) {
+        const decl = typedDecls[declIndex];
+
+        // If there's a partially-constructed type that is allowed
+        // for recursive symbol resolution, return it as the resolved type.
+        const partialType = state.getSymbolResolutionPartialType(symbol, decl);
+        if (partialType) {
+            return { type: partialType };
+        }
+
+        if (state.getIndexOfSymbolResolution(symbol, decl) < 0) {
+            if (state.pushSymbolResolution(symbol, decl)) {
+                try {
+                    const declaredTypeInfo = evaluator.getTypeForDeclaration(decl);
+
+                    // If there was recursion detected, don't use this declaration.
+                    // The exception is it's a class declaration because getTypeOfClass
+                    // handles recursion by populating a partially-created class type
+                    // in the type cache. This exception is required to handle the
+                    // circular dependency between the "type" and "object" classes in
+                    // builtins.pyi (since "object" is a "type" and "type" is an "object").
+                    if (state.popSymbolResolution(symbol) || decl.type === DeclarationType.Class) {
+                        return declaredTypeInfo;
+                    }
+                } catch (e: any) {
+                    // Clean up the stack before rethrowing.
+                    state.popSymbolResolution(symbol);
+                    throw e;
+                }
+            }
+        }
+
+        declIndex--;
+    }
+
+    return { type: undefined, exceedsMaxDecls };
 }
