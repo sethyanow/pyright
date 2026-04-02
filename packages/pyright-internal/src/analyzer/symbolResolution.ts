@@ -8,7 +8,7 @@
  */
 
 import { appendArray } from '../common/collectionUtils';
-import { ArgumentNode, NameNode, ParseNodeType, StringNode } from '../parser/parseNodes';
+import { ArgumentNode, FunctionNode, NameNode, ParseNodeType, StringNode } from '../parser/parseNodes';
 import { isAnnotationEvaluationPostponed } from './analyzerFileInfo';
 import * as AnalyzerNodeInfo from './analyzerNodeInfo';
 import { getBoundInitMethod } from './constructors';
@@ -36,10 +36,12 @@ import {
     isOverloaded,
     ModuleType,
     OverloadedType,
+    Type,
 } from './types';
 import {
     derivesFromStdlibClass,
     doForEachSubtype,
+    getDeclaredGeneratorReturnType,
     lookUpClassMember,
     lookUpObjectMember,
     MemberAccessFlags,
@@ -499,4 +501,19 @@ export function getDeclInfoForNameNode(
     }
 
     return { decls, synthesizedTypes };
+}
+
+export function getDeclaredReturnType(evaluator: TypeEvaluator, node: FunctionNode): Type | undefined {
+    const functionTypeInfo = evaluator.getTypeOfFunction(node);
+    const returnType = functionTypeInfo?.functionType.shared.declaredReturnType;
+
+    if (!returnType) {
+        return undefined;
+    }
+
+    if (FunctionType.isGenerator(functionTypeInfo.functionType)) {
+        return getDeclaredGeneratorReturnType(functionTypeInfo.functionType);
+    }
+
+    return returnType;
 }

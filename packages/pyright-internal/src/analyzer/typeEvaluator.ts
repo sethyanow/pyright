@@ -19976,18 +19976,7 @@ export function createTypeEvaluator(
     // unaltered unless the function is a generator, in which case it is
     // modified to return only the return type for the generator.
     function getDeclaredReturnType(node: FunctionNode): Type | undefined {
-        const functionTypeInfo = getTypeOfFunction(node);
-        const returnType = functionTypeInfo?.functionType.shared.declaredReturnType;
-
-        if (!returnType) {
-            return undefined;
-        }
-
-        if (FunctionType.isGenerator(functionTypeInfo.functionType)) {
-            return getDeclaredGeneratorReturnType(functionTypeInfo.functionType);
-        }
-
-        return returnType;
+        return symbolResolution.getDeclaredReturnType(evaluatorInterface, node);
     }
 
     function getTypeOfMember(member: ClassMember): Type {
