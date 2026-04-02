@@ -26,7 +26,6 @@ import { DiagnosticRule } from '../common/diagnosticRules';
 import { convertOffsetsToRange } from '../common/positionUtils';
 import {
     PythonVersion,
-    pythonVersion3_13,
     pythonVersion3_6,
     pythonVersion3_7,
     pythonVersion3_9,
@@ -118,7 +117,6 @@ import {
     FunctionDeclaration,
     isVariableDeclaration,
     ModuleLoaderActions,
-    SpecialBuiltInClassDeclaration,
     VariableDeclaration,
 } from './declaration';
 import {
@@ -280,7 +278,6 @@ import {
     TypeVarKind,
     TypeVarScopeId,
     TypeVarScopeType,
-    TypeVarTupleType,
     TypeVarType,
     UnboundType,
     UnionType,
@@ -308,7 +305,6 @@ import {
     derivesFromClassRecursive,
     derivesFromStdlibClass,
     doForEachSubtype,
-    explodeGenericClass,
     getContainerDepth,
     getDeclaredGeneratorReturnType,
     getGeneratorTypeArgs,
@@ -318,7 +314,6 @@ import {
     getTypeVarArgsRecursive,
     getTypeVarScopeId,
     getTypeVarScopeIds,
-    getUnknownForTypeVar,
     getUnknownTypeForCallable,
     InferenceContext,
     invertVariance,
@@ -344,7 +339,6 @@ import {
     isTypeAliasRecursive,
     isTypeVarSame,
     isUnboundedTupleClass,
-    isVarianceOfTypeArgCompatible,
     lookUpClassMember,
     lookUpObjectMember,
     makeFunctionTypeVarsBound,
@@ -364,7 +358,6 @@ import {
     simplifyFunctionToParamSpec,
     sortTypes,
     specializeForBaseClass,
-    specializeTupleClass,
     specializeWithDefaultTypeArgs,
     specializeWithUnknownTypeArgs,
     stripTypeForm,
@@ -14041,21 +14034,6 @@ export function createTypeEvaluator(
         return UnknownType.create();
     }
 
-    function cloneBuiltinClassWithLiteral(
-        node: ParseNode,
-        literalClassType: ClassType,
-        builtInName: string,
-        value: LiteralValue
-    ): Type {
-        const type = getBuiltInType(node, builtInName);
-        if (isInstantiableClass(type)) {
-            const literalType = ClassType.cloneWithLiteral(type, value);
-            TypeBase.setSpecialForm(literalType, literalClassType);
-            return literalType;
-        }
-
-        return UnknownType.create();
-    }
 
 
 

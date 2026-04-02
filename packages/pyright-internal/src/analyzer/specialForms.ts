@@ -10,7 +10,7 @@
 
 import { assert } from '../common/debug';
 import { appendArray } from '../common/collectionUtils';
-import { Diagnostic, DiagnosticAddendum } from '../common/diagnostic';
+import { DiagnosticAddendum } from '../common/diagnostic';
 import { DiagnosticRule } from '../common/diagnosticRules';
 import { LocAddendum, LocMessage } from '../localization/localize';
 import {
@@ -21,7 +21,6 @@ import {
     ParamCategory,
     ParseNode,
     ParseNodeType,
-    TypeParameterNode,
 } from '../parser/parseNodes';
 import {
     PythonVersion,
@@ -50,12 +49,10 @@ import {
     FunctionTypeFlags,
     LiteralValue,
     NeverType,
-    OverloadedType,
     ParamSpecType,
     TupleTypeArg,
     Type,
     TypeBase,
-    TypeVarScopeId,
     TypeVarScopeType,
     TypeVarTupleType,
     TypeVarType,
@@ -81,12 +78,10 @@ import {
 } from './types';
 import {
     addConditionToType,
-    addTypeVarsToListIfUnique,
     computeMroLinearization,
     convertToInstance,
     convertToInstantiable,
     doForEachSubtype,
-    getTypeVarArgsRecursive,
     getTypeVarScopeId,
     isEffectivelyInstantiable,
     isEllipsisType,
