@@ -10153,13 +10153,13 @@ export function createTypeEvaluator(
 
             if (className === 'TypeVarTuple') {
                 return {
-                    returnType: createTypeVarTupleType(errorNode, expandedCallType, argList),
+                    returnType: specialForms.createTypeVarTupleType(evaluatorInterface, errorNode, expandedCallType, argList),
                 };
             }
 
             if (className === 'ParamSpec') {
                 return {
-                    returnType: createParamSpecType(errorNode, expandedCallType, argList),
+                    returnType: specialForms.createParamSpecType(evaluatorInterface, errorNode, expandedCallType, argList),
                 };
             }
 
@@ -12626,237 +12626,6 @@ export function createTypeEvaluator(
     }
 
 
-    function createTypeVarTupleType(errorNode: ExpressionNode, classType: ClassType, argList: Arg[]): Type | undefined {
-        let typeVarName = '';
-
-        if (argList.length === 0) {
-            addDiagnostic(DiagnosticRule.reportCallIssue, LocMessage.typeVarFirstArg(), errorNode);
-            return undefined;
-        }
-
-        const firstArg = argList[0];
-        if (firstArg.valueExpression && firstArg.valueExpression.nodeType === ParseNodeType.StringList) {
-            typeVarName = firstArg.valueExpression.d.strings.map((s) => s.d.value).join('');
-        } else {
-            addDiagnostic(
-                DiagnosticRule.reportGeneralTypeIssues,
-                LocMessage.typeVarFirstArg(),
-                firstArg.valueExpression || errorNode
-            );
-        }
-
-        const typeVar = TypeBase.cloneAsSpecialForm(
-            TypeVarType.createInstantiable(typeVarName, TypeVarKind.TypeVarTuple),
-            ClassType.cloneAsInstance(classType)
-        );
-        typeVar.shared.defaultType = makeTupleObject(evaluatorInterface, [
-            { type: UnknownType.create(), isUnbounded: true },
-        ]);
-
-        // Parse the remaining parameters.
-        for (let i = 1; i < argList.length; i++) {
-            const paramNameNode = argList[i].name;
-            const paramName = paramNameNode ? paramNameNode.d.value : undefined;
-
-            if (paramName) {
-                if (paramName === 'default') {
-                    const expr = argList[i].valueExpression;
-                    if (expr) {
-                        const defaultType = getTypeVarTupleDefaultType(expr, /* isPep695Syntax */ false);
-                        if (defaultType) {
-                            typeVar.shared.defaultType = defaultType;
-                            typeVar.shared.isDefaultExplicit = true;
-                        }
-                    }
-
-                    const fileInfo = AnalyzerNodeInfo.getFileInfo(errorNode);
-                    if (
-                        !fileInfo.isStubFile &&
-                        PythonVersion.isLessThan(fileInfo.executionEnvironment.pythonVersion, pythonVersion3_13) &&
-                        classType.shared.moduleName !== 'typing_extensions'
-                    ) {
-                        addDiagnostic(
-                            DiagnosticRule.reportGeneralTypeIssues,
-                            LocMessage.typeVarDefaultIllegal(),
-                            expr!
-                        );
-                    }
-                } else {
-                    addDiagnostic(
-                        DiagnosticRule.reportGeneralTypeIssues,
-                        LocMessage.typeVarTupleUnknownParam().format({ name: argList[i].name?.d.value || '?' }),
-                        argList[i].node?.d.name || argList[i].valueExpression || errorNode
-                    );
-                }
-            } else {
-                addDiagnostic(
-                    DiagnosticRule.reportGeneralTypeIssues,
-                    LocMessage.typeVarTupleConstraints(),
-                    argList[i].valueExpression || errorNode
-                );
-            }
-        }
-
-        return typeVar;
-    }
-
-    function getTypeVarTupleDefaultType(node: ExpressionNode, isPep695Syntax: boolean): Type | undefined {
-        const argType = getTypeOfExpressionExpectingType(node, {
-            allowUnpackedTuple: true,
-            allowTypeVarsWithoutScopeId: true,
-            forwardRefs: isPep695Syntax,
-            typeExpression: true,
-        }).type;
-        const isUnpackedTuple = isClass(argType) && isTupleClass(argType) && argType.priv.isUnpacked;
-        const isUnpackedTypeVar = isUnpackedTypeVarTuple(argType);
-
-        if (!isUnpackedTuple && !isUnpackedTypeVar) {
-            addDiagnostic(DiagnosticRule.reportGeneralTypeIssues, LocMessage.typeVarTupleDefaultNotUnpacked(), node);
-            return undefined;
-        }
-
-        return convertToInstance(argType);
-    }
-
-    function createParamSpecType(errorNode: ExpressionNode, classType: ClassType, argList: Arg[]): Type | undefined {
-        if (argList.length === 0) {
-            addDiagnostic(DiagnosticRule.reportCallIssue, LocMessage.paramSpecFirstArg(), errorNode);
-            return undefined;
-        }
-
-        const firstArg = argList[0];
-        let paramSpecName = '';
-        if (firstArg.valueExpression && firstArg.valueExpression.nodeType === ParseNodeType.StringList) {
-            paramSpecName = firstArg.valueExpression.d.strings.map((s) => s.d.value).join('');
-        } else {
-            addDiagnostic(
-                DiagnosticRule.reportGeneralTypeIssues,
-                LocMessage.paramSpecFirstArg(),
-                firstArg.valueExpression || errorNode
-            );
-        }
-
-        const paramSpec = TypeBase.cloneAsSpecialForm(
-            TypeVarType.createInstantiable(paramSpecName, TypeVarKind.ParamSpec),
-            ClassType.cloneAsInstance(classType)
-        );
-
-        paramSpec.shared.defaultType = ParamSpecType.getUnknown();
-
-        // Parse the remaining parameters.
-        for (let i = 1; i < argList.length; i++) {
-            const paramNameNode = argList[i].name;
-            const paramName = paramNameNode ? paramNameNode.d.value : undefined;
-
-            if (paramName) {
-                if (paramName === 'default') {
-                    const expr = argList[i].valueExpression;
-                    if (expr) {
-                        const defaultType = getParamSpecDefaultType(expr, /* isPep695Syntax */ false);
-                        if (defaultType) {
-                            paramSpec.shared.defaultType = defaultType;
-                            paramSpec.shared.isDefaultExplicit = true;
-                        }
-                    }
-
-                    const fileInfo = AnalyzerNodeInfo.getFileInfo(errorNode);
-                    if (
-                        !fileInfo.isStubFile &&
-                        PythonVersion.isLessThan(fileInfo.executionEnvironment.pythonVersion, pythonVersion3_13) &&
-                        classType.shared.moduleName !== 'typing_extensions'
-                    ) {
-                        addDiagnostic(
-                            DiagnosticRule.reportGeneralTypeIssues,
-                            LocMessage.typeVarDefaultIllegal(),
-                            expr!
-                        );
-                    }
-                } else {
-                    addDiagnostic(
-                        DiagnosticRule.reportGeneralTypeIssues,
-                        LocMessage.paramSpecUnknownParam().format({ name: paramName }),
-                        paramNameNode || argList[i].valueExpression || errorNode
-                    );
-                }
-            } else {
-                addDiagnostic(
-                    DiagnosticRule.reportCallIssue,
-                    LocMessage.paramSpecUnknownArg(),
-                    argList[i].valueExpression || errorNode
-                );
-                break;
-            }
-        }
-
-        return paramSpec;
-    }
-
-    function getParamSpecDefaultType(node: ExpressionNode, isPep695Syntax: boolean): Type | undefined {
-        const functionType = FunctionType.createSynthesizedInstance('', FunctionTypeFlags.ParamSpecValue);
-
-        if (node.nodeType === ParseNodeType.Ellipsis) {
-            FunctionType.addDefaultParams(functionType);
-            functionType.shared.flags |= FunctionTypeFlags.GradualCallableForm;
-            return functionType;
-        }
-
-        if (node.nodeType === ParseNodeType.List) {
-            node.d.items.forEach((paramExpr, index) => {
-                const typeResult = getTypeOfExpressionExpectingType(paramExpr, {
-                    allowTypeVarsWithoutScopeId: true,
-                    forwardRefs: isPep695Syntax,
-                    typeExpression: true,
-                });
-
-                FunctionType.addParam(
-                    functionType,
-                    FunctionParam.create(
-                        ParamCategory.Simple,
-                        convertToInstance(typeResult.type),
-                        FunctionParamFlags.NameSynthesized | FunctionParamFlags.TypeDeclared,
-                        `__p${index}`
-                    )
-                );
-            });
-
-            if (node.d.items.length > 0) {
-                FunctionType.addPositionOnlyParamSeparator(functionType);
-            }
-
-            // Update the type cache so we don't attempt to re-evaluate this node.
-            // The type doesn't matter, so use Any.
-            writeTypeCache(node, { type: AnyType.create() }, /* flags */ undefined);
-            return functionType;
-        } else {
-            const typeResult = getTypeOfExpressionExpectingType(node, {
-                allowParamSpec: true,
-                allowTypeVarsWithoutScopeId: true,
-                allowEllipsis: true,
-                typeExpression: true,
-            });
-
-            if (typeResult.typeErrors) {
-                return undefined;
-            }
-
-            if (isParamSpec(typeResult.type)) {
-                FunctionType.addParamSpecVariadics(functionType, typeResult.type);
-                return functionType;
-            }
-
-            if (
-                isClassInstance(typeResult.type) &&
-                ClassType.isBuiltIn(typeResult.type, ['EllipsisType', 'ellipsis'])
-            ) {
-                FunctionType.addDefaultParams(functionType);
-                return functionType;
-            }
-        }
-
-        addDiagnostic(DiagnosticRule.reportGeneralTypeIssues, LocMessage.paramSpecDefaultNotTuple(), node);
-
-        return undefined;
-    }
 
     // Handles a call to TypeAliasType(). This special form allows a caller to programmatically
     // create a type alias as defined in PEP 695. If one or more of the arguments is incorrect,
@@ -12993,18 +12762,6 @@ export function createTypeEvaluator(
         );
     }
 
-    function getBooleanValue(node: ExpressionNode): boolean {
-        if (node.nodeType === ParseNodeType.Constant) {
-            if (node.d.constType === KeywordType.False) {
-                return false;
-            } else if (node.d.constType === KeywordType.True) {
-                return true;
-            }
-        }
-
-        addDiagnostic(DiagnosticRule.reportGeneralTypeIssues, LocMessage.expectedBoolLiteral(), node);
-        return false;
-    }
 
     function getFunctionFullName(functionNode: ParseNode, moduleName: string, functionName: string): string {
         const nameParts: string[] = [functionName];
@@ -21157,7 +20914,7 @@ export function createTypeEvaluator(
 
         if (node.d.typeParamKind === TypeParamKind.ParamSpec) {
             const defaultType = node.d.defaultExpr
-                ? getParamSpecDefaultType(node.d.defaultExpr, /* isPep695Syntax */ true)
+                ? specialForms.getParamSpecDefaultType(evaluatorInterface, node.d.defaultExpr, /* isPep695Syntax */ true)
                 : undefined;
 
             if (defaultType) {
@@ -21168,7 +20925,7 @@ export function createTypeEvaluator(
             }
         } else if (node.d.typeParamKind === TypeParamKind.TypeVarTuple) {
             const defaultType = node.d.defaultExpr
-                ? getTypeVarTupleDefaultType(node.d.defaultExpr, /* isPep695Syntax */ true)
+                ? specialForms.getTypeVarTupleDefaultType(evaluatorInterface, node.d.defaultExpr, /* isPep695Syntax */ true)
                 : undefined;
 
             if (defaultType) {

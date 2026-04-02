@@ -64,7 +64,9 @@ import {
     isTypeSame,
     isUnion,
     isUnpackedClass,
+    isClass,
     isUnpackedTypeVarTuple,
+    TypeVarKind,
 } from './types';
 import {
     addTypeVarsToListIfUnique,
@@ -83,6 +85,7 @@ import {
     specializeTupleClass,
     synthesizeTypeVarForSelfCls,
 } from './typeUtils';
+import { makeTupleObject } from './tuples';
 
 // Local definition — matches the interface in typeEvaluator.ts.
 // Avoids importing from typeEvaluator.ts (anti-pattern: circular dep risk).
@@ -1556,19 +1559,251 @@ export function verifyTypeVarDefaultIsCompatible(
 export function createTypeVarTupleType(
     evaluator: TypeEvaluator,
     errorNode: ExpressionNode,
-    argList: Arg[],
-    flags: EvalFlags
-): Type {
-    throw new Error('Not yet extracted');
+    classType: ClassType,
+    argList: Arg[]
+): Type | undefined {
+    let typeVarName = '';
+
+    if (argList.length === 0) {
+        evaluator.addDiagnostic(DiagnosticRule.reportCallIssue, LocMessage.typeVarFirstArg(), errorNode);
+        return undefined;
+    }
+
+    const firstArg = argList[0];
+    if (firstArg.valueExpression && firstArg.valueExpression.nodeType === ParseNodeType.StringList) {
+        typeVarName = firstArg.valueExpression.d.strings.map((s) => s.d.value).join('');
+    } else {
+        evaluator.addDiagnostic(
+            DiagnosticRule.reportGeneralTypeIssues,
+            LocMessage.typeVarFirstArg(),
+            firstArg.valueExpression || errorNode
+        );
+    }
+
+    const typeVar = TypeBase.cloneAsSpecialForm(
+        TypeVarType.createInstantiable(typeVarName, TypeVarKind.TypeVarTuple),
+        ClassType.cloneAsInstance(classType)
+    );
+    typeVar.shared.defaultType = makeTupleObject(evaluator, [
+        { type: UnknownType.create(), isUnbounded: true },
+    ]);
+
+    // Parse the remaining parameters.
+    for (let i = 1; i < argList.length; i++) {
+        const paramNameNode = argList[i].name;
+        const paramName = paramNameNode ? paramNameNode.d.value : undefined;
+
+        if (paramName) {
+            if (paramName === 'default') {
+                const expr = argList[i].valueExpression;
+                if (expr) {
+                    const defaultType = getTypeVarTupleDefaultType(evaluator, expr, /* isPep695Syntax */ false);
+                    if (defaultType) {
+                        typeVar.shared.defaultType = defaultType;
+                        typeVar.shared.isDefaultExplicit = true;
+                    }
+                }
+
+                const fileInfo = AnalyzerNodeInfo.getFileInfo(errorNode);
+                if (
+                    !fileInfo.isStubFile &&
+                    PythonVersion.isLessThan(fileInfo.executionEnvironment.pythonVersion, pythonVersion3_13) &&
+                    classType.shared.moduleName !== 'typing_extensions'
+                ) {
+                    evaluator.addDiagnostic(
+                        DiagnosticRule.reportGeneralTypeIssues,
+                        LocMessage.typeVarDefaultIllegal(),
+                        expr!
+                    );
+                }
+            } else {
+                evaluator.addDiagnostic(
+                    DiagnosticRule.reportGeneralTypeIssues,
+                    LocMessage.typeVarTupleUnknownParam().format({ name: argList[i].name?.d.value || '?' }),
+                    argList[i].node?.d.name || argList[i].valueExpression || errorNode
+                );
+            }
+        } else {
+            evaluator.addDiagnostic(
+                DiagnosticRule.reportGeneralTypeIssues,
+                LocMessage.typeVarTupleConstraints(),
+                argList[i].valueExpression || errorNode
+            );
+        }
+    }
+
+    return typeVar;
+}
+
+export function getTypeVarTupleDefaultType(
+    evaluator: TypeEvaluator,
+    node: ExpressionNode,
+    isPep695Syntax: boolean
+): Type | undefined {
+    const argType = evaluator.getTypeOfExpressionExpectingType(node, {
+        allowUnpackedTuple: true,
+        allowTypeVarsWithoutScopeId: true,
+        forwardRefs: isPep695Syntax,
+        typeExpression: true,
+    }).type;
+    const isUnpackedTuple = isClass(argType) && isTupleClass(argType) && argType.priv.isUnpacked;
+    const isUnpackedTypeVarResult = isUnpackedTypeVarTuple(argType);
+
+    if (!isUnpackedTuple && !isUnpackedTypeVarResult) {
+        evaluator.addDiagnostic(DiagnosticRule.reportGeneralTypeIssues, LocMessage.typeVarTupleDefaultNotUnpacked(), node);
+        return undefined;
+    }
+
+    return convertToInstance(argType);
 }
 
 export function createParamSpecType(
     evaluator: TypeEvaluator,
     errorNode: ExpressionNode,
-    argList: Arg[],
-    flags: EvalFlags
-): Type {
-    throw new Error('Not yet extracted');
+    classType: ClassType,
+    argList: Arg[]
+): Type | undefined {
+    if (argList.length === 0) {
+        evaluator.addDiagnostic(DiagnosticRule.reportCallIssue, LocMessage.paramSpecFirstArg(), errorNode);
+        return undefined;
+    }
+
+    const firstArg = argList[0];
+    let paramSpecName = '';
+    if (firstArg.valueExpression && firstArg.valueExpression.nodeType === ParseNodeType.StringList) {
+        paramSpecName = firstArg.valueExpression.d.strings.map((s) => s.d.value).join('');
+    } else {
+        evaluator.addDiagnostic(
+            DiagnosticRule.reportGeneralTypeIssues,
+            LocMessage.paramSpecFirstArg(),
+            firstArg.valueExpression || errorNode
+        );
+    }
+
+    const paramSpec = TypeBase.cloneAsSpecialForm(
+        TypeVarType.createInstantiable(paramSpecName, TypeVarKind.ParamSpec),
+        ClassType.cloneAsInstance(classType)
+    );
+
+    paramSpec.shared.defaultType = ParamSpecType.getUnknown();
+
+    // Parse the remaining parameters.
+    for (let i = 1; i < argList.length; i++) {
+        const paramNameNode = argList[i].name;
+        const paramName = paramNameNode ? paramNameNode.d.value : undefined;
+
+        if (paramName) {
+            if (paramName === 'default') {
+                const expr = argList[i].valueExpression;
+                if (expr) {
+                    const defaultType = getParamSpecDefaultType(evaluator, expr, /* isPep695Syntax */ false);
+                    if (defaultType) {
+                        paramSpec.shared.defaultType = defaultType;
+                        paramSpec.shared.isDefaultExplicit = true;
+                    }
+                }
+
+                const fileInfo = AnalyzerNodeInfo.getFileInfo(errorNode);
+                if (
+                    !fileInfo.isStubFile &&
+                    PythonVersion.isLessThan(fileInfo.executionEnvironment.pythonVersion, pythonVersion3_13) &&
+                    classType.shared.moduleName !== 'typing_extensions'
+                ) {
+                    evaluator.addDiagnostic(
+                        DiagnosticRule.reportGeneralTypeIssues,
+                        LocMessage.typeVarDefaultIllegal(),
+                        expr!
+                    );
+                }
+            } else {
+                evaluator.addDiagnostic(
+                    DiagnosticRule.reportGeneralTypeIssues,
+                    LocMessage.paramSpecUnknownParam().format({ name: paramName }),
+                    paramNameNode || argList[i].valueExpression || errorNode
+                );
+            }
+        } else {
+            evaluator.addDiagnostic(
+                DiagnosticRule.reportCallIssue,
+                LocMessage.paramSpecUnknownArg(),
+                argList[i].valueExpression || errorNode
+            );
+            break;
+        }
+    }
+
+    return paramSpec;
+}
+
+export function getParamSpecDefaultType(
+    evaluator: TypeEvaluator,
+    node: ExpressionNode,
+    isPep695Syntax: boolean
+): Type | undefined {
+    const functionType = FunctionType.createSynthesizedInstance('', FunctionTypeFlags.ParamSpecValue);
+
+    if (node.nodeType === ParseNodeType.Ellipsis) {
+        FunctionType.addDefaultParams(functionType);
+        functionType.shared.flags |= FunctionTypeFlags.GradualCallableForm;
+        return functionType;
+    }
+
+    if (node.nodeType === ParseNodeType.List) {
+        node.d.items.forEach((paramExpr, index) => {
+            const typeResult = evaluator.getTypeOfExpressionExpectingType(paramExpr, {
+                allowTypeVarsWithoutScopeId: true,
+                forwardRefs: isPep695Syntax,
+                typeExpression: true,
+            });
+
+            FunctionType.addParam(
+                functionType,
+                FunctionParam.create(
+                    ParamCategory.Simple,
+                    convertToInstance(typeResult.type),
+                    FunctionParamFlags.NameSynthesized | FunctionParamFlags.TypeDeclared,
+                    `__p${index}`
+                )
+            );
+        });
+
+        if (node.d.items.length > 0) {
+            FunctionType.addPositionOnlyParamSeparator(functionType);
+        }
+
+        // Update the type cache so we don't attempt to re-evaluate this node.
+        // The type doesn't matter, so use Any.
+        evaluator.setTypeResultForNode(node, { type: AnyType.create() });
+        return functionType;
+    } else {
+        const typeResult = evaluator.getTypeOfExpressionExpectingType(node, {
+            allowParamSpec: true,
+            allowTypeVarsWithoutScopeId: true,
+            allowEllipsis: true,
+            typeExpression: true,
+        });
+
+        if (typeResult.typeErrors) {
+            return undefined;
+        }
+
+        if (isParamSpec(typeResult.type)) {
+            FunctionType.addParamSpecVariadics(functionType, typeResult.type);
+            return functionType;
+        }
+
+        if (
+            isClassInstance(typeResult.type) &&
+            ClassType.isBuiltIn(typeResult.type, ['EllipsisType', 'ellipsis'])
+        ) {
+            FunctionType.addDefaultParams(functionType);
+            return functionType;
+        }
+    }
+
+    evaluator.addDiagnostic(DiagnosticRule.reportGeneralTypeIssues, LocMessage.paramSpecDefaultNotTuple(), node);
+
+    return undefined;
 }
 
 export function createTypeAliasType(
