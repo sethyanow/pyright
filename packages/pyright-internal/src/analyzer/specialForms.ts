@@ -72,6 +72,7 @@ import {
     TypeVarKind,
 } from './types';
 import {
+    addConditionToType,
     addTypeVarsToListIfUnique,
     computeMroLinearization,
     convertToInstance,
@@ -2248,10 +2249,56 @@ export function createSpecialBuiltInClass(
 export function createSubclass(
     evaluator: TypeEvaluator,
     errorNode: ExpressionNode,
-    typeArgs: TypeResultWithNode[] | undefined,
-    registry: TypeRegistry
-): Type {
-    throw new Error('Not yet extracted');
+    type1: ClassType,
+    type2: ClassType
+): ClassType {
+    assert(isInstantiableClass(type1) && isInstantiableClass(type2));
+
+    // If both classes are class objects (type[A] and type[B]), create a new
+    // class object (type[A & B]) rather than "type[A] & type[B]".
+    let createClassObject = false;
+    if (TypeBase.getInstantiableDepth(type1) > 0 && TypeBase.getInstantiableDepth(type2) > 0) {
+        type1 = ClassType.cloneAsInstance(type1);
+        type2 = ClassType.cloneAsInstance(type2);
+        createClassObject = true;
+    }
+
+    const className = `<subclass of ${evaluator.printType(convertToInstance(type1), {
+        omitTypeArgsIfUnknown: true,
+    })} and ${evaluator.printType(convertToInstance(type2), { omitTypeArgsIfUnknown: true })}>`;
+    const fileInfo = AnalyzerNodeInfo.getFileInfo(errorNode);
+
+    // The effective metaclass of the intersection is the narrower of the two metaclasses.
+    let effectiveMetaclass = type1.shared.effectiveMetaclass;
+    if (type2.shared.effectiveMetaclass) {
+        if (!effectiveMetaclass || evaluator.assignType(effectiveMetaclass, type2.shared.effectiveMetaclass)) {
+            effectiveMetaclass = type2.shared.effectiveMetaclass;
+        }
+    }
+
+    let newClassType = ClassType.createInstantiable(
+        className,
+        ParseTreeUtils.getClassFullName(errorNode, fileInfo.moduleName, className),
+        fileInfo.moduleName,
+        fileInfo.fileUri,
+        ClassTypeFlags.None,
+        ParseTreeUtils.getTypeSourceId(errorNode),
+        /* declaredMetaclass */ undefined,
+        effectiveMetaclass,
+        type1.shared.docString
+    );
+
+    newClassType.shared.baseClasses = [type1, type2];
+    computeMroLinearization(newClassType);
+
+    newClassType = addConditionToType(newClassType, type1.props?.condition);
+    newClassType = addConditionToType(newClassType, type2.props?.condition);
+
+    if (createClassObject) {
+        newClassType = ClassType.cloneAsInstantiable(newClassType);
+    }
+
+    return newClassType;
 }
 
 export function createSpecializedClassType(
