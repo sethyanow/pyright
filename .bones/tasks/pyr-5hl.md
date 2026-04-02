@@ -1,13 +1,14 @@
 ---
 id: pyr-5hl
 title: Extract Special Form Creation functions
-status: active
+status: closed
 type: task
 priority: 2
 owner: Seth
 depends_on: [pyr-kqo]
 parent: pyr-a56
 ---
+
 
 
 
@@ -109,13 +110,13 @@ cd /Volumes/code/pyright && bun run check
 
 ## Success Criteria
 
-- [ ] `specialForms.ts` exists with all `create*` functions
-- [ ] All moved functions removed from `typeEvaluator.ts` closure body
-- [ ] `typeEvaluator.ts` reduced by ~4000 lines
-- [ ] Full test suite passes (2343 tests as of pyr-kqo baseline)
-- [ ] Linter passes
-- [ ] No circular imports — `specialForms.ts` imports from `typeEvaluatorTypes.ts` (interface), never from `typeEvaluator.ts`
-- [ ] Each function's parameter list matches actual dependency usage (no unnecessary evaluator/registry/state params)
+- [x] `specialForms.ts` exists with all `create*` functions
+- [x] All moved functions removed from `typeEvaluator.ts` closure body
+- [x] `typeEvaluator.ts` reduced by ~3,212 lines (28,422 → 25,210; target was ~4000 but helper functions like validateTypeParamDefault remain in closure)
+- [x] Full test suite passes (2,344 tests)
+- [x] Linter passes
+- [x] No circular imports — `specialForms.ts` imports from `typeEvaluatorTypes.ts` (interface), never from `typeEvaluator.ts`
+- [x] Each function's parameter list matches actual dependency usage (no unnecessary evaluator/registry/state params)
 
 ## Anti-Patterns
 
