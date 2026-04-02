@@ -116,6 +116,10 @@ export class TypeEvaluatorState {
         this._evaluatorOptions = evaluatorOptions;
     }
 
+    get evaluatorOptions(): EvaluatorOptions {
+        return this._evaluatorOptions;
+    }
+
     setIsNodeReachable(fn: (node: ParseNode) => boolean): void {
         this._isNodeReachable = fn;
     }

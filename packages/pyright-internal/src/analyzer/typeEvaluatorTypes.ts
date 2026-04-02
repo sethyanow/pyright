@@ -703,6 +703,7 @@ export interface TypeEvaluator {
 
     isNodeReachable: (node: ParseNode, sourceNode?: ParseNode | undefined) => boolean;
     isAfterNodeReachable: (node: ParseNode) => boolean;
+    isFlowPathBetweenNodes: (sourceNode: ParseNode, sinkNode: ParseNode, allowSelf?: boolean) => boolean;
     getNodeReachability: (node: ParseNode, sourceNode?: ParseNode | undefined) => Reachability;
     getAfterNodeReachability: (node: ParseNode) => Reachability;
 
