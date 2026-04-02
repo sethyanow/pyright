@@ -22,6 +22,7 @@ import {
     DecoratorNode,
     ExpressionNode,
     FunctionNode,
+    IndexNode,
     MatchNode,
     NameNode,
     ParamCategory,
@@ -549,6 +550,14 @@ export interface ValidateTypeArgsOptions {
     allowUnpackedTuples?: boolean;
 }
 
+export interface GetTypeArgsOptions {
+    isAnnotatedClass?: boolean;
+    hasCustomClassGetItem?: boolean;
+    isFinalAnnotation?: boolean;
+    isClassVarAnnotation?: boolean;
+    supportsTypedDictTypeArg?: boolean;
+}
+
 export interface MapSubtypesOptions {
     conditionFilter?: TypeCondition[] | undefined;
     sortSubtypes?: boolean;
@@ -848,6 +857,14 @@ export interface TypeEvaluator {
         typeParamNodes: TypeParameterNode[] | undefined,
         getTypeParamCallback: () => TypeVarType[] | undefined
     ) => Type;
+    inferVarianceForTypeAlias: (type: Type) => Variance[] | undefined;
+    getTypeArgs: (node: IndexNode, flags: EvalFlags, options?: GetTypeArgsOptions) => TypeResultWithNode[];
+    adjustTypeArgsForTypeVarTuple: (
+        typeArgs: TypeResultWithNode[],
+        typeParams: TypeVarType[],
+        errorNode: ExpressionNode
+    ) => TypeResultWithNode[];
+
     inferReturnTypeIfNecessary: (type: Type) => void;
     inferVarianceForClass: (type: ClassType) => void;
     assignTypeArgs: (
