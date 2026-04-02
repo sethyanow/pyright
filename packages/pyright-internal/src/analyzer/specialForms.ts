@@ -15,6 +15,7 @@ import { LocMessage } from '../localization/localize';
 import {
     ArgCategory,
     ExpressionNode,
+    FunctionNode,
     IndexNode,
     ParamCategory,
     ParseNode,
@@ -1394,10 +1395,37 @@ export function createSpecializedTypeAlias(
 
 export function createAsyncFunction(
     evaluator: TypeEvaluator,
-    functionNode: ParseNode,
+    node: FunctionNode,
     functionType: FunctionType
 ): FunctionType {
-    throw new Error('Not yet extracted');
+    assert(FunctionType.isAsync(functionType));
+
+    // Clone the original function and replace its return type with an
+    // Awaitable[<returnType>]. Mark the new function as no longer async.
+    const awaitableFunctionType = FunctionType.cloneWithNewFlags(
+        functionType,
+        functionType.shared.flags & ~(FunctionTypeFlags.Async | FunctionTypeFlags.PartiallyEvaluated)
+    );
+
+    if (functionType.shared.declaredReturnType) {
+        awaitableFunctionType.shared.declaredReturnType = createAwaitableReturnType(
+            evaluator,
+            node,
+            functionType.shared.declaredReturnType,
+            FunctionType.isGenerator(functionType)
+        );
+    } else {
+        awaitableFunctionType.shared.inferredReturnType = {
+            type: createAwaitableReturnType(
+                evaluator,
+                node,
+                evaluator.getInferredReturnType(functionType),
+                FunctionType.isGenerator(functionType)
+            ),
+        };
+    }
+
+    return awaitableFunctionType;
 }
 
 export function createAwaitableReturnType(

@@ -17669,7 +17669,7 @@ export function createTypeEvaluator(
         // If it's an async function, wrap the return type in an Awaitable or Generator.
         // Set the "partially evaluated" flag around this logic to detect recursion.
         functionType.shared.flags |= FunctionTypeFlags.PartiallyEvaluated;
-        const preDecoratedType = node.d.isAsync ? createAsyncFunction(node, functionType) : functionType;
+        const preDecoratedType = node.d.isAsync ? specialForms.createAsyncFunction(evaluatorInterface, node, functionType) : functionType;
 
         // Apply all of the decorators in reverse order.
         decoratedType = preDecoratedType;
@@ -18388,36 +18388,7 @@ export function createTypeEvaluator(
         }
     }
 
-    function createAsyncFunction(node: FunctionNode, functionType: FunctionType): FunctionType {
-        assert(FunctionType.isAsync(functionType));
 
-        // Clone the original function and replace its return type with an
-        // Awaitable[<returnType>]. Mark the new function as no longer async.
-        const awaitableFunctionType = FunctionType.cloneWithNewFlags(
-            functionType,
-            functionType.shared.flags & ~(FunctionTypeFlags.Async | FunctionTypeFlags.PartiallyEvaluated)
-        );
-
-        if (functionType.shared.declaredReturnType) {
-            awaitableFunctionType.shared.declaredReturnType = specialForms.createAwaitableReturnType(
-                evaluatorInterface,
-                node,
-                functionType.shared.declaredReturnType,
-                FunctionType.isGenerator(functionType)
-            );
-        } else {
-            awaitableFunctionType.shared.inferredReturnType = {
-                type: specialForms.createAwaitableReturnType(
-                    evaluatorInterface,
-                    node,
-                    getInferredReturnType(functionType),
-                    FunctionType.isGenerator(functionType)
-                ),
-            };
-        }
-
-        return awaitableFunctionType;
-    }
 
 
     function inferFunctionReturnType(
