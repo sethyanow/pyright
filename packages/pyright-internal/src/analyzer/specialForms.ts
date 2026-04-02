@@ -1402,10 +1402,58 @@ export function createAsyncFunction(
 
 export function createAwaitableReturnType(
     evaluator: TypeEvaluator,
-    functionNode: ParseNode,
-    functionType: FunctionType,
+    node: ParseNode,
+    returnType: Type,
     isGenerator: boolean,
-    registry: TypeRegistry
+    useCoroutine = true
 ): Type {
-    throw new Error('Not yet extracted');
+    let awaitableReturnType: Type | undefined;
+
+    if (isClassInstance(returnType)) {
+        if (ClassType.isBuiltIn(returnType)) {
+            if (returnType.shared.name === 'Generator') {
+                // If the return type is a Generator, change it to an AsyncGenerator.
+                const asyncGeneratorType = evaluator.getTypingType(node, 'AsyncGenerator');
+                if (asyncGeneratorType && isInstantiableClass(asyncGeneratorType)) {
+                    const typeArgs: Type[] = [];
+                    const generatorTypeArgs = returnType.priv.typeArgs;
+                    if (generatorTypeArgs && generatorTypeArgs.length > 0) {
+                        typeArgs.push(generatorTypeArgs[0]);
+                    }
+                    if (generatorTypeArgs && generatorTypeArgs.length > 1) {
+                        typeArgs.push(generatorTypeArgs[1]);
+                    }
+                    awaitableReturnType = ClassType.cloneAsInstance(
+                        ClassType.specialize(asyncGeneratorType, typeArgs)
+                    );
+                }
+            } else if (['AsyncIterator', 'AsyncIterable'].some((name) => name === returnType.shared.name)) {
+                // If it's already an AsyncIterator or AsyncIterable, leave it as is.
+                awaitableReturnType = returnType;
+            } else if (returnType.shared.name === 'AsyncGenerator') {
+                // If it's already an AsyncGenerator and the function is a generator,
+                // leave it as is.
+                if (isGenerator) {
+                    awaitableReturnType = returnType;
+                }
+            }
+        }
+    }
+
+    if (!awaitableReturnType || !isGenerator) {
+        // Wrap in either an Awaitable or a CoroutineType, which is a subclass of Awaitable.
+        const awaitableType = useCoroutine ? evaluator.getTypesType(node, 'CoroutineType') : evaluator.getTypingType(node, 'Awaitable');
+        if (awaitableType && isInstantiableClass(awaitableType)) {
+            awaitableReturnType = ClassType.cloneAsInstance(
+                ClassType.specialize(
+                    awaitableType,
+                    useCoroutine ? [AnyType.create(), AnyType.create(), returnType] : [returnType]
+                )
+            );
+        } else {
+            awaitableReturnType = UnknownType.create();
+        }
+    }
+
+    return awaitableReturnType;
 }

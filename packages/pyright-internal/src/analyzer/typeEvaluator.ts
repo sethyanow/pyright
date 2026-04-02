@@ -1215,7 +1215,8 @@ export function createTypeEvaluator(
         }
 
         const expectedType = inferenceContext
-            ? createAwaitableReturnType(
+            ? specialForms.createAwaitableReturnType(
+                  evaluatorInterface,
                   node,
                   inferenceContext.expectedType,
                   /* isGenerator */ false,
@@ -18398,14 +18399,16 @@ export function createTypeEvaluator(
         );
 
         if (functionType.shared.declaredReturnType) {
-            awaitableFunctionType.shared.declaredReturnType = createAwaitableReturnType(
+            awaitableFunctionType.shared.declaredReturnType = specialForms.createAwaitableReturnType(
+                evaluatorInterface,
                 node,
                 functionType.shared.declaredReturnType,
                 FunctionType.isGenerator(functionType)
             );
         } else {
             awaitableFunctionType.shared.inferredReturnType = {
-                type: createAwaitableReturnType(
+                type: specialForms.createAwaitableReturnType(
+                    evaluatorInterface,
                     node,
                     getInferredReturnType(functionType),
                     FunctionType.isGenerator(functionType)
@@ -18416,62 +18419,6 @@ export function createTypeEvaluator(
         return awaitableFunctionType;
     }
 
-    function createAwaitableReturnType(
-        node: ParseNode,
-        returnType: Type,
-        isGenerator: boolean,
-        useCoroutine = true
-    ): Type {
-        let awaitableReturnType: Type | undefined;
-
-        if (isClassInstance(returnType)) {
-            if (ClassType.isBuiltIn(returnType)) {
-                if (returnType.shared.name === 'Generator') {
-                    // If the return type is a Generator, change it to an AsyncGenerator.
-                    const asyncGeneratorType = getTypingType(node, 'AsyncGenerator');
-                    if (asyncGeneratorType && isInstantiableClass(asyncGeneratorType)) {
-                        const typeArgs: Type[] = [];
-                        const generatorTypeArgs = returnType.priv.typeArgs;
-                        if (generatorTypeArgs && generatorTypeArgs.length > 0) {
-                            typeArgs.push(generatorTypeArgs[0]);
-                        }
-                        if (generatorTypeArgs && generatorTypeArgs.length > 1) {
-                            typeArgs.push(generatorTypeArgs[1]);
-                        }
-                        awaitableReturnType = ClassType.cloneAsInstance(
-                            ClassType.specialize(asyncGeneratorType, typeArgs)
-                        );
-                    }
-                } else if (['AsyncIterator', 'AsyncIterable'].some((name) => name === returnType.shared.name)) {
-                    // If it's already an AsyncIterator or AsyncIterable, leave it as is.
-                    awaitableReturnType = returnType;
-                } else if (returnType.shared.name === 'AsyncGenerator') {
-                    // If it's already an AsyncGenerator and the function is a generator,
-                    // leave it as is.
-                    if (isGenerator) {
-                        awaitableReturnType = returnType;
-                    }
-                }
-            }
-        }
-
-        if (!awaitableReturnType || !isGenerator) {
-            // Wrap in either an Awaitable or a CoroutineType, which is a subclass of Awaitable.
-            const awaitableType = useCoroutine ? getTypesType(node, 'CoroutineType') : getTypingType(node, 'Awaitable');
-            if (awaitableType && isInstantiableClass(awaitableType)) {
-                awaitableReturnType = ClassType.cloneAsInstance(
-                    ClassType.specialize(
-                        awaitableType,
-                        useCoroutine ? [AnyType.create(), AnyType.create(), returnType] : [returnType]
-                    )
-                );
-            } else {
-                awaitableReturnType = UnknownType.create();
-            }
-        }
-
-        return awaitableReturnType;
-    }
 
     function inferFunctionReturnType(
         node: FunctionNode,
