@@ -18583,39 +18583,8 @@ export function createTypeEvaluator(
         return symbolResolution.getDeclarationFromKeywordParam(type, paramName);
     }
 
-    // In general, string nodes don't have any declarations associated with them, but
-    // we need to handle the special case of string literals used as keys within a
-    // dictionary expression where those keys are associated with a known TypedDict.
     function getDeclInfoForStringNode(node: StringNode): SymbolDeclInfo | undefined {
-        const decls: Declaration[] = [];
-        const synthesizedTypes: SynthesizedTypeInfo[] = [];
-        const expectedType = getExpectedType(node)?.type;
-
-        if (expectedType) {
-            doForEachSubtype(expectedType, (subtype) => {
-                // If the expected type is a TypedDict then the node is either a key expression
-                // or a single entry in a set. We then need to check that the value of the node
-                // is a valid entry in the TypedDict to avoid resolving declarations for
-                // synthesized symbols such as 'get'.
-                if (isClassInstance(subtype) && ClassType.isTypedDictClass(subtype)) {
-                    const entry = subtype.shared.typedDictEntries?.knownItems.get(node.d.value);
-                    if (entry) {
-                        const symbol = lookUpObjectMember(subtype, node.d.value)?.symbol;
-
-                        if (symbol) {
-                            appendArray(decls, symbol.getDeclarations());
-
-                            const synthTypeInfo = symbol.getSynthesizedType();
-                            if (synthTypeInfo) {
-                                synthesizedTypes.push(synthTypeInfo);
-                            }
-                        }
-                    }
-                }
-            });
-        }
-
-        return decls.length === 0 ? undefined : { decls, synthesizedTypes };
+        return symbolResolution.getDeclInfoForStringNode(evaluatorInterface, node);
     }
 
     function getAliasFromImport(node: NameNode): NameNode | undefined {

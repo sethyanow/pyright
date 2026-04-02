@@ -15,6 +15,12 @@ import { ClassType, FunctionType, isClassInstance, isFunction } from './types';
 import { TypeEvaluator } from './typeEvaluatorTypes';
 import { lookUpClassMember } from './typeUtils';
 
+import { appendArray } from '../common/collectionUtils';
+import { StringNode } from '../parser/parseNodes';
+import { SynthesizedTypeInfo } from './symbol';
+import { SymbolDeclInfo } from './typeEvaluatorTypes';
+import { doForEachSubtype, lookUpObjectMember } from './typeUtils';
+
 import type { Symbol } from './symbol';
 
 export function isFinalVariableDeclaration(decl: Declaration): boolean {
@@ -85,4 +91,32 @@ export function isExplicitTypeAliasDeclaration(evaluator: TypeEvaluator, decl: D
 
     const type = evaluator.getTypeOfAnnotation(decl.typeAnnotationNode, { varTypeAnnotation: true, allowClassVar: true });
     return isClassInstance(type) && ClassType.isBuiltIn(type, 'TypeAlias');
+}
+
+export function getDeclInfoForStringNode(evaluator: TypeEvaluator, node: StringNode): SymbolDeclInfo | undefined {
+    const decls: Declaration[] = [];
+    const synthesizedTypes: SynthesizedTypeInfo[] = [];
+    const expectedType = evaluator.getExpectedType(node)?.type;
+
+    if (expectedType) {
+        doForEachSubtype(expectedType, (subtype) => {
+            if (isClassInstance(subtype) && ClassType.isTypedDictClass(subtype)) {
+                const entry = subtype.shared.typedDictEntries?.knownItems.get(node.d.value);
+                if (entry) {
+                    const symbol = lookUpObjectMember(subtype, node.d.value)?.symbol;
+
+                    if (symbol) {
+                        appendArray(decls, symbol.getDeclarations());
+
+                        const synthTypeInfo = symbol.getSynthesizedType();
+                        if (synthTypeInfo) {
+                            synthesizedTypes.push(synthTypeInfo);
+                        }
+                    }
+                }
+            }
+        });
+    }
+
+    return decls.length === 0 ? undefined : { decls, synthesizedTypes };
 }
