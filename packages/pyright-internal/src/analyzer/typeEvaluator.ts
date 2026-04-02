@@ -32,7 +32,7 @@ import {
 } from '../common/pythonVersion';
 import { TextRange } from '../common/textRange';
 import { Uri } from '../common/uri/uri';
-import { LocAddendum, LocMessage, ParameterizedString } from '../localization/localize';
+import { LocAddendum, LocMessage } from '../localization/localize';
 import {
     ArgCategory,
     ArgumentNode,
@@ -103,7 +103,6 @@ import { ConstraintSolution } from './constraintSolution';
 import {
     addConstraintsForExpectedType,
     applySourceSolutionToConstraints,
-    assignTypeVar,
     solveConstraints,
     solveConstraintSet,
 } from './constraintSolver';
@@ -159,12 +158,9 @@ import {
     ParamAssignmentTracker,
     ParamKind,
     ParamListDetails,
-    VirtualParamDetails,
 } from './parameterUtils';
 import * as ParseTreeUtils from './parseTreeUtils';
 import { assignTypeToPatternTargets, checkForUnusedPattern, narrowTypeBasedOnPattern } from './patternMatching';
-import { assignProperty } from './properties';
-import { assignClassToProtocol, assignModuleToProtocol } from './protocols';
 import { Scope, ScopeType, SymbolWithScope } from './scope';
 import * as specialForms from './specialForms';
 import * as typeAssignment from './typeAssignment';
@@ -174,15 +170,12 @@ import { evaluateStaticBoolExpression } from './staticExpressions';
 import { indeterminateSymbolId, Symbol, SymbolFlags, SynthesizedTypeInfo } from './symbol';
 import { isConstantName, isPrivateName, isPrivateOrProtectedName } from './symbolNameUtils';
 import { getLastTypedDeclarationForSymbol, isEffectivelyClassVar } from './symbolUtils';
-import { assignTupleTypeArgs, expandTuple, getSlicedTupleType, getTypeOfTuple, makeTupleObject } from './tuples';
+import { expandTuple, getSlicedTupleType, getTypeOfTuple, makeTupleObject } from './tuples';
 import { SpeculativeModeOptions } from './typeCacheUtils';
 import {
     assignToTypedDict,
-    assignTypedDictToTypedDict,
     createTypedDictType,
     createTypedDictTypeInlined,
-    getTypedDictDictEquivalent,
-    getTypedDictMappingEquivalent,
     getTypedDictMembersForClass,
     getTypeOfIndexedTypedDict,
     synthesizeTypedDictClassMethods,
@@ -237,7 +230,6 @@ import {
     FunctionParamFlags,
     FunctionType,
     FunctionTypeFlags,
-    InheritanceChain,
     isAny,
     isAnyOrUnknown,
     isClass,
@@ -250,7 +242,6 @@ import {
     isNever,
     isOverloaded,
     isParamSpec,
-    isPositionOnlySeparator,
     isTypeSame,
     isTypeVar,
     isTypeVarTuple,
@@ -266,12 +257,10 @@ import {
     NeverType,
     OverloadedType,
     ParamSpecType,
-    removeFromUnion,
     removeUnbound,
     SentinelLiteral,
     TupleTypeArg,
     Type,
-    TypeAliasInfo,
     TypeBase,
     TypeCategory,
     TypeCondition,
@@ -294,7 +283,6 @@ import {
     buildSolutionFromSpecializedClass,
     ClassMember,
     combineSameSizedTuples,
-    combineTupleTypeArgs,
     combineVariances,
     computeMroLinearization,
     containsAnyOrUnknown,
@@ -313,7 +301,6 @@ import {
     getSpecializedTupleType,
     getTypeCondition,
     getTypeVarArgsRecursive,
-    getTypeVarScopeId,
     getTypeVarScopeIds,
     getUnknownTypeForCallable,
     InferenceContext,
@@ -323,10 +310,8 @@ import {
     isEllipsisType,
     isIncompleteUnknown,
     isInstantiableMetaclass,
-    isLiteralLikeType,
     isLiteralType,
     isMaybeDescriptorInstance,
-    isMemberReadOnly,
     isMetaclassInstance,
     isNoneInstance,
     isNoneTypeClass,
@@ -338,7 +323,6 @@ import {
     isTupleIndexUnambiguous,
     isTypeAliasPlaceholder,
     isTypeAliasRecursive,
-    isTypeVarSame,
     isUnboundedTupleClass,
     lookUpClassMember,
     lookUpObjectMember,
@@ -532,10 +516,6 @@ const maxInferFunctionReturnRecursionCount = 12;
 // Maximum recursion amount when comparing two recursive type aliases.
 // Increasing this can greatly increase the time required to evaluate
 // two recursive type aliases that have the same definition. Decreasing
-// it can increase the chance of false negatives for such recursive
-// type aliases.
-const maxRecursiveTypeAliasRecursionCount = 10;
-
 // Normally a symbol can have only one type declaration, but there are
 // cases where multiple are possible (e.g. a property with a setter
 // and a deleter). In extreme cases, we need to limit the number of
@@ -20469,18 +20449,6 @@ export function createTypeEvaluator(
         };
     }
 
-    function assignClass(
-        destType: ClassType,
-        srcType: ClassType,
-        diag: DiagnosticAddendum | undefined,
-        constraints: ConstraintTracker | undefined,
-        flags: AssignTypeFlags,
-        recursionCount: number,
-        reportErrorsUsingObjType: boolean
-    ): boolean {
-        return typeAssignment.assignClass(evaluatorInterface, registry, state, destType, srcType, diag, constraints, flags, recursionCount, reportErrorsUsingObjType);
-    }
-
     function assignClassToSelf(
         destType: ClassType,
         srcType: ClassType,
@@ -20489,18 +20457,6 @@ export function createTypeEvaluator(
         recursionCount = 0
     ): boolean {
         return typeAssignment.assignClassToSelf(evaluatorInterface, registry, state, destType, srcType, assumedVariance, ignoreBaseClassVariance, recursionCount);
-    }
-
-    function assignClassWithTypeArgs(
-        destType: ClassType,
-        srcType: ClassType,
-        inheritanceChain: InheritanceChain,
-        diag: DiagnosticAddendum | undefined,
-        constraints: ConstraintTracker | undefined,
-        flags: AssignTypeFlags,
-        recursionCount: number
-    ): boolean {
-        return typeAssignment.assignClassWithTypeArgs(evaluatorInterface, registry, state, destType, srcType, inheritanceChain, diag, constraints, flags, recursionCount);
     }
 
     function getGetterTypeFromProperty(propertyClass: ClassType): Type | undefined {
@@ -20537,42 +20493,12 @@ export function createTypeEvaluator(
         return typeAssignment.assignType(evaluatorInterface, registry, state, destType, srcType, diag, constraints, flags, recursionCount);
     }
 
-    function assignRecursiveTypeAliasToSelf(
-        destAliasInfo: TypeAliasInfo,
-        srcAliasInfo: TypeAliasInfo,
-        diag?: DiagnosticAddendum,
-        constraints?: ConstraintTracker,
-        flags = AssignTypeFlags.Default,
-        recursionCount = 0
-    ) {
-        return typeAssignment.assignRecursiveTypeAliasToSelf(evaluatorInterface, registry, state, destAliasInfo, srcAliasInfo, diag, constraints, flags, recursionCount);
-    }
-
     function convertToTypeFormType(expectedType: Type, srcType: Type): Type {
         return typeAssignment.convertToTypeFormType(evaluatorInterface, registry, state, expectedType, srcType);
     }
 
-    function assignFromUnionType(
-        destType: Type,
-        srcType: UnionType,
-        diag: DiagnosticAddendum | undefined,
-        constraints: ConstraintTracker | undefined,
-        flags: AssignTypeFlags,
-        recursionCount: number
-    ): boolean {
-        return typeAssignment.assignFromUnionType(evaluatorInterface, registry, state, destType, srcType, diag, constraints, flags, recursionCount);
-    }
-
     function isSpecialFormClass(classType: ClassType, flags: AssignTypeFlags): boolean {
         return typeAssignment.isSpecialFormClass(classType, flags);
-    }
-
-    function setConstraintsForFreeTypeVars(
-        destType: Type,
-        srcType: UnknownType | AnyType,
-        constraints: ConstraintTracker
-    ) {
-        typeAssignment.setConstraintsForFreeTypeVars(destType, srcType, constraints);
     }
 
     // Determines whether a type is "subsumed by" (i.e. is a proper subtype of) another type.
@@ -20582,21 +20508,6 @@ export function createTypeEvaluator(
 
     function isTypeComparable(leftType: Type, rightType: Type, assumeIsOperator = false) {
         return typeAssignment.isTypeComparable(evaluatorInterface, registry, state, leftType, rightType, assumeIsOperator);
-    }
-
-    function assignToUnionType(
-        destType: UnionType,
-        srcType: Type,
-        diag: DiagnosticAddendum | undefined,
-        constraints: ConstraintTracker | undefined,
-        flags: AssignTypeFlags,
-        recursionCount: number
-    ): boolean {
-        return typeAssignment.assignToUnionType(evaluatorInterface, registry, state, destType, srcType, diag, constraints, flags, recursionCount);
-    }
-
-    function assignConditionalTypeToTypeVar(destType: TypeVarType, srcType: Type, recursionCount: number): boolean {
-        return typeAssignment.assignConditionalTypeToTypeVar(evaluatorInterface, registry, state, destType, srcType, recursionCount);
     }
 
     // If the class is a protocol and it has a `__call__` method but no other methods
@@ -20659,33 +20570,6 @@ export function createTypeEvaluator(
         }
 
         return makeFunctionTypeVarsBound(callType);
-    }
-
-    function assignParam(
-        destType: Type,
-        srcType: Type,
-        paramIndex: number | undefined,
-        diag: DiagnosticAddendum | undefined,
-        constraints: ConstraintTracker,
-        flags: AssignTypeFlags,
-        recursionCount: number
-    ) {
-        return typeAssignment.assignParam(evaluatorInterface, registry, state, destType, srcType, paramIndex, diag, constraints, flags, recursionCount);
-    }
-
-    function adjustSourceParamDetailsForDestVariadic(srcDetails: ParamListDetails, destDetails: ParamListDetails) {
-        typeAssignment.adjustSourceParamDetailsForDestVariadic(evaluatorInterface, srcDetails, destDetails);
-    }
-
-    function assignFunction(
-        destType: FunctionType,
-        srcType: FunctionType,
-        diag: DiagnosticAddendum | undefined,
-        constraints: ConstraintTracker,
-        flags: AssignTypeFlags,
-        recursionCount: number
-    ): boolean {
-        return typeAssignment.assignFunction(evaluatorInterface, registry, state, destType, srcType, diag, constraints, flags, recursionCount);
     }
 
     function narrowTypeBasedOnAssignment(declaredType: Type, assignedTypeResult: TypeResult): TypeResult {

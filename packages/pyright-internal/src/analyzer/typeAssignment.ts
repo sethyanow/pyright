@@ -98,7 +98,6 @@ import {
     isTupleClass,
     isTypeVarSame,
     lookUpClassMember,
-    makeFunctionTypeVarsBound,
     makeTypeVarsBound,
     mapSubtypes,
     MemberAccessFlags,
