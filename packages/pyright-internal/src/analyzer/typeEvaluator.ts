@@ -18580,36 +18580,7 @@ export function createTypeEvaluator(
     }
 
     function getDeclarationFromKeywordParam(type: FunctionType, paramName: string): Declaration | undefined {
-        if (isFunction(type)) {
-            if (type.shared.declaration) {
-                const functionDecl = type.shared.declaration;
-                if (functionDecl.type === DeclarationType.Function) {
-                    const functionNode = functionDecl.node;
-                    const functionScope = AnalyzerNodeInfo.getScope(functionNode);
-                    if (functionScope) {
-                        const paramSymbol = functionScope.lookUpSymbol(paramName)!;
-                        if (paramSymbol) {
-                            return paramSymbol.getDeclarations().find((decl) => decl.type === DeclarationType.Param);
-                        }
-
-                        const parameterDetails = getParamListDetails(type);
-                        if (parameterDetails.unpackedKwargsTypedDictType) {
-                            const lookupResults = lookUpClassMember(
-                                parameterDetails.unpackedKwargsTypedDictType,
-                                paramName
-                            );
-                            if (lookupResults) {
-                                return lookupResults.symbol
-                                    .getDeclarations()
-                                    .find((decl) => decl.type === DeclarationType.Variable);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        return undefined;
+        return symbolResolution.getDeclarationFromKeywordParam(type, paramName);
     }
 
     // In general, string nodes don't have any declarations associated with them, but
@@ -18648,15 +18619,7 @@ export function createTypeEvaluator(
     }
 
     function getAliasFromImport(node: NameNode): NameNode | undefined {
-        if (
-            node.parent &&
-            node.parent.nodeType === ParseNodeType.ImportFromAs &&
-            node.parent.d.alias &&
-            node === node.parent.d.name
-        ) {
-            return node.parent.d.alias;
-        }
-        return undefined;
+        return symbolResolution.getAliasFromImport(node);
     }
 
     function getDeclInfoForNameNode(node: NameNode, skipUnreachableCode = true): SymbolDeclInfo | undefined {
