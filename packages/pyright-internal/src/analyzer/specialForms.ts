@@ -1972,9 +1972,47 @@ export function createClassFromMetaclass(
     evaluator: TypeEvaluator,
     errorNode: ExpressionNode,
     argList: Arg[],
-    metaclassType: ClassType
-): Type {
-    throw new Error('Not yet extracted');
+    metaclass: ClassType
+): ClassType | undefined {
+    const fileInfo = AnalyzerNodeInfo.getFileInfo(errorNode);
+    const arg0Type = evaluator.getTypeOfArg(argList[0], /* inferenceContext */ undefined).type;
+    if (!isClassInstance(arg0Type) || !ClassType.isBuiltIn(arg0Type, 'str')) {
+        return undefined;
+    }
+    const className = (arg0Type.priv.literalValue as string) || '_';
+
+    const arg1Type = evaluator.getTypeOfArg(argList[1], /* inferenceContext */ undefined).type;
+
+    // TODO - properly handle case where tuple of base classes is provided.
+    if (!isClassInstance(arg1Type) || !isTupleClass(arg1Type) || arg1Type.priv.tupleTypeArgs === undefined) {
+        return undefined;
+    }
+
+    const classType = ClassType.createInstantiable(
+        className,
+        ParseTreeUtils.getClassFullName(errorNode, fileInfo.moduleName, className),
+        fileInfo.moduleName,
+        fileInfo.fileUri,
+        ClassTypeFlags.ValidTypeAliasClass,
+        ParseTreeUtils.getTypeSourceId(errorNode),
+        metaclass,
+        arg1Type.shared.effectiveMetaclass
+    );
+    arg1Type.priv.tupleTypeArgs.forEach((typeArg) => {
+        const specializedType = evaluator.makeTopLevelTypeVarsConcrete(typeArg.type);
+
+        if (isEffectivelyInstantiable(specializedType)) {
+            classType.shared.baseClasses.push(specializedType);
+        } else {
+            classType.shared.baseClasses.push(UnknownType.create());
+        }
+    });
+
+    if (!computeMroLinearization(classType)) {
+        evaluator.addDiagnostic(DiagnosticRule.reportGeneralTypeIssues, LocMessage.methodOrdering(), errorNode);
+    }
+
+    return classType;
 }
 
 export function createSpecialBuiltInClass(

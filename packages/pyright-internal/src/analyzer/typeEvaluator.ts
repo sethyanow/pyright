@@ -10136,7 +10136,9 @@ export function createTypeEvaluator(
                     // The two-parameter form of a call to a metaclass returns a new class
                     // built from the specified base types.
                     return {
-                        returnType: createClassFromMetaclass(errorNode, argList, expandedCallType) || AnyType.create(),
+                        returnType:
+                            specialForms.createClassFromMetaclass(evaluatorInterface, errorNode, argList, expandedCallType) ||
+                            AnyType.create(),
                     };
                 }
 
@@ -12779,53 +12781,6 @@ export function createTypeEvaluator(
         nameParts.push(moduleName);
 
         return nameParts.reverse().join('.');
-    }
-
-    // Implements the semantics of the multi-parameter variant of the "type" call.
-    function createClassFromMetaclass(
-        errorNode: ExpressionNode,
-        argList: Arg[],
-        metaclass: ClassType
-    ): ClassType | undefined {
-        const fileInfo = AnalyzerNodeInfo.getFileInfo(errorNode);
-        const arg0Type = getTypeOfArg(argList[0], /* inferenceContext */ undefined).type;
-        if (!isClassInstance(arg0Type) || !ClassType.isBuiltIn(arg0Type, 'str')) {
-            return undefined;
-        }
-        const className = (arg0Type.priv.literalValue as string) || '_';
-
-        const arg1Type = getTypeOfArg(argList[1], /* inferenceContext */ undefined).type;
-
-        // TODO - properly handle case where tuple of base classes is provided.
-        if (!isClassInstance(arg1Type) || !isTupleClass(arg1Type) || arg1Type.priv.tupleTypeArgs === undefined) {
-            return undefined;
-        }
-
-        const classType = ClassType.createInstantiable(
-            className,
-            ParseTreeUtils.getClassFullName(errorNode, fileInfo.moduleName, className),
-            fileInfo.moduleName,
-            fileInfo.fileUri,
-            ClassTypeFlags.ValidTypeAliasClass,
-            ParseTreeUtils.getTypeSourceId(errorNode),
-            metaclass,
-            arg1Type.shared.effectiveMetaclass
-        );
-        arg1Type.priv.tupleTypeArgs.forEach((typeArg) => {
-            const specializedType = makeTopLevelTypeVarsConcrete(typeArg.type);
-
-            if (isEffectivelyInstantiable(specializedType)) {
-                classType.shared.baseClasses.push(specializedType);
-            } else {
-                classType.shared.baseClasses.push(UnknownType.create());
-            }
-        });
-
-        if (!computeMroLinearization(classType)) {
-            addDiagnostic(DiagnosticRule.reportGeneralTypeIssues, LocMessage.methodOrdering(), errorNode);
-        }
-
-        return classType;
     }
 
     function getTypeOfConstant(node: ConstantNode, flags: EvalFlags): TypeResult {
