@@ -22,11 +22,16 @@ import {
     ParseNodeType,
     TypeParameterNode,
 } from '../parser/parseNodes';
+import {
+    PythonVersion,
+    pythonVersion3_13,
+} from '../common/pythonVersion';
 import { KeywordType, OperatorType, StringTokenFlags } from '../parser/tokenizerTypes';
 import * as AnalyzerNodeInfo from './analyzerNodeInfo';
 import { SpecialBuiltInClassDeclaration } from './declaration';
 import { getFunctionInfoFromDecorators } from './decorators';
 import * as ParseTreeUtils from './parseTreeUtils';
+import { ConstraintTracker } from './constraintTracker';
 import { Arg, EvalFlags, TypeEvaluator, TypeResult, TypeResultWithNode } from './typeEvaluatorTypes';
 import { TypeRegistry } from './typeRegistry';
 import {
@@ -73,6 +78,7 @@ import {
     isNoneTypeClass,
     isTupleClass,
     isUnboundedTupleClass,
+    getTypeVarScopeIds,
     requiresSpecialization,
     specializeTupleClass,
     synthesizeTypeVarForSelfCls,
@@ -1300,11 +1306,251 @@ export function createLiteralType(
 export function createTypeVarType(
     evaluator: TypeEvaluator,
     errorNode: ExpressionNode,
-    argList: Arg[],
-    flags: EvalFlags,
-    registry: TypeRegistry
-): Type {
-    throw new Error('Not yet extracted');
+    classType: ClassType,
+    argList: Arg[]
+): Type | undefined {
+    let typeVarName = '';
+    let firstConstraintArg: Arg | undefined;
+    let defaultValueNode: ExpressionNode | undefined;
+
+    if (argList.length === 0) {
+        evaluator.addDiagnostic(DiagnosticRule.reportGeneralTypeIssues, LocMessage.typeVarFirstArg(), errorNode);
+        return undefined;
+    }
+
+    const firstArg = argList[0];
+    if (firstArg.valueExpression && firstArg.valueExpression.nodeType === ParseNodeType.StringList) {
+        typeVarName = firstArg.valueExpression.d.strings.map((s) => s.d.value).join('');
+    } else {
+        evaluator.addDiagnostic(
+            DiagnosticRule.reportGeneralTypeIssues,
+            LocMessage.typeVarFirstArg(),
+            firstArg.valueExpression || errorNode
+        );
+    }
+
+    const typeVar = TypeBase.cloneAsSpecialForm(
+        TypeVarType.createInstantiable(typeVarName),
+        ClassType.cloneAsInstance(classType)
+    );
+
+    // Parse the remaining parameters.
+    const paramNameMap = new Map<string, string>();
+    for (let i = 1; i < argList.length; i++) {
+        const paramNameNode = argList[i].name;
+        const paramName = paramNameNode ? paramNameNode.d.value : undefined;
+
+        if (paramName) {
+            if (paramNameMap.get(paramName)) {
+                evaluator.addDiagnostic(
+                    DiagnosticRule.reportCallIssue,
+                    LocMessage.duplicateParam().format({ name: paramName }),
+                    argList[i].valueExpression || errorNode
+                );
+            }
+
+            if (paramName === 'bound') {
+                if (TypeVarType.hasConstraints(typeVar)) {
+                    evaluator.addDiagnostic(
+                        DiagnosticRule.reportGeneralTypeIssues,
+                        LocMessage.typeVarBoundAndConstrained(),
+                        argList[i].valueExpression || errorNode
+                    );
+                } else {
+                    const argType =
+                        argList[i].typeResult?.type ??
+                        evaluator.getTypeOfExpressionExpectingType(argList[i].valueExpression!, {
+                            noNonTypeSpecialForms: true,
+                            typeExpression: true,
+                            parsesStringLiteral: true,
+                        }).type;
+                    if (
+                        requiresSpecialization(argType, { ignorePseudoGeneric: true, ignoreImplicitTypeArgs: true })
+                    ) {
+                        evaluator.addDiagnostic(
+                            DiagnosticRule.reportGeneralTypeIssues,
+                            LocMessage.typeVarBoundGeneric(),
+                            argList[i].valueExpression || errorNode
+                        );
+                    }
+                    typeVar.shared.boundType = convertToInstance(argType);
+                }
+            } else if (paramName === 'covariant') {
+                if (argList[i].valueExpression && getBooleanValue(evaluator, argList[i].valueExpression!)) {
+                    if (
+                        typeVar.shared.declaredVariance === Variance.Contravariant ||
+                        typeVar.shared.declaredVariance === Variance.Auto
+                    ) {
+                        evaluator.addDiagnostic(
+                            DiagnosticRule.reportGeneralTypeIssues,
+                            LocMessage.typeVarVariance(),
+                            argList[i].valueExpression!
+                        );
+                    } else {
+                        typeVar.shared.declaredVariance = Variance.Covariant;
+                    }
+                }
+            } else if (paramName === 'contravariant') {
+                if (argList[i].valueExpression && getBooleanValue(evaluator, argList[i].valueExpression!)) {
+                    if (
+                        typeVar.shared.declaredVariance === Variance.Covariant ||
+                        typeVar.shared.declaredVariance === Variance.Auto
+                    ) {
+                        evaluator.addDiagnostic(
+                            DiagnosticRule.reportGeneralTypeIssues,
+                            LocMessage.typeVarVariance(),
+                            argList[i].valueExpression!
+                        );
+                    } else {
+                        typeVar.shared.declaredVariance = Variance.Contravariant;
+                    }
+                }
+            } else if (paramName === 'infer_variance') {
+                if (argList[i].valueExpression && getBooleanValue(evaluator, argList[i].valueExpression!)) {
+                    if (
+                        typeVar.shared.declaredVariance === Variance.Covariant ||
+                        typeVar.shared.declaredVariance === Variance.Contravariant
+                    ) {
+                        evaluator.addDiagnostic(
+                            DiagnosticRule.reportGeneralTypeIssues,
+                            LocMessage.typeVarVariance(),
+                            argList[i].valueExpression!
+                        );
+                    } else {
+                        typeVar.shared.declaredVariance = Variance.Auto;
+                    }
+                }
+            } else if (paramName === 'default') {
+                defaultValueNode = argList[i].valueExpression;
+                const argType =
+                    argList[i].typeResult?.type ??
+                    evaluator.getTypeOfExpressionExpectingType(defaultValueNode!, {
+                        allowTypeVarsWithoutScopeId: true,
+                        typeExpression: true,
+                    }).type;
+                typeVar.shared.defaultType = convertToInstance(argType);
+                typeVar.shared.isDefaultExplicit = true;
+
+                const fileInfo = AnalyzerNodeInfo.getFileInfo(errorNode);
+                if (
+                    !fileInfo.isStubFile &&
+                    PythonVersion.isLessThan(fileInfo.executionEnvironment.pythonVersion, pythonVersion3_13) &&
+                    classType.shared.moduleName !== 'typing_extensions'
+                ) {
+                    evaluator.addDiagnostic(
+                        DiagnosticRule.reportGeneralTypeIssues,
+                        LocMessage.typeVarDefaultIllegal(),
+                        defaultValueNode!
+                    );
+                }
+            } else {
+                evaluator.addDiagnostic(
+                    DiagnosticRule.reportCallIssue,
+                    LocMessage.typeVarUnknownParam().format({ name: paramName }),
+                    argList[i].node?.d.name || argList[i].valueExpression || errorNode
+                );
+            }
+
+            paramNameMap.set(paramName, paramName);
+        } else {
+            if (TypeVarType.hasBound(typeVar)) {
+                evaluator.addDiagnostic(
+                    DiagnosticRule.reportGeneralTypeIssues,
+                    LocMessage.typeVarBoundAndConstrained(),
+                    argList[i].valueExpression || errorNode
+                );
+            } else {
+                const argType =
+                    argList[i].typeResult?.type ??
+                    evaluator.getTypeOfExpressionExpectingType(argList[i].valueExpression!, {
+                        typeExpression: true,
+                    }).type;
+
+                if (requiresSpecialization(argType, { ignorePseudoGeneric: true })) {
+                    evaluator.addDiagnostic(
+                        DiagnosticRule.reportGeneralTypeIssues,
+                        LocMessage.typeVarConstraintGeneric(),
+                        argList[i].valueExpression || errorNode
+                    );
+                }
+                TypeVarType.addConstraint(typeVar, convertToInstance(argType));
+                if (firstConstraintArg === undefined) {
+                    firstConstraintArg = argList[i];
+                }
+            }
+        }
+    }
+
+    if (typeVar.shared.constraints.length === 1 && firstConstraintArg) {
+        evaluator.addDiagnostic(
+            DiagnosticRule.reportGeneralTypeIssues,
+            LocMessage.typeVarSingleConstraint(),
+            firstConstraintArg.valueExpression || errorNode
+        );
+    }
+
+    // If a default is provided, make sure it is compatible with the bound
+    // or constraint.
+    if (typeVar.shared.isDefaultExplicit && defaultValueNode) {
+        verifyTypeVarDefaultIsCompatible(evaluator, typeVar, defaultValueNode);
+    }
+
+    return typeVar;
+}
+
+export function verifyTypeVarDefaultIsCompatible(
+    evaluator: TypeEvaluator,
+    typeVar: TypeVarType,
+    defaultValueNode: ExpressionNode
+) {
+    assert(typeVar.shared.isDefaultExplicit);
+
+    const constraints = new ConstraintTracker();
+    const concreteDefaultType = evaluator.makeTopLevelTypeVarsConcrete(
+        evaluator.solveAndApplyConstraints(typeVar.shared.defaultType, constraints, {
+            replaceUnsolved: {
+                scopeIds: getTypeVarScopeIds(typeVar),
+                tupleClassType: evaluator.getTupleClassType(),
+            },
+        })
+    );
+
+    if (typeVar.shared.boundType) {
+        if (!evaluator.assignType(typeVar.shared.boundType, concreteDefaultType)) {
+            evaluator.addDiagnostic(
+                DiagnosticRule.reportGeneralTypeIssues,
+                LocMessage.typeVarDefaultBoundMismatch(),
+                defaultValueNode
+            );
+        }
+    } else if (TypeVarType.hasConstraints(typeVar)) {
+        let isConstraintCompatible = true;
+
+        // If the default type is a constrained TypeVar, make sure all of its constraints
+        // are also constraints in typeVar. If the default type is not a constrained TypeVar,
+        // use its concrete type to compare against the constraints.
+        if (isTypeVar(typeVar.shared.defaultType) && TypeVarType.hasConstraints(typeVar.shared.defaultType)) {
+            for (const constraint of typeVar.shared.defaultType.shared.constraints) {
+                if (!typeVar.shared.constraints.some((c) => isTypeSame(c, constraint))) {
+                    isConstraintCompatible = false;
+                }
+            }
+        } else if (
+            !typeVar.shared.constraints.some((constraint) =>
+                isTypeSame(constraint, concreteDefaultType, { ignoreConditions: true })
+            )
+        ) {
+            isConstraintCompatible = false;
+        }
+
+        if (!isConstraintCompatible) {
+            evaluator.addDiagnostic(
+                DiagnosticRule.reportGeneralTypeIssues,
+                LocMessage.typeVarDefaultConstraintMismatch(),
+                defaultValueNode
+            );
+        }
+    }
 }
 
 export function createTypeVarTupleType(
