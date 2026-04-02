@@ -13,4 +13,5 @@
     },
     "typescript.tsdk": "node_modules/typescript/lib",
     "python.languageServer": "None",
+    "specstory.cloudSync.enabled": "never",
 }

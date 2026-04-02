@@ -13,7 +13,6 @@ import { DiagnosticAddendum } from '../common/diagnostic';
 import { DiagnosticRule } from '../common/diagnosticRules';
 import { LocAddendum, LocMessage } from '../localization/localize';
 import {
-    ArgumentNode,
     FunctionNode,
     ImportAsNode,
     ImportFromAsNode,

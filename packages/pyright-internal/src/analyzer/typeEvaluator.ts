@@ -119,11 +119,9 @@ import {
     VariableDeclaration,
 } from './declaration';
 import {
-    getDeclarationsWithUsesLocalNameRemoved,
     getNameNodeForDeclaration,
     resolveAliasDeclaration as resolveAliasDeclarationUtil,
     ResolvedAliasInfo,
-    synthesizeAliasDeclaration,
 } from './declarationUtils';
 import { TypeCacheEntry, TypeEvaluatorState } from './typeEvaluatorState';
 import { populateTypeRegistry, TypeRegistry } from './typeRegistry';
@@ -168,7 +166,7 @@ import * as symbolResolution from './symbolResolution';
 import * as ScopeUtils from './scopeUtils';
 import { createSentinelType } from './sentinel';
 import { evaluateStaticBoolExpression } from './staticExpressions';
-import { indeterminateSymbolId, Symbol, SymbolFlags, SynthesizedTypeInfo } from './symbol';
+import { indeterminateSymbolId, Symbol, SymbolFlags } from './symbol';
 import { isConstantName, isPrivateName, isPrivateOrProtectedName } from './symbolNameUtils';
 import { getLastTypedDeclarationForSymbol, isEffectivelyClassVar } from './symbolUtils';
 import { expandTuple, getSlicedTupleType, getTypeOfTuple, makeTupleObject } from './tuples';
@@ -296,7 +294,6 @@ import {
     derivesFromStdlibClass,
     doForEachSubtype,
     getContainerDepth,
-    getDeclaredGeneratorReturnType,
     getGeneratorTypeArgs,
     getGeneratorYieldType,
     getSpecializedTupleType,
@@ -519,10 +516,6 @@ const maxInferFunctionReturnRecursionCount = 12;
 // two recursive type aliases that have the same definition. Decreasing
 // Normally a symbol can have only one type declaration, but there are
 // cases where multiple are possible (e.g. a property with a setter
-// and a deleter). In extreme cases, we need to limit the number of
-// type declarations we consider to avoid excessive computation.
-const maxTypedDeclsPerSymbol = 16;
-
 // This debugging option prints each expression and its evaluated type.
 const printExpressionTypes = false;
 
@@ -606,9 +599,6 @@ export function createTypeEvaluator(
     function getCodeFlowAnalyzerForReturnTypeInferenceContext() {
         return state.getCodeFlowAnalyzerForReturnTypeInferenceContext();
     }
-    function getIndexOfSymbolResolution(symbol: Symbol, declaration: Declaration) {
-        return state.getIndexOfSymbolResolution(symbol, declaration);
-    }
     function pushSymbolResolution(symbol: Symbol, declaration: Declaration) {
         return state.pushSymbolResolution(symbol, declaration);
     }
@@ -618,10 +608,6 @@ export function createTypeEvaluator(
     function setSymbolResolutionPartialType(symbol: Symbol, declaration: Declaration, type: Type) {
         state.setSymbolResolutionPartialType(symbol, declaration, type);
     }
-    function getSymbolResolutionPartialType(symbol: Symbol, declaration: Declaration) {
-        return state.getSymbolResolutionPartialType(symbol, declaration);
-    }
-
     // Determines the type of the specified node by evaluating it in
     // context, logging any errors in the process. This may require the
     // type of surrounding statements to be evaluated.
@@ -18417,9 +18403,7 @@ export function createTypeEvaluator(
         return state.isSpeculativeModeInUse(node);
     }
 
-    function getDeclarationFromKeywordParam(type: FunctionType, paramName: string): Declaration | undefined {
-        return symbolResolution.getDeclarationFromKeywordParam(type, paramName);
-    }
+
 
     function getDeclInfoForStringNode(node: StringNode): SymbolDeclInfo | undefined {
         return symbolResolution.getDeclInfoForStringNode(evaluatorInterface, node);
