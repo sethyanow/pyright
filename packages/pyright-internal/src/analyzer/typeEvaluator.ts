@@ -164,6 +164,7 @@ import { assignTypeToPatternTargets, checkForUnusedPattern, narrowTypeBasedOnPat
 import { Scope, ScopeType, SymbolWithScope } from './scope';
 import * as specialForms from './specialForms';
 import * as typeAssignment from './typeAssignment';
+import * as symbolResolution from './symbolResolution';
 import * as ScopeUtils from './scopeUtils';
 import { createSentinelType } from './sentinel';
 import { evaluateStaticBoolExpression } from './staticExpressions';
@@ -20824,28 +20825,15 @@ export function createTypeEvaluator(
     }
 
     function isFinalVariable(symbol: Symbol): boolean {
-        return symbol.getDeclarations().some((decl) => isFinalVariableDeclaration(decl));
+        return symbolResolution.isFinalVariable(symbol);
     }
 
     function isFinalVariableDeclaration(decl: Declaration): boolean {
-        return decl.type === DeclarationType.Variable && !!decl.isFinal;
+        return symbolResolution.isFinalVariableDeclaration(decl);
     }
 
     function isExplicitTypeAliasDeclaration(decl: Declaration): boolean {
-        if (decl.type !== DeclarationType.Variable || !decl.typeAnnotationNode) {
-            return false;
-        }
-
-        if (
-            decl.typeAnnotationNode.nodeType !== ParseNodeType.Name &&
-            decl.typeAnnotationNode.nodeType !== ParseNodeType.MemberAccess &&
-            decl.typeAnnotationNode.nodeType !== ParseNodeType.StringList
-        ) {
-            return false;
-        }
-
-        const type = getTypeOfAnnotation(decl.typeAnnotationNode, { varTypeAnnotation: true, allowClassVar: true });
-        return isClassInstance(type) && ClassType.isBuiltIn(type, 'TypeAlias');
+        return symbolResolution.isExplicitTypeAliasDeclaration(evaluatorInterface, decl);
     }
 
     function isPossibleTypeAliasDeclaration(decl: Declaration): boolean {
