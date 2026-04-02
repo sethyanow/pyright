@@ -56,6 +56,7 @@ import {
     UnknownType,
     Variance,
     combineTypes,
+    isAnyOrUnknown,
     isClassInstance,
     isInstantiableClass,
     isParamSpec,
@@ -74,6 +75,8 @@ import {
     convertToInstance,
     doForEachSubtype,
     getTypeVarArgsRecursive,
+    getTypeVarScopeId,
+    isEffectivelyInstantiable,
     isEllipsisType,
     isInstantiableMetaclass,
     isNoneInstance,
@@ -85,6 +88,7 @@ import {
     specializeTupleClass,
     synthesizeTypeVarForSelfCls,
 } from './typeUtils';
+import { Symbol, SymbolFlags } from './symbol';
 import { makeTupleObject } from './tuples';
 
 // Local definition — matches the interface in typeEvaluator.ts.
@@ -1819,10 +1823,149 @@ export function createNewType(
     evaluator: TypeEvaluator,
     errorNode: ExpressionNode,
     argList: Arg[],
-    flags: EvalFlags,
     registry: TypeRegistry
-): Type {
-    throw new Error('Not yet extracted');
+): ClassType | undefined {
+    const fileInfo = AnalyzerNodeInfo.getFileInfo(errorNode);
+    let className = '';
+
+    if (argList.length !== 2) {
+        evaluator.addDiagnostic(DiagnosticRule.reportCallIssue, LocMessage.newTypeParamCount(), errorNode);
+        return undefined;
+    }
+
+    const nameArg = argList[0];
+    if (
+        nameArg.argCategory === ArgCategory.Simple &&
+        nameArg.valueExpression &&
+        nameArg.valueExpression.nodeType === ParseNodeType.StringList
+    ) {
+        className = nameArg.valueExpression.d.strings.map((s) => s.d.value).join('');
+    }
+
+    if (!className) {
+        evaluator.addDiagnostic(
+            DiagnosticRule.reportArgumentType,
+            LocMessage.newTypeBadName(),
+            argList[0].node ?? errorNode
+        );
+        return undefined;
+    }
+
+    if (
+        errorNode.parent?.nodeType === ParseNodeType.Assignment &&
+        errorNode.parent.d.leftExpr.nodeType === ParseNodeType.Name &&
+        errorNode.parent.d.leftExpr.d.value !== className
+    ) {
+        evaluator.addDiagnostic(
+            DiagnosticRule.reportGeneralTypeIssues,
+            LocMessage.newTypeNameMismatch(),
+            errorNode.parent.d.leftExpr
+        );
+        return undefined;
+    }
+
+    let baseClass = (
+        argList[1].typeResult ?? evaluator.getTypeOfExpressionExpectingType(argList[1].valueExpression!)
+    ).type;
+    let isBaseClassAny = false;
+
+    if (isAnyOrUnknown(baseClass)) {
+        baseClass = registry.objectClass ?? UnknownType.create();
+
+        evaluator.addDiagnostic(
+            DiagnosticRule.reportGeneralTypeIssues,
+            LocMessage.newTypeAnyOrUnknown(),
+            argList[1].node ?? errorNode
+        );
+
+        isBaseClassAny = true;
+    }
+
+    // Specifically disallow Annotated.
+    if (
+        baseClass.props?.specialForm &&
+        isClassInstance(baseClass.props.specialForm) &&
+        ClassType.isBuiltIn(baseClass.props.specialForm, 'Annotated')
+    ) {
+        evaluator.addDiagnostic(
+            DiagnosticRule.reportGeneralTypeIssues,
+            LocMessage.newTypeNotAClass(),
+            argList[1].node || errorNode
+        );
+        return undefined;
+    }
+
+    if (!isInstantiableClass(baseClass)) {
+        evaluator.addDiagnostic(
+            DiagnosticRule.reportGeneralTypeIssues,
+            LocMessage.newTypeNotAClass(),
+            argList[1].node || errorNode
+        );
+        return undefined;
+    }
+
+    if (ClassType.isProtocolClass(baseClass) || ClassType.isTypedDictClass(baseClass)) {
+        evaluator.addDiagnostic(
+            DiagnosticRule.reportGeneralTypeIssues,
+            LocMessage.newTypeProtocolClass(),
+            argList[1].node || errorNode
+        );
+    } else if (baseClass.priv.literalValue !== undefined) {
+        evaluator.addDiagnostic(
+            DiagnosticRule.reportGeneralTypeIssues,
+            LocMessage.newTypeLiteral(),
+            argList[1].node || errorNode
+        );
+    }
+
+    const classType = ClassType.createInstantiable(
+        className,
+        ParseTreeUtils.getClassFullName(errorNode, fileInfo.moduleName, className),
+        fileInfo.moduleName,
+        fileInfo.fileUri,
+        ClassTypeFlags.Final | ClassTypeFlags.NewTypeClass | ClassTypeFlags.ValidTypeAliasClass,
+        ParseTreeUtils.getTypeSourceId(errorNode),
+        /* declaredMetaclass */ undefined,
+        baseClass.shared.effectiveMetaclass
+    );
+    classType.shared.baseClasses.push(isBaseClassAny ? AnyType.create() : baseClass);
+    computeMroLinearization(classType);
+
+    if (!isBaseClassAny) {
+        // Synthesize an __init__ method that accepts only the specified type.
+        const initType = FunctionType.createSynthesizedInstance('__init__');
+        FunctionType.addParam(
+            initType,
+            FunctionParam.create(ParamCategory.Simple, AnyType.create(), FunctionParamFlags.TypeDeclared, 'self')
+        );
+        FunctionType.addParam(
+            initType,
+            FunctionParam.create(
+                ParamCategory.Simple,
+                ClassType.cloneAsInstance(baseClass),
+                FunctionParamFlags.TypeDeclared,
+                '_x'
+            )
+        );
+        initType.shared.declaredReturnType = evaluator.getNoneType();
+        ClassType.getSymbolTable(classType).set(
+            '__init__',
+            Symbol.createWithType(SymbolFlags.ClassMember, initType)
+        );
+
+        // Synthesize a trivial __new__ method.
+        const newType = FunctionType.createSynthesizedInstance('__new__', FunctionTypeFlags.ConstructorMethod);
+        FunctionType.addParam(
+            newType,
+            FunctionParam.create(ParamCategory.Simple, AnyType.create(), FunctionParamFlags.TypeDeclared, 'cls')
+        );
+        FunctionType.addDefaultParams(newType);
+        newType.shared.declaredReturnType = ClassType.cloneAsInstance(classType);
+        newType.priv.constructorTypeVarScopeId = getTypeVarScopeId(classType);
+        ClassType.getSymbolTable(classType).set('__new__', Symbol.createWithType(SymbolFlags.ClassMember, newType));
+    }
+
+    return classType;
 }
 
 export function createClassFromMetaclass(
