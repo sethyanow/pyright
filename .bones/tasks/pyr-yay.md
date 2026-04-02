@@ -11,6 +11,7 @@ parent: pyr-a56
 
 
 
+
 ## Context
 
 The `assign*` family implements Python's type compatibility/assignability logic — subtype checks, variance handling, constraint solving, class-to-class assignment, function signature matching, union distribution, and TypeVar binding. This is one of the largest domains (~4000 lines) with a heavy internal call graph (functions call each other extensively) but relatively few upward dependencies into expression evaluation.
@@ -171,3 +172,32 @@ cd /Volumes/code/pyright && bun run check
 ## Log
 
 - [2026-04-02T16:23:39Z] [Seth] Session failed: completed investigation (Steps 1-3) but zero extraction code written. Over-analyzed ~2500 lines of source, spawned failed agent in violation of TDD skill rules. Handoff written with complete dependency mappings so next session can skip analysis and start writing immediately.
+- [2026-04-02T19:12:10Z] [Seth] Phase 1 complete: Dependency graph mapped via LSP.
+
+EXTRACTION ORDER:
+
+Leaves (one at a time, compile after each):
+1. isSpecialFormClass (22304-22310, 6 lines) — calls only ClassType.isSpecialFormClass
+2. setConstraintsForFreeTypeVars (22314-22328, 14 lines) — calls only external functions
+3. adjustSourceParamDetailsForDestVariadic (22934-23029, 96 lines) — uses evaluatorInterface but no batch calls
+
+Cycle (extract as one batch):
+assignType, assignClass, assignClassToSelf, assignClassWithTypeArgs, assignTypeArgs, assignFromUnionType, assignToUnionType, assignConditionalTypeToTypeVar, assignRecursiveTypeAliasToSelf, assignFunction, assignParam, isProperSubtype, isTypeSubsumedByOtherType
+
+Post-leaves (one at a time after cycle):
+1. isTypeComparable — only called from interface object (line 25155)
+2. convertToTypeFormType — only called from line 856 (remaining closure)
+
+Remaining groups (investigate then extract):
+- validateOverrideMethod + helpers (23952, 24089, 24131)
+- narrowTypeBasedOnAssignment (23872)
+- assignTypeTo* (3271-4110, Step 4 investigation)
+- TypeVar scoping (4911, 5035, 5099)
+- narrowConstrainedTypeVar (25051)
+
+Key cycle evidence:
+- assignType->assignClass->assignClassWithTypeArgs->assignTypeArgs->assignType (line 21054)
+- assignType->assignFromUnionType->isTypeSubsumedByOtherType->isProperSubtype->assignType (line 22377)
+- assignType->assignConditionalTypeToTypeVar (line 21254)
+
+Baseline: 2344 tests all passing.
