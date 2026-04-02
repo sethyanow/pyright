@@ -1,12 +1,15 @@
 ---
 id: pyr-yay
 title: Extract Type Assignment and Compatibility functions
-status: open
+status: active
 type: task
 priority: 2
+owner: Seth
 depends_on: [pyr-5hl]
 parent: pyr-a56
 ---
+
+
 
 ## Context
 
@@ -26,6 +29,8 @@ Primary closure coupling: `assignClassToSelfStack` (4 refs, used for recursive c
 5. All existing tests pass — zero behavior change
 
 ## Implementation
+
+**Reference:** `.claude/skills/closure-extraction/` — extraction process, dependency mapping, per-function checklist.
 
 ### Step 1: Baseline test run
 ```bash
@@ -162,3 +167,7 @@ cd /Volumes/code/pyright && bun run check
 - Betrayal: A function is 80% extractable but has 2-3 calls to deep closure internals that aren't on any interface. The agent declares it "too entangled" and leaves the entire group behind, losing 800+ lines of extraction.
 - Consequence: Suboptimal decomposition — line count target undershot, but no behavioral issue.
 - Mitigation: For functions with partial entanglement, check if the closure internals they call can be added to the TypeEvaluator interface (if they're generally useful) or passed as callback params (if they're narrow). Don't treat "has ANY closure dependency" as binary — evaluate each dependency individually. But if adding them to the interface would bloat it (anti-pattern from epic), leave the functions in the closure and document why.
+
+## Log
+
+- [2026-04-02T16:23:39Z] [Seth] Session failed: completed investigation (Steps 1-3) but zero extraction code written. Over-analyzed ~2500 lines of source, spawned failed agent in violation of TDD skill rules. Handoff written with complete dependency mappings so next session can skip analysis and start writing immediately.

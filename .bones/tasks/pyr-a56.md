@@ -71,6 +71,8 @@ Two patterns already exist in pyright:
 
 Domain extractions (tasks 3-7) use pattern 1. Infrastructure extraction (task 2) uses pattern 2.
 
+**Reference:** `.claude/skills/closure-extraction/` — LSP-driven dependency mapping, SCC analysis for extraction ordering, per-function checklist.
+
 ### Verified Architecture Claims
 
 - `prefetched` has 180 references, all other state vars have 4-15 [VERIFIED via LSP findReferences]
