@@ -14818,98 +14818,6 @@ export function createTypeEvaluator(
         return typeAlias;
     }
 
-    function createSpecialBuiltInClass(node: ParseNode, assignedName: string, aliasMapEntry: AliasMapEntry): ClassType {
-        const fileInfo = AnalyzerNodeInfo.getFileInfo(node);
-        let specialClassType = ClassType.createInstantiable(
-            assignedName,
-            ParseTreeUtils.getClassFullName(node, fileInfo.moduleName, assignedName),
-            fileInfo.moduleName,
-            fileInfo.fileUri,
-            ClassTypeFlags.BuiltIn | ClassTypeFlags.SpecialBuiltIn,
-            /* typeSourceId */ 0,
-            /* declaredMetaclass */ undefined,
-            /* effectiveMetaclass */ undefined
-        );
-
-        if (aliasMapEntry.isSpecialForm) {
-            specialClassType.shared.flags |= ClassTypeFlags.SpecialFormClass;
-        }
-
-        if (aliasMapEntry.isIllegalInIsinstance) {
-            specialClassType.shared.flags |= ClassTypeFlags.IllegalIsinstanceClass;
-        }
-
-        // Synthesize a single type parameter with the specified variance if
-        // specified in the alias map entry.
-        if (aliasMapEntry.typeParamVariance !== undefined) {
-            let typeParam = TypeVarType.createInstance('T');
-            typeParam = TypeVarType.cloneForScopeId(
-                typeParam,
-                ParseTreeUtils.getScopeIdForNode(node),
-                assignedName,
-                TypeVarScopeType.Class
-            );
-            typeParam.shared.declaredVariance = aliasMapEntry.typeParamVariance;
-            specialClassType.shared.typeParams.push(typeParam);
-        }
-
-        const specialBuiltInClassDeclaration = (AnalyzerNodeInfo.getDeclaration(node) ??
-            (node.parent ? AnalyzerNodeInfo.getDeclaration(node.parent) : undefined)) as
-            | SpecialBuiltInClassDeclaration
-            | undefined;
-
-        specialClassType.shared.declaration = specialBuiltInClassDeclaration;
-
-        if (fileInfo.isTypingExtensionsStubFile) {
-            specialClassType.shared.flags |= ClassTypeFlags.TypingExtensionClass;
-        }
-
-        const baseClassName = aliasMapEntry.implicitBaseClass || aliasMapEntry.alias || 'object';
-
-        let baseClass: Type | undefined;
-        if (aliasMapEntry.module === 'builtins') {
-            baseClass = getBuiltInType(node, baseClassName);
-        } else if (aliasMapEntry.module === 'collections') {
-            // The typing.pyi file imports collections.
-            baseClass = getTypeOfModule(node, baseClassName, ['collections']);
-        } else if (aliasMapEntry.module === 'internals') {
-            // Handle TypedDict specially.
-            assert(baseClassName === 'TypedDictFallback');
-            baseClass = registry.typedDictPrivateClass;
-            if (baseClass) {
-                // The TypedDictFallback class is marked as abstract, but the
-                // methods that are abstract are overridden and shouldn't
-                // cause the TypedDict to be marked as abstract.
-                if (
-                    isInstantiableClass(baseClass) &&
-                    ClassType.isBuiltIn(baseClass, ['_TypedDict', 'TypedDictFallback'])
-                ) {
-                    baseClass = ClassType.cloneWithNewFlags(
-                        baseClass,
-                        baseClass.shared.flags &
-                            ~(ClassTypeFlags.SupportsAbstractMethods | ClassTypeFlags.TypeCheckOnly)
-                    );
-                }
-            }
-        }
-
-        if (baseClass && isInstantiableClass(baseClass)) {
-            if (aliasMapEntry.alias) {
-                specialClassType = ClassType.cloneForTypingAlias(baseClass, assignedName);
-            } else {
-                specialClassType.shared.baseClasses.push(baseClass);
-                specialClassType.shared.effectiveMetaclass = baseClass.shared.effectiveMetaclass;
-                computeMroLinearization(specialClassType);
-            }
-        } else {
-            specialClassType.shared.baseClasses.push(UnknownType.create());
-            specialClassType.shared.effectiveMetaclass = UnknownType.create();
-            computeMroLinearization(specialClassType);
-        }
-
-        return specialClassType;
-    }
-
     // Handles some special-case type annotations that are found
     // within the typings.pyi file.
     function handleTypingStubTypeAnnotation(node: ExpressionNode): Type | undefined {
@@ -14987,7 +14895,9 @@ export function createTypeEvaluator(
                 return cachedType;
             }
 
-            let specialType: Type = createSpecialBuiltInClass(node, assignedName, aliasMapEntry);
+            let specialType: Type = specialForms.createSpecialBuiltInClass(
+                evaluatorInterface, node, assignedName, aliasMapEntry, registry
+            );
 
             // Handle 'LiteralString' specially because we want it to act as
             // though it derives from 'str'.
@@ -15055,7 +14965,7 @@ export function createTypeEvaluator(
         if (aliasMapEntry) {
             // Evaluate the expression so symbols are marked as accessed.
             getTypeOfExpression(node.d.rightExpr);
-            return createSpecialBuiltInClass(node, assignedName, aliasMapEntry);
+            return specialForms.createSpecialBuiltInClass(evaluatorInterface, node, assignedName, aliasMapEntry, registry);
         }
 
         return undefined;
