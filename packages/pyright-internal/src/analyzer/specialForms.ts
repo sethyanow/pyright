@@ -33,6 +33,8 @@ import { getFunctionInfoFromDecorators } from './decorators';
 import * as ParseTreeUtils from './parseTreeUtils';
 import { ConstraintTracker } from './constraintTracker';
 import { Arg, EvalFlags, TypeEvaluator, TypeResult, TypeResultWithNode } from './typeEvaluatorTypes';
+import { ScopeType } from './scope';
+import * as ScopeUtils from './scopeUtils';
 import { TypeRegistry } from './typeRegistry';
 import {
     AnyType,
@@ -1813,10 +1815,140 @@ export function getParamSpecDefaultType(
 export function createTypeAliasType(
     evaluator: TypeEvaluator,
     errorNode: ExpressionNode,
-    argList: Arg[],
-    flags: EvalFlags
-): Type {
-    throw new Error('Not yet extracted');
+    argList: Arg[]
+): Type | undefined {
+    if (errorNode.nodeType !== ParseNodeType.Call || !errorNode.parent || argList.length < 2) {
+        return undefined;
+    }
+
+    if (
+        errorNode.parent.nodeType !== ParseNodeType.Assignment ||
+        errorNode.parent.d.rightExpr !== errorNode ||
+        errorNode.parent.d.leftExpr.nodeType !== ParseNodeType.Name
+    ) {
+        evaluator.addDiagnostic(
+            DiagnosticRule.reportGeneralTypeIssues,
+            LocMessage.typeAliasTypeMustBeAssigned(),
+            errorNode
+        );
+        return undefined;
+    }
+
+    const scope = ScopeUtils.getScopeForNode(errorNode);
+    if (scope) {
+        if (scope.type !== ScopeType.Class && scope.type !== ScopeType.Module && scope.type !== ScopeType.Builtin) {
+            evaluator.addDiagnostic(
+                DiagnosticRule.reportGeneralTypeIssues,
+                LocMessage.typeAliasTypeBadScope(),
+                errorNode.parent.d.leftExpr
+            );
+        }
+    }
+
+    const nameNode = errorNode.parent.d.leftExpr;
+
+    const firstArg = argList[0];
+    if (firstArg.valueExpression && firstArg.valueExpression.nodeType === ParseNodeType.StringList) {
+        const typeAliasName = firstArg.valueExpression.d.strings.map((s) => s.d.value).join('');
+        if (typeAliasName !== nameNode.d.value) {
+            evaluator.addDiagnostic(
+                DiagnosticRule.reportGeneralTypeIssues,
+                LocMessage.typeAliasTypeNameMismatch(),
+                firstArg.valueExpression
+            );
+        }
+    } else {
+        evaluator.addDiagnostic(
+            DiagnosticRule.reportGeneralTypeIssues,
+            LocMessage.typeAliasTypeNameArg(),
+            firstArg.valueExpression || errorNode
+        );
+        return undefined;
+    }
+
+    let valueExpr: ExpressionNode | undefined;
+    let typeParamsExpr: ExpressionNode | undefined;
+
+    // Parse the remaining parameters.
+    for (let i = 1; i < argList.length; i++) {
+        const paramNameNode = argList[i].name;
+        const paramName = paramNameNode ? paramNameNode.d.value : undefined;
+
+        if (paramName) {
+            if (paramName === 'type_params' && !typeParamsExpr) {
+                typeParamsExpr = argList[i].valueExpression;
+            } else if (paramName === 'value' && !valueExpr) {
+                valueExpr = argList[i].valueExpression;
+            } else {
+                return undefined;
+            }
+        } else if (i === 1) {
+            valueExpr = argList[i].valueExpression;
+        } else {
+            return undefined;
+        }
+    }
+
+    // The value expression is not optional, so bail if it's not present.
+    if (!valueExpr) {
+        return undefined;
+    }
+
+    let typeParams: TypeVarType[] | undefined;
+    if (typeParamsExpr) {
+        if (typeParamsExpr.nodeType !== ParseNodeType.Tuple) {
+            evaluator.addDiagnostic(
+                DiagnosticRule.reportGeneralTypeIssues,
+                LocMessage.typeAliasTypeParamInvalid(),
+                typeParamsExpr
+            );
+            return undefined;
+        }
+
+        typeParams = [];
+        let isTypeParamListValid = true;
+        typeParamsExpr.d.items.map((expr) => {
+            let entryType = evaluator.getTypeOfExpression(
+                expr,
+                EvalFlags.InstantiableType | EvalFlags.AllowTypeVarWithoutScopeId
+            ).type;
+
+            if (isTypeVar(entryType)) {
+                if (entryType.priv.scopeId || (isTypeVarTuple(entryType) && entryType.priv.isUnpacked)) {
+                    isTypeParamListValid = false;
+                } else {
+                    entryType = TypeVarType.cloneForScopeId(
+                        entryType,
+                        ParseTreeUtils.getScopeIdForNode(nameNode),
+                        nameNode.d.value,
+                        TypeVarScopeType.TypeAlias
+                    );
+                }
+
+                typeParams!.push(entryType);
+            } else {
+                isTypeParamListValid = false;
+            }
+        });
+
+        if (!isTypeParamListValid) {
+            evaluator.addDiagnostic(
+                DiagnosticRule.reportGeneralTypeIssues,
+                LocMessage.typeAliasTypeParamInvalid(),
+                typeParamsExpr
+            );
+            return undefined;
+        }
+    }
+
+    return evaluator.getTypeOfTypeAliasCommon(
+        nameNode,
+        nameNode,
+        valueExpr,
+        /* isPep695Syntax */ false,
+        /* typeParamNodes */ undefined,
+        () => typeParams
+    );
 }
 
 export function createNewType(

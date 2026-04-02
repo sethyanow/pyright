@@ -10166,7 +10166,7 @@ export function createTypeEvaluator(
             }
 
             if (className === 'TypeAliasType') {
-                const newTypeAlias = createTypeAliasType(errorNode, argList);
+                const newTypeAlias = specialForms.createTypeAliasType(evaluatorInterface, errorNode, argList);
                 if (newTypeAlias) {
                     return { returnType: newTypeAlias };
                 }
@@ -12627,142 +12627,6 @@ export function createTypeEvaluator(
         return { isCompatible, argType, isTypeIncomplete, skippedBareTypeVarExpectedType, condition };
     }
 
-
-
-    // Handles a call to TypeAliasType(). This special form allows a caller to programmatically
-    // create a type alias as defined in PEP 695. If one or more of the arguments is incorrect,
-    // it returns undefined so the normal constructor evaluation can be performed (and type errors
-    // emitted).
-    function createTypeAliasType(errorNode: ExpressionNode, argList: Arg[]): Type | undefined {
-        if (errorNode.nodeType !== ParseNodeType.Call || !errorNode.parent || argList.length < 2) {
-            return undefined;
-        }
-
-        if (
-            errorNode.parent.nodeType !== ParseNodeType.Assignment ||
-            errorNode.parent.d.rightExpr !== errorNode ||
-            errorNode.parent.d.leftExpr.nodeType !== ParseNodeType.Name
-        ) {
-            addDiagnostic(DiagnosticRule.reportGeneralTypeIssues, LocMessage.typeAliasTypeMustBeAssigned(), errorNode);
-            return undefined;
-        }
-
-        const scope = ScopeUtils.getScopeForNode(errorNode);
-        if (scope) {
-            if (scope.type !== ScopeType.Class && scope.type !== ScopeType.Module && scope.type !== ScopeType.Builtin) {
-                addDiagnostic(
-                    DiagnosticRule.reportGeneralTypeIssues,
-                    LocMessage.typeAliasTypeBadScope(),
-                    errorNode.parent.d.leftExpr
-                );
-            }
-        }
-
-        const nameNode = errorNode.parent.d.leftExpr;
-
-        const firstArg = argList[0];
-        if (firstArg.valueExpression && firstArg.valueExpression.nodeType === ParseNodeType.StringList) {
-            const typeAliasName = firstArg.valueExpression.d.strings.map((s) => s.d.value).join('');
-            if (typeAliasName !== nameNode.d.value) {
-                addDiagnostic(
-                    DiagnosticRule.reportGeneralTypeIssues,
-                    LocMessage.typeAliasTypeNameMismatch(),
-                    firstArg.valueExpression
-                );
-            }
-        } else {
-            addDiagnostic(
-                DiagnosticRule.reportGeneralTypeIssues,
-                LocMessage.typeAliasTypeNameArg(),
-                firstArg.valueExpression || errorNode
-            );
-            return undefined;
-        }
-
-        let valueExpr: ExpressionNode | undefined;
-        let typeParamsExpr: ExpressionNode | undefined;
-
-        // Parse the remaining parameters.
-        for (let i = 1; i < argList.length; i++) {
-            const paramNameNode = argList[i].name;
-            const paramName = paramNameNode ? paramNameNode.d.value : undefined;
-
-            if (paramName) {
-                if (paramName === 'type_params' && !typeParamsExpr) {
-                    typeParamsExpr = argList[i].valueExpression;
-                } else if (paramName === 'value' && !valueExpr) {
-                    valueExpr = argList[i].valueExpression;
-                } else {
-                    return undefined;
-                }
-            } else if (i === 1) {
-                valueExpr = argList[i].valueExpression;
-            } else {
-                return undefined;
-            }
-        }
-
-        // The value expression is not optional, so bail if it's not present.
-        if (!valueExpr) {
-            return undefined;
-        }
-
-        let typeParams: TypeVarType[] | undefined;
-        if (typeParamsExpr) {
-            if (typeParamsExpr.nodeType !== ParseNodeType.Tuple) {
-                addDiagnostic(
-                    DiagnosticRule.reportGeneralTypeIssues,
-                    LocMessage.typeAliasTypeParamInvalid(),
-                    typeParamsExpr
-                );
-                return undefined;
-            }
-
-            typeParams = [];
-            let isTypeParamListValid = true;
-            typeParamsExpr.d.items.map((expr) => {
-                let entryType = getTypeOfExpression(
-                    expr,
-                    EvalFlags.InstantiableType | EvalFlags.AllowTypeVarWithoutScopeId
-                ).type;
-
-                if (isTypeVar(entryType)) {
-                    if (entryType.priv.scopeId || (isTypeVarTuple(entryType) && entryType.priv.isUnpacked)) {
-                        isTypeParamListValid = false;
-                    } else {
-                        entryType = TypeVarType.cloneForScopeId(
-                            entryType,
-                            ParseTreeUtils.getScopeIdForNode(nameNode),
-                            nameNode.d.value,
-                            TypeVarScopeType.TypeAlias
-                        );
-                    }
-
-                    typeParams!.push(entryType);
-                } else {
-                    isTypeParamListValid = false;
-                }
-            });
-
-            if (!isTypeParamListValid) {
-                addDiagnostic(
-                    DiagnosticRule.reportGeneralTypeIssues,
-                    LocMessage.typeAliasTypeParamInvalid(),
-                    typeParamsExpr
-                );
-                return undefined;
-            }
-        }
-
-        return getTypeOfTypeAliasCommon(
-            nameNode,
-            nameNode,
-            valueExpr,
-            /* isPep695Syntax */ false,
-            /* typeParamNodes */ undefined,
-            () => typeParams
-        );
-    }
 
 
     function getFunctionFullName(functionNode: ParseNode, moduleName: string, functionName: string): string {
@@ -26862,6 +26726,7 @@ export function createTypeEvaluator(
         getTypesType,
         getTypeOfModule,
         getTypeCheckerInternalsType,
+        getTypeOfTypeAliasCommon,
         assignTypeArgs,
         reportMissingTypeArgs,
         inferReturnTypeIfNecessary,

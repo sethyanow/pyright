@@ -28,6 +28,7 @@ import {
     ParameterNode,
     ParseNode,
     StringNode,
+    TypeParameterNode,
 } from '../parser/parseNodes';
 import { AnalyzerFileInfo } from './analyzerFileInfo';
 import { CodeFlowReferenceExpressionNode, FlowNode } from './codeFlowTypes';
@@ -839,6 +840,14 @@ export interface TypeEvaluator {
     getTypesType: (node: ParseNode, symbolName: string) => Type | undefined;
     getTypeOfModule: (node: ParseNode, symbolName: string, nameParts: string[]) => Type | undefined;
     getTypeCheckerInternalsType: (node: ParseNode, symbolName: string) => Type | undefined;
+    getTypeOfTypeAliasCommon: (
+        declNode: ParseNode,
+        nameNode: NameNode,
+        valueNode: ExpressionNode,
+        isPep695Syntax: boolean,
+        typeParamNodes: TypeParameterNode[] | undefined,
+        getTypeParamCallback: () => TypeVarType[] | undefined
+    ) => Type;
     inferReturnTypeIfNecessary: (type: Type) => void;
     inferVarianceForClass: (type: ClassType) => void;
     assignTypeArgs: (
