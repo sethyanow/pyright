@@ -7,19 +7,34 @@
  * the createTypeEvaluator closure.
  */
 
-import { NameNode, ParseNodeType } from '../parser/parseNodes';
-import * as AnalyzerNodeInfo from './analyzerNodeInfo';
-import { Declaration, DeclarationType } from './declaration';
-import { getParamListDetails } from './parameterUtils';
-import { ClassType, FunctionType, isClassInstance, isFunction } from './types';
-import { TypeEvaluator } from './typeEvaluatorTypes';
-import { lookUpClassMember } from './typeUtils';
-
 import { appendArray } from '../common/collectionUtils';
-import { StringNode } from '../parser/parseNodes';
+import { NameNode, ParseNodeType, StringNode } from '../parser/parseNodes';
+import * as AnalyzerNodeInfo from './analyzerNodeInfo';
+import { Declaration, DeclarationType, FunctionDeclaration } from './declaration';
+import { getFunctionInfoFromDecorators } from './decorators';
+import { getParamListDetails } from './parameterUtils';
+import * as ParseTreeUtils from './parseTreeUtils';
 import { SynthesizedTypeInfo } from './symbol';
-import { SymbolDeclInfo } from './typeEvaluatorTypes';
-import { doForEachSubtype, lookUpObjectMember } from './typeUtils';
+import { getLastTypedDeclarationForSymbol } from './symbolUtils';
+import {
+    AbstractSymbol,
+    SymbolDeclInfo,
+    TypeEvaluator,
+} from './typeEvaluatorTypes';
+import {
+    ClassType,
+    FunctionType,
+    FunctionTypeFlags,
+    isClassInstance,
+    isFunction,
+    isInstantiableClass,
+} from './types';
+import {
+    derivesFromStdlibClass,
+    doForEachSubtype,
+    lookUpClassMember,
+    lookUpObjectMember,
+} from './typeUtils';
 
 import type { Symbol } from './symbol';
 
@@ -119,4 +134,136 @@ export function getDeclInfoForStringNode(evaluator: TypeEvaluator, node: StringN
     }
 
     return decls.length === 0 ? undefined : { decls, synthesizedTypes };
+}
+
+function methodAlwaysRaisesNotImplemented(evaluator: TypeEvaluator, functionDecl?: FunctionDeclaration): boolean {
+    if (
+        !functionDecl ||
+        !functionDecl.isMethod ||
+        functionDecl.returnStatements ||
+        functionDecl.yieldStatements ||
+        !functionDecl.raiseStatements
+    ) {
+        return false;
+    }
+
+    const statements = functionDecl.node.d.suite.d.statements;
+    if (statements.some((statement) => statement.nodeType !== ParseNodeType.StatementList)) {
+        return false;
+    }
+
+    for (const raiseStatement of functionDecl.raiseStatements) {
+        if (!raiseStatement.d.expr || raiseStatement.d.fromExpr) {
+            return false;
+        }
+        const raiseType = evaluator.getTypeOfExpression(raiseStatement.d.expr).type;
+        const classType = isInstantiableClass(raiseType)
+            ? raiseType
+            : isClassInstance(raiseType)
+            ? raiseType
+            : undefined;
+        if (!classType || !derivesFromStdlibClass(classType, 'NotImplementedError')) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+export function getAbstractSymbolInfo(
+    evaluator: TypeEvaluator,
+    classType: ClassType,
+    symbolName: string
+): AbstractSymbol | undefined {
+    const isProtocolClass = ClassType.isProtocolClass(classType);
+
+    const symbol = ClassType.getSymbolTable(classType).get(symbolName);
+    if (!symbol) {
+        return undefined;
+    }
+
+    if (!symbol.isClassMember() && !symbol.isNamedTupleMemberMember()) {
+        return undefined;
+    }
+
+    const lastDecl = getLastTypedDeclarationForSymbol(symbol);
+    if (!lastDecl) {
+        return undefined;
+    }
+
+    if (isProtocolClass && lastDecl.type === DeclarationType.Variable) {
+        const allDecls = symbol.getDeclarations();
+        if (!allDecls.some((decl) => decl.type === DeclarationType.Variable && !!decl.inferredTypeSource)) {
+            return { symbol, symbolName, classType, hasImplementation: false };
+        }
+    }
+
+    if (lastDecl.type !== DeclarationType.Function) {
+        return undefined;
+    }
+
+    let isAbstract = false;
+    const lastFunctionInfo = getFunctionInfoFromDecorators(evaluator, lastDecl.node, /* isInClass */ true);
+    if ((lastFunctionInfo.flags & FunctionTypeFlags.AbstractMethod) !== 0) {
+        isAbstract = true;
+    }
+
+    const isStubFile = AnalyzerNodeInfo.getFileInfo(lastDecl.node).isStubFile;
+
+    const firstDecl = symbol.getDeclarations()[0];
+
+    if (firstDecl !== lastDecl && firstDecl.type === DeclarationType.Function) {
+        const firstFunctionInfo = getFunctionInfoFromDecorators(evaluator, firstDecl.node, /* isInClass */ true);
+        if ((firstFunctionInfo.flags & FunctionTypeFlags.AbstractMethod) !== 0) {
+            isAbstract = true;
+        }
+
+        if (isProtocolClass && (lastFunctionInfo.flags & FunctionTypeFlags.Overloaded) !== 0) {
+            if (isProtocolClass && !isAbstract && isStubFile) {
+                return undefined;
+            }
+
+            return { symbol, symbolName, classType, hasImplementation: false };
+        }
+    }
+
+    if (!isProtocolClass && !isAbstract) {
+        return undefined;
+    }
+
+    const hasImplementation =
+        !ParseTreeUtils.isSuiteEmpty(lastDecl.node.d.suite) && !methodAlwaysRaisesNotImplemented(evaluator, lastDecl);
+
+    if (isProtocolClass && !isAbstract) {
+        if (hasImplementation || isStubFile) {
+            return undefined;
+        }
+    }
+
+    return { symbol, symbolName, classType, hasImplementation };
+}
+
+export function getAbstractSymbols(evaluator: TypeEvaluator, classType: ClassType): AbstractSymbol[] {
+    const symbolTable = new Map<string, AbstractSymbol>();
+
+    ClassType.getReverseMro(classType).forEach((mroClass) => {
+        if (isInstantiableClass(mroClass)) {
+            ClassType.getSymbolTable(mroClass).forEach((symbol, symbolName) => {
+                const abstractSymbolInfo = getAbstractSymbolInfo(evaluator, mroClass, symbolName);
+
+                if (abstractSymbolInfo) {
+                    symbolTable.set(symbolName, abstractSymbolInfo);
+                } else {
+                    symbolTable.delete(symbolName);
+                }
+            });
+        }
+    });
+
+    const symbolList: AbstractSymbol[] = [];
+    symbolTable.forEach((method) => {
+        symbolList.push(method);
+    });
+
+    return symbolList;
 }
