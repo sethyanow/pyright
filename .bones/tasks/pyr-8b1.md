@@ -24,7 +24,7 @@ Primary closure coupling was `signatureTrackerStack` (7 refs) and `speculativeTy
 3. Each function takes `TypeEvaluator` + `TypeRegistry` + `TypeEvaluatorState` as needed
 4. Update `typeEvaluator.ts` to import and delegate
 5. All existing tests pass — zero behavior change
-6. Final `wc -l` check on `typeEvaluator.ts` — target ~5K lines
+6. After extraction, `typeEvaluator.ts` contains only expression evaluation orchestration + wiring
 
 ## Implementation
 

@@ -41,11 +41,11 @@ The fix: extract the infrastructure (type registry + state management), then dom
 6. Extract Member Access/Descriptors — `applyDescriptor*`, `bindMethod*` (~1500 lines)
 7. Extract Call Validation/Overloads — `validate*`, `getBestOverload*`, `expandArg*` (~2000 lines)
 8. All existing tests pass after every extraction — zero behavior change
-9. Target: `typeEvaluator.ts` at ~5K lines (expression evaluation orchestration + wiring)
+9. `typeEvaluator.ts` retains only expression evaluation orchestration + wiring
 
 ## Success Criteria
 
-- [ ] `typeEvaluator.ts` reduced from ~29K to ~5K lines
+- [ ] `typeEvaluator.ts` contains only expression evaluation orchestration + wiring — domain logic extracted to modules
 - [ ] Full test suite passes: `cd packages/pyright-internal && bun run test:norebuild`
 - [ ] Each extracted module has single clear responsibility
 - [ ] No circular dependencies between extracted modules

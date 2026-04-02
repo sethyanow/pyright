@@ -115,7 +115,7 @@ cd /Volumes/code/pyright && bun run check
 ## Success Criteria
 
 - [ ] `typeAssignment.ts` exists with assignment and compatibility functions
-- [ ] `typeEvaluator.ts` reduced by ~4000 lines
+- [ ] All inventoried function groups either extracted or documented as staying in closure
 - [ ] Full test suite passes
 - [ ] Linter passes
 - [ ] No circular imports — `typeAssignment.ts` imports from `typeEvaluatorTypes.ts` (not `typeEvaluator.ts`)
