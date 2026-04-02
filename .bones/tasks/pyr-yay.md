@@ -1,13 +1,15 @@
 ---
 id: pyr-yay
 title: Extract Type Assignment and Compatibility functions
-status: active
+status: closed
 type: task
 priority: 2
 owner: Seth
 depends_on: [pyr-5hl]
 parent: pyr-a56
 ---
+
+
 
 
 
@@ -114,13 +116,13 @@ cd /Volumes/code/pyright && bun run check
 
 ## Success Criteria
 
-- [ ] `typeAssignment.ts` exists with assignment and compatibility functions
-- [ ] All inventoried function groups either extracted or documented as staying in closure
-- [ ] Full test suite passes
-- [ ] Linter passes
-- [ ] No circular imports — `typeAssignment.ts` imports from `typeEvaluatorTypes.ts` (not `typeEvaluator.ts`)
-- [ ] Each extracted function receives evaluator/registry/state as explicit params (no implicit closure access)
-- [ ] assignTypeTo* decision documented: either extracted with rationale, or left in closure with rationale
+- [x] `typeAssignment.ts` exists with assignment and compatibility functions
+- [x] All inventoried function groups either extracted or documented as staying in closure
+- [x] Full test suite passes
+- [x] Linter passes
+- [x] No circular imports — `typeAssignment.ts` imports from `typeEvaluatorTypes.ts` (not `typeEvaluator.ts`)
+- [x] Each extracted function receives evaluator/registry/state as explicit params (no implicit closure access)
+- [x] assignTypeTo* decision documented: either extracted with rationale, or left in closure with rationale
 
 ## Anti-Patterns
 
@@ -203,3 +205,4 @@ Key cycle evidence:
 
 Baseline: 2344 tests all passing.
 - [2026-04-02T20:24:42Z] [Seth] Phase 3 cycle extraction complete. All 13 cycle functions written to typeAssignment.ts (2280 lines). Delegations wired in typeEvaluator.ts. Tests pass: 2344/2344 identical to baseline. Dead code cleanup in progress.
+- [2026-04-02T21:54:08Z] [Seth] Phase 4 complete. Post-leaves extracted: isTypeComparable, convertToTypeFormType. Remaining groups: narrowTypeBasedOnAssignment + validateOverrideMethod cluster (4 functions) extracted. STAYING IN CLOSURE (documented): assignTypeTo* (calls writeTypeCache, reportPossibleUnknownAssignment, getTypeOfExpression — deep expression evaluation entanglement), TypeVar scoping (findScopedTypeVar calls readTypeCache, getTypeOfFunctionPredecorated — not on interface), narrowConstrainedTypeVar (thin wrapper around codeFlowEngine — closure-local variable). Tests: 2344/2344 passing.
