@@ -8,7 +8,20 @@
  */
 
 import { appendArray } from '../common/collectionUtils';
-import { ArgumentNode, FunctionNode, NameNode, ParseNodeType, StringNode } from '../parser/parseNodes';
+import { assert } from '../common/debug';
+import { DiagnosticAddendum } from '../common/diagnostic';
+import { DiagnosticRule } from '../common/diagnosticRules';
+import { LocAddendum, LocMessage } from '../localization/localize';
+import {
+    ArgumentNode,
+    FunctionNode,
+    ImportAsNode,
+    ImportFromAsNode,
+    ImportFromNode,
+    NameNode,
+    ParseNodeType,
+    StringNode,
+} from '../parser/parseNodes';
 import { isAnnotationEvaluationPostponed } from './analyzerFileInfo';
 import * as AnalyzerNodeInfo from './analyzerNodeInfo';
 import { getBoundInitMethod } from './constructors';
@@ -20,6 +33,7 @@ import * as ParseTreeUtils from './parseTreeUtils';
 import * as ScopeUtils from './scopeUtils';
 import { SynthesizedTypeInfo } from './symbol';
 import { getLastTypedDeclarationForSymbol } from './symbolUtils';
+import { TypeEvaluatorState } from './typeEvaluatorState';
 import {
     AbstractSymbol,
     SymbolDeclInfo,
@@ -35,8 +49,10 @@ import {
     isModule,
     isOverloaded,
     ModuleType,
+    AnyType,
     OverloadedType,
     Type,
+    UnknownType,
 } from './types';
 import {
     derivesFromStdlibClass,
@@ -516,4 +532,88 @@ export function getDeclaredReturnType(evaluator: TypeEvaluator, node: FunctionNo
     }
 
     return returnType;
+}
+
+export function getAliasedSymbolTypeForName(
+    evaluator: TypeEvaluator,
+    state: TypeEvaluatorState,
+    node: ImportAsNode | ImportFromAsNode | ImportFromNode,
+    name: string
+): Type | undefined {
+    const symbolWithScope = evaluator.lookUpSymbolRecursive(node, name, /* honorCodeFlow */ true);
+    if (!symbolWithScope) {
+        return undefined;
+    }
+
+    // Normally there will be at most one decl associated with the import node, but
+    // there can be multiple in the case of the "from .X import X" statement. In such
+    // case, we want to choose the last declaration.
+    const filteredDecls = symbolWithScope.symbol
+        .getDeclarations()
+        .filter(
+            (decl) => ParseTreeUtils.isNodeContainedWithin(node, decl.node) && decl.type === DeclarationType.Alias
+        );
+    let aliasDecl = filteredDecls.length > 0 ? filteredDecls[filteredDecls.length - 1] : undefined;
+
+    // If we didn't find an exact match, look for any alias associated with
+    // this symbol. In cases where we have multiple ImportAs nodes that share
+    // the same first-part name (e.g. "import asyncio" and "import asyncio.tasks"),
+    // we may not find the declaration associated with this node.
+    if (!aliasDecl) {
+        aliasDecl = symbolWithScope.symbol.getDeclarations().find((decl) => decl.type === DeclarationType.Alias);
+    }
+
+    if (!aliasDecl) {
+        return undefined;
+    }
+
+    assert(aliasDecl.type === DeclarationType.Alias);
+
+    const fileInfo = AnalyzerNodeInfo.getFileInfo(node);
+
+    // Try to resolve the alias while honoring external visibility.
+    const resolvedAliasInfo = evaluator.resolveAliasDeclarationWithInfo(aliasDecl, /* resolveLocalNames */ true, {
+        allowExternallyHiddenAccess: fileInfo.isStubFile,
+    });
+
+    if (!resolvedAliasInfo) {
+        return undefined;
+    }
+
+    if (!resolvedAliasInfo.declaration) {
+        return state.evaluatorOptions.evaluateUnknownImportsAsAny ? AnyType.create() : UnknownType.create();
+    }
+
+    if (node.nodeType === ParseNodeType.ImportFromAs) {
+        if (resolvedAliasInfo.isPrivate) {
+            evaluator.addDiagnostic(
+                DiagnosticRule.reportPrivateUsage,
+                LocMessage.privateUsedOutsideOfModule().format({
+                    name: node.d.name.d.value,
+                }),
+                node.d.name
+            );
+        }
+
+        if (resolvedAliasInfo.privatePyTypedImporter) {
+            const diag = new DiagnosticAddendum();
+            if (resolvedAliasInfo.privatePyTypedImported) {
+                diag.addMessage(
+                    LocAddendum.privateImportFromPyTypedSource().format({
+                        module: resolvedAliasInfo.privatePyTypedImported,
+                    })
+                );
+            }
+            evaluator.addDiagnostic(
+                DiagnosticRule.reportPrivateImportUsage,
+                LocMessage.privateImportFromPyTypedModule().format({
+                    name: node.d.name.d.value,
+                    module: resolvedAliasInfo.privatePyTypedImporter,
+                }) + diag.getString(),
+                node.d.name
+            );
+        }
+    }
+
+    return evaluator.getInferredTypeOfDeclaration(symbolWithScope.symbol, aliasDecl);
 }
