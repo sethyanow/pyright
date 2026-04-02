@@ -49,13 +49,24 @@ From that table, identify:
 
 Log the extraction order to bones before writing any code.
 
+## LSP Drives Extraction
+
+**LSP is the primary extraction tool, not reading.** For each function, `outgoingCalls` gives you the complete dependency map — every closure ref, every external import, every intra-batch call, with exact file and line. This IS the dependency classification step. You don't need to read the function body to classify its dependencies; `outgoingCalls` already did it.
+
+| LSP Operation | What it tells you | When to use |
+|---|---|---|
+| `outgoingCalls` | Complete dependency classification for a function | Before writing each function — this IS step 2 |
+| `goToDefinition` | Which module exports an ambiguous symbol | When outgoingCalls shows a symbol you can't place |
+| `incomingCalls` | How many callers a function has | Choosing delegation pattern (many callers = local stub, few = interface lambda) |
+| `hover` | Function signatures | Wiring delegation params — confirm types match |
+
+Read the function body only when you're ready to WRITE the transformed version — not before, not for "understanding."
+
 ## Phase 2: Extract Leaves (one at a time)
 
 For each leaf function:
 
-1. **Get the body** — ChunkHound regex search gives complete functions for small/medium ones (with exact start/end lines). Large functions (~800+ lines) only return the first ~30 lines as a chunk — use `Read` with offset+limit from the ChunkHound start line to the next function's start. To find function end lines, `documentSymbol` on the whole file returns every function boundary (large output, cache it once per session).
-
-2. **Classify dependencies** — The `outgoingCalls` result from Phase 1 already has this. For each call in `typeEvaluator.ts`, it resolves to one of:
+1. **Classify dependencies** — Run `outgoingCalls` on the function. The result classifies every call:
 
    | Resolves to | What it means | Transformation |
    |---|---|---|
@@ -65,15 +76,15 @@ For each leaf function:
    | `state.xxxStack` / `state.xxxCache` | State access | Needs `state` param |
    | Function in types.ts, typeUtils.ts, etc. | External import | Add import statement |
 
-   Use `goToDefinition` on any call site to confirm the classification. Use `hover` to check signatures when wiring delegation.
+   Use `goToDefinition` on ambiguous symbols to confirm which module they come from.
 
-3. **Write the function** — Append to the target module file via Edit. Add `export`, add the needed params (evaluator/registry/state) as first arguments, replace `evaluatorInterface` with `evaluator`, replace bare closure calls with `evaluator.xxx(...)`.
+2. **Read and write the function** — Read the function body, transform it, append to the target module file via Edit. Add `export`, add the needed params (evaluator/registry/state) as first arguments, replace `evaluatorInterface` with `evaluator`, replace bare closure calls with `evaluator.xxx(...)`.
 
-4. **Wire delegation** — In typeEvaluator.ts, replace the function body with a call to the extracted version. Use `incomingCalls` to check how many callers exist — if many, keep a local delegate function. If only called from the interface object, a lambda in the interface is sufficient.
+3. **Wire delegation** — In typeEvaluator.ts, replace the function body with a call to the extracted version. For functions over ~100 lines, use the **dead-rename technique**: match the signature + first unique lines, insert a delegation stub, rename the old function to `_functionName_dead`. Delete `_dead` functions after tests pass (bottom-up to avoid line shifts).
 
-5. **Compile** — `npx tsc --noEmit`. Fix errors before moving to the next function.
+4. **Compile** — `npx tsc --noEmit`. Fix errors before moving to the next function. Don't pre-solve imports — add what you know, compile, fix what the compiler reports.
 
-6. **Commit** — Each leaf extraction is one commit.
+5. **Commit** — Each leaf extraction is one commit.
 
 ## Phase 3: Extract the Cycle
 
@@ -83,6 +94,8 @@ Same per-function analysis as Phase 2, but:
 - Wire ALL delegations in typeEvaluator.ts before compiling
 - Then compile once and fix
 - One commit for the entire cycle
+
+**"Write ALL" means accumulate sequentially** — write one function, then the next. It does NOT mean understand all functions first. The cadence is: `outgoingCalls` on function → read body → transform → append → next function. The compile step waits until all are written; the understanding step does not batch.
 
 This is the only justified batch operation. It's bounded by the dependency graph, not by convenience.
 
@@ -113,7 +126,8 @@ If you can't point to the specific cycle in your dependency table that justifies
 - Reaching for sed, cat, or bash pipelines to "extract" code
 - Reading more than one function body before writing anything
 - The phrase "I need to understand the full picture first"
-- Estimating the total line count of the extraction
+- Counting or mentioning line counts. Line counts are planning noise — the difficulty of extraction is per-function (read, transform, write), not aggregate. If you catch yourself saying "~2500 lines remaining," you're not planning, you're catastrophizing.
+- Spawning agents for mechanical work you should do yourself
 
 ## File Safety
 

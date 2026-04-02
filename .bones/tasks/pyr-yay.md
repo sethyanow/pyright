@@ -12,6 +12,7 @@ parent: pyr-a56
 
 
 
+
 ## Context
 
 The `assign*` family implements Python's type compatibility/assignability logic — subtype checks, variance handling, constraint solving, class-to-class assignment, function signature matching, union distribution, and TypeVar binding. This is one of the largest domains (~4000 lines) with a heavy internal call graph (functions call each other extensively) but relatively few upward dependencies into expression evaluation.
@@ -201,3 +202,4 @@ Key cycle evidence:
 - assignType->assignConditionalTypeToTypeVar (line 21254)
 
 Baseline: 2344 tests all passing.
+- [2026-04-02T20:24:42Z] [Seth] Phase 3 cycle extraction complete. All 13 cycle functions written to typeAssignment.ts (2280 lines). Delegations wired in typeEvaluator.ts. Tests pass: 2344/2344 identical to baseline. Dead code cleanup in progress.

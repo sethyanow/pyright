@@ -17,7 +17,7 @@ Common ones encountered during assignment extraction:
 - `inferVarianceForClass(classType)` → `evaluator.inferVarianceForClass(classType)`
 - `solveAndApplyConstraints(...)` → `evaluator.solveAndApplyConstraints(...)`
 - `stripLiteralValue(type)` → `evaluator.stripLiteralValue(type)`
-- `getEffectiveReturnType(funcType)` — closure function at ~line 20039. Verify with `goToDefinition` whether it maps to an interface method or needs to be co-extracted/passed as a callback.
+- `getEffectiveReturnType(funcType)` — closure-only function. Use `FunctionType.getEffectiveReturnType(type)` (from types.ts) as the primary path, with `evaluator.getInferredReturnType(type)` as fallback for functions that haven't been inferred yet. See the `getEffectiveReturnType` helper in typeAssignment.ts.
 
 **How to verify:** `goToDefinition` on the call site. If it resolves to a line inside `createTypeEvaluator()` (lines ~568-25210), it's a closure function. Then check if it appears in the evaluator interface object (~line 25083). If yes, use `evaluator.xxx()`. If no, it needs to either be added to the interface or extracted too.
 
@@ -54,6 +54,25 @@ Functions imported from other analyzer modules (not the closure):
 - `typeUtils.ts`: lookUpClassMember, getTypeVarArgsRecursive, sortTypes, requiresSpecialization, convertToInstance, convertToInstantiable, doForEachSubtype, makeTypeVarsBound, partiallySpecializeType, specializeForBaseClass, MemberAccessFlags, etc.
 - `types.ts`: ClassType, TypeVarType, FunctionType, Type, isClass, isTypeVar, isUnion, isAnyOrUnknown, etc.
 - `parameterUtils.ts`: getParamListDetails, ParamKind, ParamListDetails
+
+## Symbols That Aren't Where You'd Expect
+
+Confirmed during pyr-yay extraction — these tripped up import resolution:
+
+| Symbol | NOT in | Actually in |
+|---|---|---|
+| `isPrivateOrProtectedName` | typeUtils | `symbolNameUtils.ts` |
+| `isPositionOnlySeparator` | FunctionType namespace | standalone export in `types.ts` |
+| `findSubtype` | (not exported from typeUtils) | implement locally or use `doForEachSubtype` |
+| `isTypeVarSame` | types.ts | `typeUtils.ts` |
+| `isNoneInstance` | types.ts | `typeUtils.ts` |
+| `isLiteralType` (function) | types.ts | `typeUtils.ts` |
+| `isLiteralLikeType` | types.ts | `typeUtils.ts` |
+| `removeFromUnion` | typeUtils | `types.ts` |
+| `isMethodType` | typeUtils | `types.ts` |
+| `ConstraintSet` | types.ts | `constraintTracker.ts` |
+
+Don't pre-solve imports. Add what you know, compile, fix what the compiler reports.
 
 ## The evaluatorInterface → evaluator Rename
 
