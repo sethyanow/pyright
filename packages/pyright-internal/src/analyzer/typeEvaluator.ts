@@ -141,6 +141,7 @@ import {
 import * as ParseTreeUtils from './parseTreeUtils';
 import { assignTypeToPatternTargets, checkForUnusedPattern, narrowTypeBasedOnPattern } from './patternMatching';
 import { Scope, ScopeType, SymbolWithScope } from './scope';
+import * as callValidation from './callValidation';
 import * as memberAccessModule from './memberAccess';
 import * as specialForms from './specialForms';
 import * as typeAssignment from './typeAssignment';
@@ -6651,11 +6652,7 @@ export function createTypeEvaluator(
     }
 
     function convertNodeToArg(node: ArgumentNode): ArgWithExpression {
-        return {
-            argCategory: node.d.argCategory,
-            name: node.d.name,
-            valueExpression: node.d.valueExpr,
-        };
+        return callValidation.convertNodeToArg(node);
     }
 
     function getTypeOfRevealType(node: CallNode, inferenceContext: InferenceContext | undefined): TypeResult {
