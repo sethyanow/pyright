@@ -34,6 +34,8 @@ import {
     ArgWithExpression,
     AssignTypeFlags,
     EvalFlags,
+    CallResult,
+    EffectiveReturnTypeOptions,
     EvaluatorUsage,
     GetTypeArgsOptions,
     ExpectedTypeOptions,
@@ -63,7 +65,10 @@ import {
     isUnpacked,
     isUnpackedClass,
     isUnpackedTypeVarTuple,
+    isTypeSame,
+    isFunctionOrOverloaded,
     maxTypeRecursionCount,
+    TypeBase,
     AnyType,
     ParamSpecType,
     removeUnbound,
@@ -77,6 +82,9 @@ import {
     Variance,
 } from './types';
 import { ConstraintSolution } from './constraintSolution';
+import { applySourceSolutionToConstraints, solveConstraints, solveConstraintSet } from './constraintSolver';
+import { ConstraintSet } from './constraintTracker';
+import * as symbolResolution from './symbolResolution';
 import { enumerateLiteralsForType } from './typeGuards';
 import { expandTuple, makeTupleObject } from './tuples';
 import { TypeRegistry } from './typeRegistry';
@@ -96,6 +104,9 @@ import {
     isUnboundedTupleClass,
     isTupleClass,
     makePacked,
+    convertTypeToParamSpecValue,
+    preserveUnknown,
+    addConditionToType,
     makeInferenceContext,
     requiresSpecialization,
 } from './typeUtils';
@@ -2221,4 +2232,442 @@ export function getTypeArg(
     }
 
     return typeResult;
+}
+
+// Redefined locally to avoid circular import from typeEvaluator.ts
+export interface ParamSpecArgResult {
+    argumentErrors: boolean;
+    constraintTrackers: (ConstraintTracker | undefined)[];
+}
+
+export function getUnknownExemptTypeVarsForReturnType(functionType: FunctionType, returnType: Type): TypeVarType[] {
+    if (isFunction(returnType) && !returnType.shared.name) {
+        const returnTypeScopeId = returnType.shared.typeVarScopeId;
+
+        if (returnTypeScopeId && functionType.shared.typeVarScopeId) {
+            let typeVarsInReturnType = getTypeVarArgsRecursive(returnType);
+
+            functionType.shared.parameters.forEach((param, index) => {
+                if (FunctionParam.isTypeDeclared(param)) {
+                    const typeVarsInInputParam = getTypeVarArgsRecursive(
+                        FunctionType.getParamType(functionType, index)
+                    );
+                    typeVarsInReturnType = typeVarsInReturnType.filter(
+                        (returnTypeVar) =>
+                            !typeVarsInInputParam.some((inputTypeVar) => isTypeSame(returnTypeVar, inputTypeVar))
+                    );
+                }
+            });
+
+            return typeVarsInReturnType;
+        }
+    }
+
+    return [];
+}
+
+export function validateArgTypesForParamSpec(
+    evaluator: TypeEvaluator,
+    state: TypeEvaluatorState,
+    registry: TypeRegistry,
+    errorNode: ExpressionNode,
+    argList: Arg[],
+    paramSpec: ParamSpecType,
+    destConstraints: ConstraintTracker
+): ParamSpecArgResult {
+    const sets = destConstraints.getConstraintSets();
+
+    if (sets.length === 1) {
+        return validateArgTypesForParamSpecSignature(evaluator, state, registry, errorNode, argList, paramSpec, sets[0]);
+    }
+
+    const filteredSets: ConstraintSet[] = [];
+    const constraintTrackers: (ConstraintTracker | undefined)[] = [];
+    const speculativeNode = getSpeculativeNodeForCall(errorNode);
+
+    sets.forEach((context) => {
+        state.useSpeculativeMode(speculativeNode, () => {
+            const paramSpecArgResult = validateArgTypesForParamSpecSignature(
+                evaluator,
+                state,
+                registry,
+                errorNode,
+                argList,
+                paramSpec,
+                context
+            );
+
+            if (!paramSpecArgResult.argumentErrors) {
+                filteredSets.push(context);
+            }
+
+            appendArray(constraintTrackers, paramSpecArgResult.constraintTrackers);
+        });
+    });
+
+    if (filteredSets.length > 0) {
+        destConstraints.addConstraintSets(filteredSets);
+    }
+
+    const paramSpecArgResult = validateArgTypesForParamSpecSignature(
+        evaluator,
+        state,
+        registry,
+        errorNode,
+        argList,
+        paramSpec,
+        filteredSets.length > 0 ? filteredSets[0] : sets[0]
+    );
+
+    return { argumentErrors: paramSpecArgResult.argumentErrors, constraintTrackers: constraintTrackers };
+}
+
+export function validateArgTypesForParamSpecSignature(
+    evaluator: TypeEvaluator,
+    state: TypeEvaluatorState,
+    registry: TypeRegistry,
+    errorNode: ExpressionNode,
+    argList: Arg[],
+    paramSpec: ParamSpecType,
+    constraintSet: ConstraintSet
+): ParamSpecArgResult {
+    const solutionSet = solveConstraintSet(evaluator, constraintSet);
+    let paramSpecType = solutionSet.getType(paramSpec);
+    paramSpecType = convertTypeToParamSpecValue(paramSpecType ?? paramSpec);
+
+    const matchResults = matchArgsToParams(evaluator, state, registry, errorNode, argList, { type: paramSpecType }, 0);
+    const functionType = matchResults.overload;
+    const constraints = new ConstraintTracker();
+
+    if (matchResults.argumentErrors) {
+        argList.forEach((arg) => {
+            if (arg.valueExpression && !state.isSpeculativeModeInUse(arg.valueExpression)) {
+                evaluator.getTypeOfExpression(arg.valueExpression);
+            }
+        });
+
+        return { argumentErrors: true, constraintTrackers: [constraints] };
+    }
+
+    const functionParamSpec = FunctionType.getParamSpecFromArgsKwargs(functionType);
+    const functionWithoutParamSpec = FunctionType.cloneRemoveParamSpecArgsKwargs(functionType);
+
+    if (
+        functionParamSpec &&
+        functionWithoutParamSpec.shared.parameters.length === 0 &&
+        isTypeSame(functionParamSpec, paramSpec)
+    ) {
+        let argsCount = 0;
+        let kwargsCount = 0;
+        let argumentErrors = false;
+        let argErrorNode: ExpressionNode | undefined;
+
+        for (const arg of argList) {
+            const argType = getTypeOfArg(evaluator, arg, /* inferenceContext */ undefined)?.type;
+
+            if (arg.argCategory === ArgCategory.UnpackedList) {
+                if (isParamSpecArgs(paramSpec, argType)) {
+                    argsCount++;
+                }
+            } else if (arg.argCategory === ArgCategory.UnpackedDictionary) {
+                if (isParamSpecKwargs(paramSpec, argType)) {
+                    kwargsCount++;
+                }
+            } else {
+                argErrorNode = argErrorNode ?? arg.valueExpression;
+                argumentErrors = true;
+            }
+        }
+
+        if (argsCount !== 1 || kwargsCount !== 1) {
+            argumentErrors = true;
+        }
+
+        if (argumentErrors) {
+            evaluator.addDiagnostic(
+                DiagnosticRule.reportCallIssue,
+                LocMessage.paramSpecArgsMissing().format({
+                    type: evaluator.printType(functionParamSpec),
+                }),
+                argErrorNode ?? errorNode
+            );
+        }
+
+        return { argumentErrors, constraintTrackers: [constraints] };
+    }
+
+    const result = validateArgTypes(evaluator, state, registry, errorNode, matchResults, constraints, /* skipUnknownArgCheck */ undefined);
+    return { argumentErrors: !!result.argumentErrors, constraintTrackers: [constraints] };
+}
+
+export function validateArgTypes(
+    evaluator: TypeEvaluator,
+    state: TypeEvaluatorState,
+    registry: TypeRegistry,
+    errorNode: ExpressionNode,
+    matchResults: MatchArgsToParamsResult,
+    constraints: ConstraintTracker,
+    skipUnknownArgCheck: boolean | undefined
+): CallResult {
+    const type = matchResults.overload;
+    let isTypeIncomplete = matchResults.isTypeIncomplete;
+    let argumentErrors = false;
+    let argumentMatchScore = 0;
+    let specializedInitSelfType: Type | undefined;
+    let anyOrUnknownArg: UnknownType | AnyType | undefined;
+    const speculativeNode = getSpeculativeNodeForCall(errorNode);
+    const typeCondition = getTypeCondition(type);
+    const paramSpec = FunctionType.getParamSpecFromArgsKwargs(type);
+
+    if (type.priv.boundToType && !type.priv.boundToType.priv.includeSubclasses && type.shared.methodClass) {
+        const abstractSymbolInfo = symbolResolution.getAbstractSymbolInfo(evaluator, type.shared.methodClass, type.shared.name);
+
+        if (abstractSymbolInfo && !abstractSymbolInfo.hasImplementation) {
+            evaluator.addDiagnostic(
+                DiagnosticRule.reportAbstractUsage,
+                LocMessage.abstractMethodInvocation().format({
+                    method: type.shared.name,
+                }),
+                errorNode.nodeType === ParseNodeType.Call ? errorNode.d.leftExpr : errorNode
+            );
+        }
+    }
+
+    if (
+        type.shared.name === '__init__' &&
+        type.priv.strippedFirstParamType &&
+        type.priv.boundToType &&
+        isClassInstance(type.priv.strippedFirstParamType) &&
+        isClassInstance(type.priv.boundToType) &&
+        ClassType.isSameGenericClass(type.priv.strippedFirstParamType, type.priv.boundToType) &&
+        type.priv.strippedFirstParamType.priv.typeArgs
+    ) {
+        const typeParams = type.priv.strippedFirstParamType.shared.typeParams;
+        specializedInitSelfType = type.priv.strippedFirstParamType;
+        type.priv.strippedFirstParamType.priv.typeArgs.forEach((typeArg, index) => {
+            if (index < typeParams.length) {
+                const typeParam = typeParams[index];
+                if (!isTypeSame(typeParam, typeArg, { ignorePseudoGeneric: true })) {
+                    constraints.setBounds(typeParams[index], typeArg);
+                }
+            }
+        });
+    }
+
+    if (
+        FunctionType.isBuiltIn(type, [
+            'typing.cast',
+            'typing_extensions.cast',
+            'builtins.isinstance',
+            'builtins.issubclass',
+        ])
+    ) {
+        skipUnknownArgCheck = true;
+    }
+
+    const typeVarCount = matchResults.argParams.filter((arg) => arg.requiresTypeVarMatching).length;
+    if (typeVarCount > 0) {
+        let passCount = Math.min(typeVarCount, 2);
+
+        for (let i = 0; i < passCount; i++) {
+            state.useSpeculativeMode(speculativeNode, () => {
+                matchResults.argParams.forEach((argParam) => {
+                    if (!argParam.requiresTypeVarMatching) {
+                        return;
+                    }
+
+                    const argResult = validateArgType(
+                        evaluator,
+                        state,
+                        argParam,
+                        constraints,
+                        { type, isIncomplete: matchResults.isTypeIncomplete },
+                        {
+                            skipUnknownArgCheck,
+                            isArgFirstPass: passCount > 1 && i === 0,
+                            conditionFilter: typeCondition,
+                            skipReportError: true,
+                        }
+                    );
+
+                    if (argResult.isTypeIncomplete) {
+                        isTypeIncomplete = true;
+                    }
+
+                    if (i === 0 && passCount < 2 && argResult.skippedBareTypeVarExpectedType) {
+                        passCount++;
+                    }
+                });
+            });
+        }
+    }
+
+    let sawParamSpecArgs = false;
+    let sawParamSpecKwargs = false;
+
+    let condition: TypeCondition[] = [];
+    const argResults: ArgResult[] = [];
+
+    matchResults.argParams.forEach((argParam, argParamIndex) => {
+        const argResult = validateArgType(
+            evaluator,
+            state,
+            argParam,
+            constraints,
+            { type, isIncomplete: matchResults.isTypeIncomplete },
+            {
+                skipUnknownArgCheck,
+                conditionFilter: typeCondition,
+            }
+        );
+
+        argResults.push(argResult);
+
+        if (!argResult.isCompatible) {
+            argumentErrors = true;
+            argumentMatchScore += 1 + (matchResults.argParams.length - argParamIndex);
+        }
+
+        if (argResult.isTypeIncomplete) {
+            isTypeIncomplete = true;
+        }
+
+        if (argResult.condition) {
+            condition = TypeCondition.combine(condition, argResult.condition) ?? [];
+        }
+
+        if (isAnyOrUnknown(argResult.argType)) {
+            anyOrUnknownArg = anyOrUnknownArg
+                ? preserveUnknown(argResult.argType, anyOrUnknownArg)
+                : argResult.argType;
+        }
+
+        if (paramSpec) {
+            if (argParam.argument.argCategory === ArgCategory.UnpackedList) {
+                if (isParamSpecArgs(paramSpec, argResult.argType)) {
+                    if (sawParamSpecArgs) {
+                        evaluator.addDiagnostic(
+                            DiagnosticRule.reportCallIssue,
+                            LocMessage.paramSpecArgsKwargsDuplicate().format({ type: evaluator.printType(paramSpec) }),
+                            argParam.errorNode
+                        );
+                    }
+
+                    sawParamSpecArgs = true;
+                }
+            }
+
+            if (argParam.argument.argCategory === ArgCategory.UnpackedDictionary) {
+                if (isParamSpecKwargs(paramSpec, argResult.argType)) {
+                    if (sawParamSpecKwargs) {
+                        evaluator.addDiagnostic(
+                            DiagnosticRule.reportCallIssue,
+                            LocMessage.paramSpecArgsKwargsDuplicate().format({ type: evaluator.printType(paramSpec) }),
+                            argParam.errorNode
+                        );
+                    }
+
+                    sawParamSpecKwargs = true;
+                }
+            }
+        }
+    });
+
+    let paramSpecConstraints: (ConstraintTracker | undefined)[] = [];
+
+    if (matchResults.paramSpecArgList && matchResults.paramSpecTarget) {
+        const paramSpecArgResult = validateArgTypesForParamSpec(
+            evaluator,
+            state,
+            registry,
+            errorNode,
+            matchResults.paramSpecArgList,
+            matchResults.paramSpecTarget,
+            constraints
+        );
+
+        if (paramSpecArgResult.argumentErrors) {
+            argumentErrors = true;
+            argumentMatchScore += 1;
+        }
+
+        paramSpecConstraints = paramSpecArgResult.constraintTrackers;
+    } else if (paramSpec) {
+        if (!sawParamSpecArgs || !sawParamSpecKwargs) {
+            if (!isTypeIncomplete) {
+                evaluator.addDiagnostic(
+                    DiagnosticRule.reportCallIssue,
+                    LocMessage.paramSpecArgsMissing().format({ type: evaluator.printType(paramSpec) }),
+                    errorNode
+                );
+            }
+            argumentErrors = true;
+            argumentMatchScore += 1;
+        }
+    }
+
+    const returnTypeResult = evaluator.getEffectiveReturnTypeResult(type, {
+        callSiteInfo: { args: matchResults.argParams, errorNode },
+    });
+    let returnType = returnTypeResult.type;
+    if (returnTypeResult.isIncomplete) {
+        isTypeIncomplete = true;
+    }
+
+    if (condition.length > 0) {
+        returnType = TypeBase.cloneForCondition(returnType, condition);
+    }
+
+    let eliminateUnsolvedInUnions = true;
+
+    if (isFunctionOrOverloaded(returnType)) {
+        eliminateUnsolvedInUnions = false;
+    }
+
+    let specializedReturnType = evaluator.solveAndApplyConstraints(returnType, constraints, {
+        replaceUnsolved: {
+            scopeIds: getTypeVarScopeIds(type),
+            unsolvedExemptTypeVars: getUnknownExemptTypeVarsForReturnType(type, returnType),
+            tupleClassType: evaluator.getTupleClassType(),
+            eliminateUnsolvedInUnions,
+        },
+    });
+    specializedReturnType = addConditionToType(specializedReturnType, typeCondition, { skipBoundTypeVars: true });
+
+    if (paramSpecConstraints.length > 0) {
+        paramSpecConstraints.forEach((psc) => {
+            if (psc) {
+                specializedReturnType = evaluator.solveAndApplyConstraints(specializedReturnType, psc);
+
+                applySourceSolutionToConstraints(
+                    constraints,
+                    solveConstraints(evaluator, psc)
+                );
+            }
+        });
+    }
+
+    if (isUnpackedClass(specializedReturnType)) {
+        specializedReturnType = ClassType.cloneForPacked(specializedReturnType);
+    }
+
+    const liveTypeVarScopes = ParseTreeUtils.getTypeVarScopesForNode(errorNode);
+    specializedReturnType = adjustCallableReturnType(evaluator, errorNode, specializedReturnType, liveTypeVarScopes);
+
+    if (specializedInitSelfType) {
+        specializedInitSelfType = evaluator.solveAndApplyConstraints(specializedInitSelfType, constraints);
+    }
+
+    matchResults.argumentMatchScore = argumentMatchScore;
+
+    return {
+        argumentErrors,
+        argResults,
+        anyOrUnknownArg,
+        returnType: specializedReturnType,
+        isTypeIncomplete,
+        activeParam: matchResults.activeParam,
+        specializedInitSelfType,
+        overloadsUsedForCall: argumentErrors ? [] : [type],
+    };
 }

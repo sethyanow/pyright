@@ -8190,6 +8190,15 @@ export function createTypeEvaluator(
         constraints: ConstraintTracker,
         skipUnknownArgCheck: boolean | undefined
     ): CallResult {
+        return callValidation.validateArgTypes(evaluatorInterface, state, registry, errorNode, matchResults, constraints, skipUnknownArgCheck);
+    }
+
+    function _validateArgTypes_dead(
+        errorNode: ExpressionNode,
+        matchResults: MatchArgsToParamsResult,
+        constraints: ConstraintTracker,
+        skipUnknownArgCheck: boolean | undefined
+    ): CallResult {
         const type = matchResults.overload;
         let isTypeIncomplete = matchResults.isTypeIncomplete;
         let argumentErrors = false;
