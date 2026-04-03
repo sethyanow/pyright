@@ -117,11 +117,7 @@ import {
     ModuleLoaderActions,
     VariableDeclaration,
 } from './declaration';
-import {
-    getNameNodeForDeclaration,
-    resolveAliasDeclaration as resolveAliasDeclarationUtil,
-    ResolvedAliasInfo,
-} from './declarationUtils';
+import { getNameNodeForDeclaration, ResolvedAliasInfo } from './declarationUtils';
 import { TypeCacheEntry, TypeEvaluatorState } from './typeEvaluatorState';
 import { populateTypeRegistry, TypeRegistry } from './typeRegistry';
 import {
@@ -503,10 +499,6 @@ const maxTotalOverloadArgTypeExpansionCount = 256;
 // Maximum size of an enum that will be expanded during overload
 // argument type expansion.
 const maxSingleOverloadArgTypeExpansionCount = 64;
-
-// Maximum number of recursive function return type inference attempts
-// that can be concurrently pending before we give up.
-const maxInferFunctionReturnRecursionCount = 12;
 
 // Maximum recursion amount when comparing two recursive type aliases.
 // Increasing this can greatly increase the time required to evaluate
@@ -16364,43 +16356,6 @@ export function createTypeEvaluator(
         return symbolResolution.inferFunctionReturnType(evaluatorInterface, state, node, isAbstract, callerNode);
     }
 
-    // Determines whether the method consists only of a "raise" statement
-    // and the exception type raised is a NotImplementedError or a subclass
-    // thereof. This is commonly used for abstract methods.
-    function methodAlwaysRaisesNotImplemented(functionDecl?: FunctionDeclaration): boolean {
-        if (
-            !functionDecl ||
-            !functionDecl.isMethod ||
-            functionDecl.returnStatements ||
-            functionDecl.yieldStatements ||
-            !functionDecl.raiseStatements
-        ) {
-            return false;
-        }
-
-        const statements = functionDecl.node.d.suite.d.statements;
-        if (statements.some((statement) => statement.nodeType !== ParseNodeType.StatementList)) {
-            return false;
-        }
-
-        for (const raiseStatement of functionDecl.raiseStatements) {
-            if (!raiseStatement.d.expr || raiseStatement.d.fromExpr) {
-                return false;
-            }
-            const raiseType = getTypeOfExpression(raiseStatement.d.expr).type;
-            const classType = isInstantiableClass(raiseType)
-                ? raiseType
-                : isClassInstance(raiseType)
-                ? raiseType
-                : undefined;
-            if (!classType || !derivesFromStdlibClass(classType, 'NotImplementedError')) {
-                return false;
-            }
-        }
-
-        return true;
-    }
-
     function evaluateTypesForForStatement(node: ForNode): void {
         if (isTypeCached(node)) {
             return;
@@ -18224,11 +18179,7 @@ export function createTypeEvaluator(
         resolveLocalNames: boolean,
         options?: ResolveAliasOptions
     ): Declaration | undefined {
-        return resolveAliasDeclarationUtil(importLookup, declaration, {
-            resolveLocalNames,
-            allowExternallyHiddenAccess: options?.allowExternallyHiddenAccess ?? false,
-            skipFileNeededCheck: options?.skipFileNeededCheck ?? false,
-        })?.declaration;
+        return symbolResolution.resolveAliasDeclaration(state, declaration, resolveLocalNames, options);
     }
 
     function resolveAliasDeclarationWithInfo(
@@ -18236,11 +18187,7 @@ export function createTypeEvaluator(
         resolveLocalNames: boolean,
         options?: ResolveAliasOptions
     ): ResolvedAliasInfo | undefined {
-        return resolveAliasDeclarationUtil(importLookup, declaration, {
-            resolveLocalNames,
-            allowExternallyHiddenAccess: options?.allowExternallyHiddenAccess ?? false,
-            skipFileNeededCheck: options?.skipFileNeededCheck ?? false,
-        });
+        return symbolResolution.resolveAliasDeclarationWithInfo(state, declaration, resolveLocalNames, options);
     }
 
     // Returns the type of the symbol. If the type is explicitly declared, that type

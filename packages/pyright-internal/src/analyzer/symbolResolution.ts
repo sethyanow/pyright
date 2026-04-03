@@ -31,7 +31,12 @@ import { isAnnotationEvaluationPostponed } from './analyzerFileInfo';
 import * as AnalyzerNodeInfo from './analyzerNodeInfo';
 import { getBoundInitMethod } from './constructors';
 import { Declaration, DeclarationType, FunctionDeclaration } from './declaration';
-import { getDeclarationsWithUsesLocalNameRemoved, synthesizeAliasDeclaration } from './declarationUtils';
+import {
+    getDeclarationsWithUsesLocalNameRemoved,
+    resolveAliasDeclaration as resolveAliasDeclarationUtil,
+    ResolvedAliasInfo,
+    synthesizeAliasDeclaration,
+} from './declarationUtils';
 import { getFunctionInfoFromDecorators } from './decorators';
 import { getParamListDetails } from './parameterUtils';
 import * as ParseTreeUtils from './parseTreeUtils';
@@ -46,6 +51,7 @@ import {
     EvalFlags,
     EvaluatorUsage,
     Reachability,
+    ResolveAliasOptions,
     SymbolDeclInfo,
     TypeEvaluator,
     TypeResult,
@@ -1578,4 +1584,30 @@ export function inferFunctionReturnType(
     }
 
     return inferredReturnType ? { type: inferredReturnType, isIncomplete } : undefined;
+}
+
+export function resolveAliasDeclaration(
+    state: TypeEvaluatorState,
+    declaration: Declaration,
+    resolveLocalNames: boolean,
+    options?: ResolveAliasOptions
+): Declaration | undefined {
+    return resolveAliasDeclarationUtil(state.importLookup, declaration, {
+        resolveLocalNames,
+        allowExternallyHiddenAccess: options?.allowExternallyHiddenAccess ?? false,
+        skipFileNeededCheck: options?.skipFileNeededCheck ?? false,
+    })?.declaration;
+}
+
+export function resolveAliasDeclarationWithInfo(
+    state: TypeEvaluatorState,
+    declaration: Declaration,
+    resolveLocalNames: boolean,
+    options?: ResolveAliasOptions
+): ResolvedAliasInfo | undefined {
+    return resolveAliasDeclarationUtil(state.importLookup, declaration, {
+        resolveLocalNames,
+        allowExternallyHiddenAccess: options?.allowExternallyHiddenAccess ?? false,
+        skipFileNeededCheck: options?.skipFileNeededCheck ?? false,
+    });
 }
