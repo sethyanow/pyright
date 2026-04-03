@@ -333,7 +333,7 @@ export function getAbstractSymbols(evaluator: TypeEvaluator, classType: ClassTyp
 
     ClassType.getReverseMro(classType).forEach((mroClass) => {
         if (isInstantiableClass(mroClass)) {
-            ClassType.getSymbolTable(mroClass).forEach((symbol, symbolName) => {
+            ClassType.getSymbolTable(mroClass).forEach((_symbol, symbolName) => {
                 const abstractSymbolInfo = getAbstractSymbolInfo(evaluator, mroClass, symbolName);
 
                 if (abstractSymbolInfo) {

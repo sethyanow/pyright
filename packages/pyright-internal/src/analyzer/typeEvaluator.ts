@@ -7065,7 +7065,7 @@ export function createTypeEvaluator(
 
         doForEachSubtype(transformedType, (subtype) => {
             if (subtype.category === TypeCategory.Function) {
-                subtype.shared.parameters.forEach((param, index) => {
+                subtype.shared.parameters.forEach((_param, index) => {
                     const paramType = FunctionType.getParamType(subtype, index);
                     updateUsageVarianceForType(paramType, invertVariance(varianceContext));
                 });
@@ -8815,7 +8815,7 @@ export function createTypeEvaluator(
             );
         }
 
-        let expandedArgTypes: (Type | undefined)[][] | undefined = [argList.map((arg) => undefined)];
+        let expandedArgTypes: (Type | undefined)[][] | undefined = [argList.map(() => undefined)];
 
         while (true) {
             const callResult = validateOverloadsWithExpandedTypes(
@@ -14781,7 +14781,7 @@ export function createTypeEvaluator(
                         if (
                             initParams.length > 1 &&
                             !initParams.some(
-                                (param, index) => !!ParseTreeUtils.getTypeAnnotationForParam(initDeclNode, index)
+                                (_param, index) => !!ParseTreeUtils.getTypeAnnotationForParam(initDeclNode, index)
                             )
                         ) {
                             const genericParams = initParams.filter(
@@ -16584,7 +16584,6 @@ export function createTypeEvaluator(
 
         if (!node.parent || node.parent.nodeType !== ParseNodeType.Match) {
             fail('Expected parent of case statement to be match statement');
-            return;
         }
 
         const fileInfo = AnalyzerNodeInfo.getFileInfo(node);
@@ -17238,7 +17237,6 @@ export function createTypeEvaluator(
         }
 
         fail('Unexpected statement');
-        return undefined;
     }
 
     // Helper function for cases where we need to evaluate the types
