@@ -18,8 +18,12 @@ import {
     EvaluatorUsage,
     ValidateArgTypeParams,
 } from './typeEvaluatorTypes';
-import { FunctionParam, FunctionType, isAnyOrUnknown, ParamSpecType, Type, UnknownType } from './types';
-import { areTypesSame } from './typeUtils';
+import { TypeEvaluator } from './typeEvaluatorTypes';
+import { FunctionParam, FunctionType, isAnyOrUnknown, isClassInstance, ParamSpecType, Type, UnknownType } from './types';
+import { enumerateLiteralsForType } from './typeGuards';
+import { areTypesSame, doForEachSubtype } from './typeUtils';
+import { expandTuple } from './tuples';
+import { appendArray } from '../common/collectionUtils';
 
 // Redefined locally to avoid circular import from typeEvaluator.ts
 export interface MatchArgsToParamsResult {
@@ -156,4 +160,87 @@ export function filterOverloadMatchesForAnyArgs(matches: MatchedOverloadInfo[]):
     }
 
     return [matches[0]];
+}
+
+const maxSingleOverloadArgTypeExpansionCount = 64;
+
+export function expandArgType(evaluator: TypeEvaluator, type: Type): Type[] | undefined {
+    const expandedTypes: Type[] = [];
+
+    // Expand any top-level type variables with constraints.
+    type = evaluator.makeTopLevelTypeVarsConcrete(type);
+
+    doForEachSubtype(type, (subtype) => {
+        if (isClassInstance(subtype)) {
+            // Expand any bool or Enum literals.
+            const expandedLiteralTypes = enumerateLiteralsForType(evaluator, subtype);
+            if (expandedLiteralTypes && expandedLiteralTypes.length <= maxSingleOverloadArgTypeExpansionCount) {
+                appendArray(expandedTypes, expandedLiteralTypes);
+                return;
+            }
+
+            // Expand any fixed-size tuples.
+            const expandedTuples = expandTuple(subtype, maxSingleOverloadArgTypeExpansionCount);
+            if (expandedTuples) {
+                appendArray(expandedTypes, expandedTuples);
+                return;
+            }
+        }
+
+        expandedTypes.push(subtype);
+    });
+
+    return expandedTypes.length > 1 ? expandedTypes : undefined;
+}
+
+// Expands the specified argument type list to include expanded
+// union types. Returns undefined when the expansion is complete and no
+// more expansion is possible.
+export function expandArgTypes(
+    evaluator: TypeEvaluator,
+    contextFreeArgTypes: Type[],
+    expandedArgTypes: (Type | undefined)[][]
+): (Type | undefined)[][] | undefined {
+    // Find the rightmost already-expanded argument.
+    let indexToExpand = contextFreeArgTypes.length - 1;
+    while (indexToExpand >= 0 && !expandedArgTypes[0][indexToExpand]) {
+        indexToExpand--;
+    }
+
+    // Move to the next candidate for expansion.
+    indexToExpand++;
+
+    if (indexToExpand >= contextFreeArgTypes.length) {
+        return undefined;
+    }
+
+    let expandedTypes: Type[] | undefined;
+    while (indexToExpand < contextFreeArgTypes.length) {
+        // Is this a union type? If so, we can expand it.
+        const argType = contextFreeArgTypes[indexToExpand];
+
+        expandedTypes = expandArgType(evaluator, argType);
+        if (expandedTypes) {
+            break;
+        }
+        indexToExpand++;
+    }
+
+    // We have nothing left to expand.
+    if (!expandedTypes) {
+        return undefined;
+    }
+
+    // Expand entry indexToExpand.
+    const newExpandedArgTypes: (Type | undefined)[][] = [];
+
+    expandedArgTypes.forEach((preExpandedTypes) => {
+        expandedTypes.forEach((subtype) => {
+            const expandedTypes = [...preExpandedTypes];
+            expandedTypes[indexToExpand] = subtype;
+            newExpandedArgTypes.push(expandedTypes);
+        });
+    });
+
+    return newExpandedArgTypes;
 }

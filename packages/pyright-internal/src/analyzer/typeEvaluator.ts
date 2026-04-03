@@ -152,7 +152,7 @@ import { createSentinelType } from './sentinel';
 import { evaluateStaticBoolExpression } from './staticExpressions';
 import { indeterminateSymbolId, Symbol, SymbolFlags } from './symbol';
 import { isConstantName, isPrivateName, isPrivateOrProtectedName } from './symbolNameUtils';
-import { expandTuple, getSlicedTupleType, getTypeOfTuple, makeTupleObject } from './tuples';
+import { getSlicedTupleType, getTypeOfTuple, makeTupleObject } from './tuples';
 import { SpeculativeModeOptions } from './typeCacheUtils';
 import {
     assignToTypedDict,
@@ -196,7 +196,6 @@ import {
     ValidateArgTypeParams,
     ValidateTypeArgsOptions,
 } from './typeEvaluatorTypes';
-import { enumerateLiteralsForType } from './typeGuards';
 import * as TypePrinter from './typePrinter';
 import {
     AnyType,
@@ -439,10 +438,6 @@ const maxEffectiveTypeEvaluationAttempts = 16;
 // Maximum number of combinatoric argument type expansions allowed
 // when resolving an overload.
 const maxTotalOverloadArgTypeExpansionCount = 256;
-
-// Maximum size of an enum that will be expanded during overload
-// argument type expansion.
-const maxSingleOverloadArgTypeExpansionCount = 64;
 
 // Maximum recursion amount when comparing two recursive type aliases.
 // Increasing this can greatly increase the time required to evaluate
@@ -7588,77 +7583,7 @@ export function createTypeEvaluator(
         contextFreeArgTypes: Type[],
         expandedArgTypes: (Type | undefined)[][]
     ): (Type | undefined)[][] | undefined {
-        // Find the rightmost already-expanded argument.
-        let indexToExpand = contextFreeArgTypes.length - 1;
-        while (indexToExpand >= 0 && !expandedArgTypes[0][indexToExpand]) {
-            indexToExpand--;
-        }
-
-        // Move to the next candidate for expansion.
-        indexToExpand++;
-
-        if (indexToExpand >= contextFreeArgTypes.length) {
-            return undefined;
-        }
-
-        let expandedTypes: Type[] | undefined;
-        while (indexToExpand < contextFreeArgTypes.length) {
-            // Is this a union type? If so, we can expand it.
-            const argType = contextFreeArgTypes[indexToExpand];
-
-            expandedTypes = expandArgType(argType);
-            if (expandedTypes) {
-                break;
-            }
-            indexToExpand++;
-        }
-
-        // We have nothing left to expand.
-        if (!expandedTypes) {
-            return undefined;
-        }
-
-        // Expand entry indexToExpand.
-        const newExpandedArgTypes: (Type | undefined)[][] = [];
-
-        expandedArgTypes.forEach((preExpandedTypes) => {
-            expandedTypes.forEach((subtype) => {
-                const expandedTypes = [...preExpandedTypes];
-                expandedTypes[indexToExpand] = subtype;
-                newExpandedArgTypes.push(expandedTypes);
-            });
-        });
-
-        return newExpandedArgTypes;
-    }
-
-    function expandArgType(type: Type): Type[] | undefined {
-        const expandedTypes: Type[] = [];
-
-        // Expand any top-level type variables with constraints.
-        type = makeTopLevelTypeVarsConcrete(type);
-
-        doForEachSubtype(type, (subtype) => {
-            if (isClassInstance(subtype)) {
-                // Expand any bool or Enum literals.
-                const expandedLiteralTypes = enumerateLiteralsForType(evaluatorInterface, subtype);
-                if (expandedLiteralTypes && expandedLiteralTypes.length <= maxSingleOverloadArgTypeExpansionCount) {
-                    appendArray(expandedTypes, expandedLiteralTypes);
-                    return;
-                }
-
-                // Expand any fixed-size tuples.
-                const expandedTuples = expandTuple(subtype, maxSingleOverloadArgTypeExpansionCount);
-                if (expandedTuples) {
-                    appendArray(expandedTypes, expandedTuples);
-                    return;
-                }
-            }
-
-            expandedTypes.push(subtype);
-        });
-
-        return expandedTypes.length > 1 ? expandedTypes : undefined;
+        return callValidation.expandArgTypes(evaluatorInterface, contextFreeArgTypes, expandedArgTypes);
     }
 
     // Validates that the arguments can be assigned to the call's parameter
