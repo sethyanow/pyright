@@ -13933,20 +13933,7 @@ export function createTypeEvaluator(
     }
 
     function adjustParamAnnotatedType(param: ParameterNode, type: Type): Type {
-        // PEP 484 indicates that if a parameter has a default value of 'None'
-        // the type checker should assume that the type is optional (i.e. a union
-        // of the specified type and 'None'). Skip this step if the type is already
-        // optional to avoid losing alias names when combining the types.
-        if (
-            param.d.defaultValue?.nodeType === ParseNodeType.Constant &&
-            param.d.defaultValue.d.constType === KeywordType.None &&
-            !isOptionalType(type) &&
-            !AnalyzerNodeInfo.getFileInfo(param).diagnosticRuleSet.strictParameterNoneValue
-        ) {
-            return combineTypes([type, getNoneType()]);
-        }
-
-        return type;
+        return callValidation.adjustParamAnnotatedType(evaluatorInterface, param, type);
     }
 
     // Attempts to infer an unannotated parameter type from available context.

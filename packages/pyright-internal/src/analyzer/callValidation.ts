@@ -7,7 +7,8 @@
  * extracted from typeEvaluator.ts.
  */
 
-import { ArgCategory, ArgumentNode, ExpressionNode, ParamCategory, ParseNode, ParseNodeType } from '../parser/parseNodes';
+import { ArgCategory, ArgumentNode, ExpressionNode, ParamCategory, ParameterNode, ParseNode, ParseNodeType } from '../parser/parseNodes';
+import { KeywordType } from '../parser/tokenizerTypes';
 import * as ParseTreeUtils from './parseTreeUtils';
 import { assert } from '../common/debug';
 import { DiagnosticRule } from '../common/diagnosticRules';
@@ -43,6 +44,7 @@ import {
     isTypeVar,
     isTypeVarTuple,
     isUnknown,
+    combineTypes,
     isUnpackedClass,
     ParamSpecType,
     removeUnbound,
@@ -67,6 +69,7 @@ import {
     getTypeVarArgsRecursive,
     InferenceContext,
     isEllipsisType,
+    isOptionalType,
     isPartlyUnknown,
     isTupleClass,
     makeInferenceContext,
@@ -947,4 +950,17 @@ export function validateArgType(
     }
 
     return { isCompatible, argType, isTypeIncomplete, skippedBareTypeVarExpectedType, condition };
+}
+
+export function adjustParamAnnotatedType(evaluator: TypeEvaluator, param: ParameterNode, type: Type): Type {
+    if (
+        param.d.defaultValue?.nodeType === ParseNodeType.Constant &&
+        param.d.defaultValue.d.constType === KeywordType.None &&
+        !isOptionalType(type) &&
+        !AnalyzerNodeInfo.getFileInfo(param).diagnosticRuleSet.strictParameterNoneValue
+    ) {
+        return combineTypes([type, evaluator.getNoneType()]);
+    }
+
+    return type;
 }
