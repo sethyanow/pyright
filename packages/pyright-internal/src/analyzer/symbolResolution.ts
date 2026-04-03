@@ -30,7 +30,13 @@ import {
 import { ImportLookup, isAnnotationEvaluationPostponed } from './analyzerFileInfo';
 import * as AnalyzerNodeInfo from './analyzerNodeInfo';
 import { getBoundInitMethod } from './constructors';
-import { Declaration, DeclarationType, FunctionDeclaration, ModuleLoaderActions } from './declaration';
+import {
+    Declaration,
+    DeclarationType,
+    FunctionDeclaration,
+    isVariableDeclaration,
+    ModuleLoaderActions,
+} from './declaration';
 import {
     getDeclarationsWithUsesLocalNameRemoved,
     resolveAliasDeclaration as resolveAliasDeclarationUtil,
@@ -43,11 +49,12 @@ import * as ParseTreeUtils from './parseTreeUtils';
 import { ScopeType, SymbolWithScope } from './scope';
 import * as ScopeUtils from './scopeUtils';
 import { Symbol, SymbolFlags, SynthesizedTypeInfo } from './symbol';
-import { getLastTypedDeclarationForSymbol } from './symbolUtils';
+import { getLastTypedDeclarationForSymbol, isEffectivelyClassVar } from './symbolUtils';
 import { TypeEvaluatorState } from './typeEvaluatorState';
 import {
     AbstractSymbol,
     DeclaredSymbolTypeInfo,
+    EffectiveTypeResult,
     EvalFlags,
     EvaluatorUsage,
     Reachability,
@@ -63,6 +70,7 @@ import {
     FunctionType,
     FunctionTypeFlags,
     isAnyOrUnknown,
+    isClass,
     isClassInstance,
     isFunction,
     isFunctionOrOverloaded,
@@ -111,7 +119,6 @@ import {
 import { getTypeOfIndexedTypedDict } from './typedDicts';
 import { makeTupleObject } from './tuples';
 import { Uri } from '../common/uri/uri';
-
 
 export function isFinalVariableDeclaration(decl: Declaration): boolean {
     return decl.type === DeclarationType.Variable && !!decl.isFinal;
@@ -1867,7 +1874,13 @@ export function transformTypeForTypeAlias(
         if (typeParamNodes && index < typeParamNodes.length) {
             bestErrorNode = typeParamNodes[index].d.defaultExpr ?? typeParamNodes[index].d.name;
         }
-        validateTypeParamDefault(evaluator, bestErrorNode, typeParam, typeParams.slice(0, index), sharedInfo.typeVarScopeId);
+        validateTypeParamDefault(
+            evaluator,
+            bestErrorNode,
+            typeParam,
+            typeParams.slice(0, index),
+            sharedInfo.typeVarScopeId
+        );
     });
 
     // Verify that we have at most one TypeVarTuple.
@@ -1885,8 +1898,7 @@ export function transformTypeForTypeAlias(
     if (!sharedInfo.isTypeAliasType && !isPep695TypeVarType) {
         const boundTypeVars = typeParams.filter(
             (typeVar) =>
-                typeVar.priv.scopeId !== sharedInfo.typeVarScopeId &&
-                typeVar.priv.scopeType === TypeVarScopeType.Class
+                typeVar.priv.scopeId !== sharedInfo.typeVarScopeId && typeVar.priv.scopeType === TypeVarScopeType.Class
         );
 
         if (boundTypeVars.length > 0) {
@@ -1930,7 +1942,12 @@ export function transformTypeForTypeAlias(
 
 // Applies some heuristics to determine whether it's likely that all Python
 // type checkers will infer the same type.
-function isUnambiguousInference(evaluator: TypeEvaluator, symbol: Symbol, decl: Declaration, inferredType: Type): boolean {
+function isUnambiguousInference(
+    evaluator: TypeEvaluator,
+    symbol: Symbol,
+    decl: Declaration,
+    inferredType: Type
+): boolean {
     const nonSlotsDecls = symbol.getDeclarations().filter((decl) => {
         return decl.type !== DeclarationType.Variable || !decl.isInferenceAllowedInPyTyped;
     });
@@ -2044,9 +2061,7 @@ export function getInferredTypeOfDeclaration(
                     if (existingType?.type && isModule(existingType.type)) {
                         importedModuleType = existingType.type;
                     } else {
-                        const moduleName = moduleType.priv.moduleName
-                            ? moduleType.priv.moduleName + '.' + name
-                            : '';
+                        const moduleName = moduleType.priv.moduleName ? moduleType.priv.moduleName + '.' + name : '';
                         importedModuleType = ModuleType.create(moduleName, implicitImport.uri);
                     }
 
@@ -2092,9 +2107,7 @@ export function getInferredTypeOfDeclaration(
 
         return applyLoaderActionsToModuleType(
             moduleType,
-            resolvedDecl.symbolName && resolvedDecl.submoduleFallback
-                ? resolvedDecl.submoduleFallback
-                : resolvedDecl,
+            resolvedDecl.symbolName && resolvedDecl.submoduleFallback ? resolvedDecl.submoduleFallback : resolvedDecl,
             state.importLookup
         );
     }
@@ -2170,7 +2183,8 @@ export function getInferredTypeOfDeclaration(
 
     if (resolvedDecl.type === DeclarationType.Variable && resolvedDecl.inferredTypeSource) {
         const isTypeAlias =
-            isExplicitTypeAliasDeclaration(evaluator, resolvedDecl) || isPossibleTypeAliasOrTypedDict(evaluator, resolvedDecl);
+            isExplicitTypeAliasDeclaration(evaluator, resolvedDecl) ||
+            isPossibleTypeAliasOrTypedDict(evaluator, resolvedDecl);
 
         // If this is a type alias, evaluate types for the entire assignment
         // statement rather than just the RHS of the assignment.
@@ -2220,4 +2234,252 @@ export function getInferredTypeOfDeclaration(
     }
 
     return undefined;
+}
+
+// --- Effective type resolution ---
+
+export function includesVariableTypeDecl(decls: Declaration[]): boolean {
+    return decls.some((decl) => {
+        if (decl.type === DeclarationType.Variable) {
+            const fileInfo = AnalyzerNodeInfo.getFileInfo(decl.node);
+            if (!fileInfo.isTypingStubFile && !fileInfo.isTypingExtensionsStubFile) {
+                return true;
+            }
+        }
+        if (decl.type === DeclarationType.Param) {
+            return true;
+        }
+        return false;
+    });
+}
+
+export function getEffectiveTypeOfSymbol(
+    evaluator: TypeEvaluator,
+    state: TypeEvaluatorState,
+    symbol: Symbol,
+    getTypeOfSymbolForDecls?: (symbol: Symbol, decls: Declaration[], typeCacheKey: string) => EffectiveTypeResult
+): Type {
+    return getEffectiveTypeOfSymbolForUsage(evaluator, state, symbol, undefined, false, getTypeOfSymbolForDecls).type;
+}
+
+export function getEffectiveTypeOfSymbolForUsage(
+    evaluator: TypeEvaluator,
+    state: TypeEvaluatorState,
+    symbol: Symbol,
+    usageNode?: NameNode,
+    useLastDecl?: boolean,
+    getTypeOfSymbolForDecls?: (symbol: Symbol, decls: Declaration[], typeCacheKey: string) => EffectiveTypeResult
+): EffectiveTypeResult {
+    let declaredTypeInfo: DeclaredSymbolTypeInfo | undefined;
+
+    // If there's a declared type, it takes precedence over inferred types.
+    if (symbol.hasTypedDeclarations()) {
+        declaredTypeInfo = getDeclaredTypeOfSymbol(evaluator, state, symbol, usageNode);
+        const declaredType = declaredTypeInfo?.type;
+
+        let isIncomplete = false;
+        if (declaredType) {
+            if (isFunction(declaredType) && FunctionType.isPartiallyEvaluated(declaredType)) {
+                isIncomplete = true;
+            } else if (isClass(declaredType) && ClassType.isPartiallyEvaluated(declaredType)) {
+                isIncomplete = true;
+            }
+        }
+
+        // If the "declared" type uses a "TypeAlias" type annotation, then
+        // we need to use the inferred type path to evaluate its type.
+        if (declaredType || !declaredTypeInfo.isTypeAlias) {
+            const typedDecls = symbol.getTypedDeclarations();
+
+            const isRecursiveDefinition =
+                !declaredType &&
+                !declaredTypeInfo.exceedsMaxDecls &&
+                !state.speculativeTypeTracker.isSpeculative(/* node */ undefined);
+
+            const result: EffectiveTypeResult = {
+                type: declaredType ?? UnknownType.create(),
+                isIncomplete,
+                includesVariableDecl: includesVariableTypeDecl(typedDecls),
+                includesIllegalTypeAliasDecl: !typedDecls.every((decl) => isPossibleTypeAliasDeclaration(decl)),
+                includesSpeculativeResult: false,
+                isRecursiveDefinition,
+            };
+
+            return result;
+        }
+    }
+
+    return inferTypeOfSymbolForUsage(
+        evaluator,
+        state,
+        symbol,
+        usageNode,
+        useLastDecl ?? false,
+        getTypeOfSymbolForDecls
+    );
+}
+
+export function inferTypeOfSymbolForUsage(
+    evaluator: TypeEvaluator,
+    state: TypeEvaluatorState,
+    symbol: Symbol,
+    usageNode?: NameNode,
+    useLastDecl = false,
+    getTypeOfSymbolForDecls?: (symbol: Symbol, decls: Declaration[], typeCacheKey: string) => EffectiveTypeResult
+): EffectiveTypeResult {
+    // Look in the inferred type cache to see if we've computed this already.
+    const cacheEntries = state.effectiveTypeCache.get(symbol.id);
+    const usageNodeId = usageNode ? usageNode.id : undefined;
+    const effectiveTypeCacheKey = `${usageNodeId === undefined ? '.' : usageNodeId.toString()}${
+        useLastDecl ? '*' : ''
+    }`;
+    const cacheEntry = cacheEntries?.get(effectiveTypeCacheKey);
+
+    if (cacheEntry && !cacheEntry.isIncomplete) {
+        return cacheEntry;
+    }
+
+    // Infer the type.
+    const decls = symbol.getDeclarations();
+
+    let declIndexToConsider: number | undefined;
+
+    // Limit the number of declarations to explore.
+    if (decls.length > maxDeclarationsToUseForInference) {
+        const result: EffectiveTypeResult = {
+            type: UnknownType.create(),
+            isIncomplete: false,
+            includesVariableDecl: false,
+            includesIllegalTypeAliasDecl: !decls.every((decl) => isPossibleTypeAliasDeclaration(decl)),
+            includesSpeculativeResult: false,
+            isRecursiveDefinition: false,
+        };
+
+        addToEffectiveTypeCache(state, symbol, cacheEntries, effectiveTypeCacheKey, result);
+        return result;
+    }
+
+    // If the caller has requested that we use only the last decl, we
+    // will use only the last one, but we'll ignore decls that are in
+    // except clauses.
+    if (useLastDecl) {
+        decls.forEach((decl, index) => {
+            if (!decl.isInExceptSuite) {
+                declIndexToConsider = index;
+            }
+        });
+    } else {
+        // Handle the case where there are multiple imports — one of them in
+        // a try block and one or more in except blocks. In this case, we'll
+        // use the one in the try block rather than the excepts.
+        if (decls.length > 1 && decls.every((decl) => decl.type === DeclarationType.Alias)) {
+            const nonExceptDecls = decls.filter((decl) => decl.type === DeclarationType.Alias && !decl.isInExceptSuite);
+            if (nonExceptDecls.length === 1) {
+                declIndexToConsider = decls.findIndex((decl) => decl === nonExceptDecls[0]);
+            }
+        }
+    }
+
+    // Determine which declarations to use for inference.
+    const declsToConsider: Declaration[] = [];
+    let includesVariableDecl = false;
+    let includesIllegalTypeAliasDecl = false;
+
+    let sawExplicitTypeAlias = false;
+    decls.forEach((decl, index) => {
+        const resolvedDecl =
+            evaluator.resolveAliasDeclaration(decl, /* resolveLocalNames */ true, {
+                allowExternallyHiddenAccess: AnalyzerNodeInfo.getFileInfo(decl.node).isStubFile,
+            }) ?? decl;
+
+        if (!isPossibleTypeAliasDeclaration(resolvedDecl) && !isExplicitTypeAliasDeclaration(evaluator, resolvedDecl)) {
+            includesIllegalTypeAliasDecl = true;
+        }
+
+        if (includesVariableTypeDecl([resolvedDecl])) {
+            includesVariableDecl = true;
+        }
+
+        if (declIndexToConsider !== undefined && declIndexToConsider !== index) {
+            return;
+        }
+
+        if (sawExplicitTypeAlias) {
+            return;
+        }
+
+        if (
+            isEffectivelyClassVar(symbol, /* isDataclass */ false) &&
+            decl.type === DeclarationType.Variable &&
+            decl.isDefinedByMemberAccess
+        ) {
+            return;
+        }
+
+        if (usageNode !== undefined) {
+            if (decl.type !== DeclarationType.Alias) {
+                const usageScope = ParseTreeUtils.getExecutionScopeNode(usageNode);
+                const declScope = ParseTreeUtils.getExecutionScopeNode(decl.node);
+                if (usageScope === declScope) {
+                    if (!evaluator.isFlowPathBetweenNodes(decl.node, usageNode)) {
+                        return;
+                    }
+                }
+            }
+        }
+
+        const isExplicitTypeAlias = isExplicitTypeAliasDeclaration(evaluator, resolvedDecl);
+        const isTypeAlias = isExplicitTypeAlias || isPossibleTypeAliasOrTypedDict(evaluator, resolvedDecl);
+
+        if (isExplicitTypeAlias) {
+            sawExplicitTypeAlias = true;
+        }
+
+        if (
+            isTypeAlias &&
+            resolvedDecl.type === DeclarationType.Variable &&
+            resolvedDecl.inferredTypeSource?.parent?.nodeType === ParseNodeType.Assignment
+        ) {
+            evaluator.evaluateTypesForAssignmentStatement(resolvedDecl.inferredTypeSource.parent);
+        }
+
+        declsToConsider.push(resolvedDecl);
+    });
+
+    // If all of the decls come from augmented assignments, we won't be able to
+    // determine its type. At least one declaration must be a simple assignment.
+    if (
+        declsToConsider.every(
+            (decl) =>
+                isVariableDeclaration(decl) &&
+                ParseTreeUtils.isNodeContainedWithinNodeType(decl.node, ParseNodeType.AugmentedAssignment)
+        )
+    ) {
+        declsToConsider.splice(0);
+    }
+
+    const result = getTypeOfSymbolForDecls!(symbol, declsToConsider, effectiveTypeCacheKey);
+    result.includesVariableDecl = includesVariableDecl;
+    result.includesIllegalTypeAliasDecl = includesIllegalTypeAliasDecl;
+
+    // Add the result to the effective type cache if it doesn't include speculative results.
+    if (!result.includesSpeculativeResult) {
+        addToEffectiveTypeCache(state, symbol, cacheEntries, effectiveTypeCacheKey, result);
+    }
+
+    return result;
+}
+
+function addToEffectiveTypeCache(
+    state: TypeEvaluatorState,
+    symbol: Symbol,
+    cacheEntries: Map<string, EffectiveTypeResult> | undefined,
+    effectiveTypeCacheKey: string,
+    result: EffectiveTypeResult
+) {
+    if (!cacheEntries) {
+        cacheEntries = new Map<string, EffectiveTypeResult>();
+        state.effectiveTypeCache.set(symbol.id, cacheEntries);
+    }
+    cacheEntries.set(effectiveTypeCacheKey, result);
 }
