@@ -13723,122 +13723,14 @@ export function createTypeEvaluator(
         isPep695TypeVarType: boolean,
         typeParamNodes?: TypeParameterNode[]
     ): Type {
-        // If this is a recursive type alias that hasn't yet been fully resolved
-        // (i.e. there is no boundType associated with it), don't apply the transform.
-        if (isTypeAliasPlaceholder(type)) {
-            return type;
-        }
-
-        const sharedInfo = typeAliasPlaceholder.shared.recursiveAlias;
-        assert(sharedInfo !== undefined);
-
-        let typeParams: TypeVarType[] | undefined = sharedInfo.typeParams;
-        if (!typeParams) {
-            // Determine if there are any generic type parameters associated
-            // with this type alias.
-            typeParams = [];
-
-            addTypeVarsToListIfUnique(typeParams, getTypeVarArgsRecursive(type));
-
-            // Don't include any synthesized type variables.
-            typeParams = typeParams.filter((typeVar) => !typeVar.shared.isSynthesized);
-        }
-
-        // Convert all type variables to instances.
-        typeParams = typeParams.map((typeVar) => {
-            if (TypeBase.isInstance(typeVar)) {
-                return typeVar;
-            }
-            return convertToInstance(typeVar);
-        });
-
-        // See if the type alias includes a TypeVarTuple followed by a TypeVar
-        // with a default value. This isn't allowed.
-        const firstTypeVarTupleIndex = typeParams.findIndex((typeVar) => isTypeVarTuple(typeVar));
-        if (firstTypeVarTupleIndex >= 0) {
-            const typeVarWithDefaultIndex = typeParams.findIndex(
-                (typeVar, index) =>
-                    index > firstTypeVarTupleIndex && !isParamSpec(typeVar) && typeVar.shared.isDefaultExplicit
-            );
-
-            if (typeVarWithDefaultIndex >= 0) {
-                addDiagnostic(
-                    DiagnosticRule.reportGeneralTypeIssues,
-                    LocMessage.typeVarWithDefaultFollowsVariadic().format({
-                        typeVarName: typeParams[typeVarWithDefaultIndex].shared.name,
-                        variadicName: typeParams[firstTypeVarTupleIndex].shared.name,
-                    }),
-                    typeParamNodes ? typeParamNodes[typeVarWithDefaultIndex].d.name : errorNode
-                );
-            }
-        }
-
-        // Validate the default types for all type parameters.
-        typeParams.forEach((typeParam, index) => {
-            assert(typeParams !== undefined);
-            let bestErrorNode = errorNode;
-            if (typeParamNodes && index < typeParamNodes.length) {
-                bestErrorNode = typeParamNodes[index].d.defaultExpr ?? typeParamNodes[index].d.name;
-            }
-            validateTypeParamDefault(bestErrorNode, typeParam, typeParams.slice(0, index), sharedInfo.typeVarScopeId);
-        });
-
-        // Verify that we have at most one TypeVarTuple.
-        const variadics = typeParams.filter((param) => isTypeVarTuple(param));
-        if (variadics.length > 1) {
-            addDiagnostic(
-                DiagnosticRule.reportInvalidTypeForm,
-                LocMessage.variadicTypeParamTooManyAlias().format({
-                    names: variadics.map((v) => `"${v.shared.name}"`).join(', '),
-                }),
-                errorNode
-            );
-        }
-
-        if (!sharedInfo.isTypeAliasType && !isPep695TypeVarType) {
-            const boundTypeVars = typeParams.filter(
-                (typeVar) =>
-                    typeVar.priv.scopeId !== sharedInfo.typeVarScopeId &&
-                    typeVar.priv.scopeType === TypeVarScopeType.Class
-            );
-
-            if (boundTypeVars.length > 0) {
-                addDiagnostic(
-                    DiagnosticRule.reportInvalidTypeForm,
-                    LocMessage.genericTypeAliasBoundTypeVar().format({
-                        names: boundTypeVars.map((t) => `${t.shared.name}`).join(', '),
-                    }),
-                    errorNode
-                );
-            }
-        }
-
-        if (!TypeBase.isInstantiable(type)) {
-            return type;
-        }
-
-        sharedInfo.typeParams = typeParams.length > 0 ? typeParams : undefined;
-
-        let typeAlias = TypeBase.cloneForTypeAlias(type, {
-            shared: sharedInfo,
-            typeArgs: undefined,
-        });
-
-        // All PEP 695 type aliases are special forms because they are
-        // TypeAliasType objects at runtime.
-        if (sharedInfo.isTypeAliasType || isPep695TypeVarType) {
-            const typeAliasTypeClass = getTypingType(errorNode, 'TypeAliasType');
-            if (typeAliasTypeClass && isInstantiableClass(typeAliasTypeClass)) {
-                typeAlias = TypeBase.cloneAsSpecialForm(typeAlias, ClassType.cloneAsInstance(typeAliasTypeClass));
-            }
-        }
-
-        // Delete the TypeForm info. The type alias serves as its own TypeForm info.
-        if (typeAlias.props?.typeForm) {
-            typeAlias = TypeBase.cloneWithTypeForm(typeAlias, undefined);
-        }
-
-        return typeAlias;
+        return symbolResolution.transformTypeForTypeAlias(
+            evaluatorInterface,
+            type,
+            errorNode,
+            typeAliasPlaceholder,
+            isPep695TypeVarType,
+            typeParamNodes
+        );
     }
 
     // Handles some special-case type annotations that are found
@@ -14187,24 +14079,7 @@ export function createTypeEvaluator(
     // Synthesize a TypeVar that acts as a placeholder for a type alias. This allows
     // the type alias definition to refer to itself.
     function synthesizeTypeAliasPlaceholder(nameNode: NameNode, isTypeAliasType: boolean = false): TypeVarType {
-        const placeholder = TypeVarType.createInstantiable(`__type_alias_${nameNode.d.value}`);
-        placeholder.shared.isSynthesized = true;
-        const typeVarScopeId = ParseTreeUtils.getScopeIdForNode(nameNode);
-        const fileInfo = AnalyzerNodeInfo.getFileInfo(nameNode);
-
-        placeholder.shared.recursiveAlias = {
-            name: nameNode.d.value,
-            fullName: ParseTreeUtils.getClassFullName(nameNode, fileInfo.moduleName, nameNode.d.value),
-            moduleName: fileInfo.moduleName,
-            fileUri: fileInfo.fileUri,
-            typeVarScopeId,
-            isTypeAliasType,
-            typeParams: undefined,
-            computedVariance: undefined,
-        };
-        placeholder.priv.scopeId = typeVarScopeId;
-
-        return placeholder;
+        return symbolResolution.synthesizeTypeAliasPlaceholder(nameNode, isTypeAliasType);
     }
 
     // Evaluates the type of a type alias (i.e. "type") statement. This code
@@ -15254,42 +15129,7 @@ export function createTypeEvaluator(
         otherLiveTypeParams: TypeVarType[],
         scopeId: TypeVarScopeId
     ) {
-        if (!typeParam.shared.isDefaultExplicit && !typeParam.shared.isSynthesized && !TypeVarType.isSelf(typeParam)) {
-            const typeVarWithDefault = otherLiveTypeParams.find(
-                (param) => param.shared.isDefaultExplicit && param.priv.scopeId === scopeId
-            );
-
-            if (typeVarWithDefault) {
-                addDiagnostic(
-                    DiagnosticRule.reportGeneralTypeIssues,
-                    LocMessage.typeVarWithoutDefault().format({
-                        name: typeParam.shared.name,
-                        other: typeVarWithDefault.shared.name,
-                    }),
-                    errorNode
-                );
-            }
-            return;
-        }
-
-        const invalidTypeVars = new Set<string>();
-        validateTypeVarDefault(typeParam, otherLiveTypeParams, invalidTypeVars);
-
-        // If we found one or more unapplied type variable, report an error.
-        if (invalidTypeVars.size > 0) {
-            const diag = new DiagnosticAddendum();
-            invalidTypeVars.forEach((name) => {
-                diag.addMessage(LocAddendum.typeVarDefaultOutOfScope().format({ name }));
-            });
-
-            addDiagnostic(
-                DiagnosticRule.reportGeneralTypeIssues,
-                LocMessage.typeVarDefaultInvalidTypeVar().format({
-                    name: typeParam.shared.name,
-                }) + diag.getString(),
-                errorNode
-            );
-        }
+        symbolResolution.validateTypeParamDefault(evaluatorInterface, errorNode, typeParam, otherLiveTypeParams, scopeId);
     }
 
     function inferVarianceForClass(classType: ClassType): void {
@@ -17933,289 +17773,7 @@ export function createTypeEvaluator(
     }
 
     function getInferredTypeOfDeclaration(symbol: Symbol, decl: Declaration): Type | undefined {
-        const resolvedDecl = resolveAliasDeclaration(decl, /* resolveLocalNames */ true, {
-            allowExternallyHiddenAccess: AnalyzerNodeInfo.getFileInfo(decl.node).isStubFile,
-        });
-
-        // We couldn't resolve the alias. Substitute an unknown
-        // type in this case.
-        if (!resolvedDecl) {
-            return evaluatorOptions.evaluateUnknownImportsAsAny ? AnyType.create() : UnknownType.create();
-        }
-
-        function applyLoaderActionsToModuleType(
-            moduleType: ModuleType,
-            loaderActions: ModuleLoaderActions,
-            importLookup: ImportLookup
-        ): Type {
-            if (!loaderActions.uri.isEmpty() && loaderActions.loadSymbolsFromPath) {
-                const lookupResults = importLookup(loaderActions.uri);
-                if (lookupResults) {
-                    moduleType.priv.fields = lookupResults.symbolTable;
-                    moduleType.priv.docString = lookupResults.docString;
-                } else {
-                    // Note that all module attributes that are not found in the
-                    // symbol table should be treated as Any or Unknown rather than
-                    // as an error.
-                    moduleType.priv.notPresentFieldType = evaluatorOptions.evaluateUnknownImportsAsAny
-                        ? AnyType.create()
-                        : UnknownType.create();
-                }
-            }
-
-            if (loaderActions.implicitImports) {
-                loaderActions.implicitImports.forEach((implicitImport, name) => {
-                    const existingLoaderField = moduleType.priv.loaderFields.get(name);
-
-                    // Recursively apply loader actions.
-                    let symbolType: Type;
-
-                    if (implicitImport.isUnresolved) {
-                        symbolType = UnknownType.create();
-                    } else {
-                        let importedModuleType: ModuleType;
-
-                        const existingType = existingLoaderField?.getSynthesizedType();
-                        if (existingType?.type && isModule(existingType.type)) {
-                            importedModuleType = existingType.type;
-                        } else {
-                            const moduleName = moduleType.priv.moduleName
-                                ? moduleType.priv.moduleName + '.' + name
-                                : '';
-                            importedModuleType = ModuleType.create(moduleName, implicitImport.uri);
-                        }
-
-                        symbolType = applyLoaderActionsToModuleType(importedModuleType, implicitImport, importLookup);
-                    }
-
-                    if (!existingLoaderField) {
-                        const importedModuleSymbol = Symbol.createWithType(SymbolFlags.None, symbolType);
-                        moduleType.priv.loaderFields.set(name, importedModuleSymbol);
-                    }
-                });
-            }
-
-            return moduleType;
-        }
-
-        // If the resolved declaration is still an alias, the alias
-        // is pointing at a module, and we need to synthesize a
-        // module type.
-        if (resolvedDecl.type === DeclarationType.Alias) {
-            let moduleType: ModuleType | undefined;
-
-            // See if this is an import that shares a ModuleType with another
-            // import statement. If so, used the cached type. This happens when
-            // multiple import statements start with the same module name, such
-            // as "import a.b" and "import a.c".
-            if (resolvedDecl.node.nodeType === ParseNodeType.ImportAs) {
-                const cachedType = readTypeCache(resolvedDecl.node.d.module, EvalFlags.None);
-                if (cachedType && isModule(cachedType)) {
-                    moduleType = cachedType;
-                }
-            }
-
-            if (!moduleType) {
-                // Build a module type that corresponds to the declaration and
-                // its associated loader actions.
-                moduleType = ModuleType.create(resolvedDecl.moduleName, resolvedDecl.uri);
-
-                if (resolvedDecl.node.nodeType === ParseNodeType.ImportAs) {
-                    writeTypeCache(resolvedDecl.node.d.module, { type: moduleType }, EvalFlags.None);
-                }
-            }
-
-            return applyLoaderActionsToModuleType(
-                moduleType,
-                resolvedDecl.symbolName && resolvedDecl.submoduleFallback
-                    ? resolvedDecl.submoduleFallback
-                    : resolvedDecl,
-                importLookup
-            );
-        }
-
-        const declaredType = getTypeForDeclaration(resolvedDecl);
-        if (declaredType.type) {
-            return declaredType.type;
-        }
-
-        // If this is part of a "py.typed" package, don't fall back on type inference
-        // unless it's marked Final, is a constant, or is a declared type alias.
-        const fileInfo = AnalyzerNodeInfo.getFileInfo(resolvedDecl.node);
-        let isUnambiguousType = !fileInfo.isInPyTypedPackage || fileInfo.isStubFile;
-
-        // If this is a py.typed package, determine if this is a case where an unannotated
-        // variable is considered "unambiguous" because all type checkers are almost
-        // guaranteed to infer its type the same.
-        if (!isUnambiguousType) {
-            if (resolvedDecl.type === DeclarationType.Variable) {
-                // Special-case variables within an enum class. These are effectively
-                // constants, so we'll treat them as unambiguous.
-                const enclosingClass = ParseTreeUtils.getEnclosingClass(resolvedDecl.node, /* stopAtFunction */ true);
-                if (enclosingClass) {
-                    const classTypeInfo = getTypeOfClass(enclosingClass);
-                    if (classTypeInfo && ClassType.isEnumClass(classTypeInfo.classType)) {
-                        isUnambiguousType = true;
-                    }
-                }
-
-                // Special-case constants, which are treated as unambiguous.
-                if (isFinalVariableDeclaration(resolvedDecl) || resolvedDecl.isConstant) {
-                    isUnambiguousType = true;
-                }
-
-                // Special-case calls to certain built-in type functions.
-                if (resolvedDecl.inferredTypeSource?.nodeType === ParseNodeType.Call) {
-                    const baseTypeResult = getTypeOfExpression(
-                        resolvedDecl.inferredTypeSource.d.leftExpr,
-                        EvalFlags.CallBaseDefaults
-                    );
-                    const callType = baseTypeResult.type;
-
-                    const exemptBuiltins = [
-                        'TypeVar',
-                        'ParamSpec',
-                        'TypeVarTuple',
-                        'TypedDict',
-                        'NamedTuple',
-                        'NewType',
-                        'TypeAliasType',
-                    ];
-
-                    if (isInstantiableClass(callType) && ClassType.isBuiltIn(callType, exemptBuiltins)) {
-                        isUnambiguousType = true;
-                    } else if (
-                        isFunction(callType) &&
-                        exemptBuiltins.some((name) => FunctionType.isBuiltIn(callType, name))
-                    ) {
-                        isUnambiguousType = true;
-                    }
-                }
-            }
-        }
-
-        // If the resolved declaration had no defined type, use the
-        // inferred type for this node.
-        if (resolvedDecl.type === DeclarationType.Param) {
-            assert(resolvedDecl.node.d.name !== undefined);
-            return evaluateTypeForSubnode(resolvedDecl.node.d.name, () => {
-                evaluateTypeOfParam(resolvedDecl.node);
-            })?.type;
-        }
-
-        if (resolvedDecl.type === DeclarationType.Variable && resolvedDecl.inferredTypeSource) {
-            const isTypeAlias =
-                isExplicitTypeAliasDeclaration(resolvedDecl) || isPossibleTypeAliasOrTypedDict(resolvedDecl);
-
-            // If this is a type alias, evaluate types for the entire assignment
-            // statement rather than just the RHS of the assignment.
-            const typeSource =
-                isTypeAlias && resolvedDecl.inferredTypeSource.parent
-                    ? resolvedDecl.inferredTypeSource.parent
-                    : resolvedDecl.inferredTypeSource;
-            let inferredType = evaluateTypeForSubnode(resolvedDecl.node, () => {
-                evaluateTypesForStatement(typeSource);
-            })?.type;
-
-            if (inferredType && isTypeAlias && resolvedDecl.typeAliasName) {
-                // If this was a speculative type alias, it becomes a real type alias only
-                // in the event that its inferred type is instantiable or explicitly Any
-                // (but not an ellipsis).
-                if (isLegalImplicitTypeAliasType(inferredType)) {
-                    const typeAliasTypeVar = synthesizeTypeAliasPlaceholder(resolvedDecl.typeAliasName);
-
-                    inferredType = transformTypeForTypeAlias(
-                        inferredType,
-                        resolvedDecl.node,
-                        typeAliasTypeVar,
-                        /* isPep695TypeVarType */ false
-                    );
-
-                    isUnambiguousType = true;
-                }
-            }
-
-            // Determine whether we need to mark the annotation as ambiguous.
-            if (inferredType && fileInfo.isInPyTypedPackage && !fileInfo.isStubFile) {
-                if (!isUnambiguousType) {
-                    // See if this particular inference can be considered "unambiguous".
-                    // Any symbol that is assigned more than once is considered ambiguous.
-                    if (isUnambiguousInference(symbol, decl, inferredType)) {
-                        isUnambiguousType = true;
-                    }
-                }
-
-                if (!isUnambiguousType) {
-                    inferredType = TypeBase.cloneForAmbiguousType(inferredType);
-                }
-            }
-
-            return inferredType;
-        }
-
-        return undefined;
-    }
-
-    // Applies some heuristics to determine whether it's likely that all Python
-    // type checkers will infer the same type.
-    function isUnambiguousInference(symbol: Symbol, decl: Declaration, inferredType: Type): boolean {
-        const nonSlotsDecls = symbol.getDeclarations().filter((decl) => {
-            return decl.type !== DeclarationType.Variable || !decl.isInferenceAllowedInPyTyped;
-        });
-
-        // Any symbol with more than one assignment is considered ambiguous.
-        if (nonSlotsDecls.length > 1) {
-            return false;
-        }
-
-        if (decl.type !== DeclarationType.Variable) {
-            return false;
-        }
-
-        // If there are no non-slots declarations, don't mark the inferred type as ambiguous.
-        if (nonSlotsDecls.length === 0) {
-            return true;
-        }
-
-        // TypeVar definitions don't require a declaration.
-        if (isTypeVar(inferredType)) {
-            return true;
-        }
-
-        let assignmentNode: AssignmentNode | undefined;
-
-        const parentNode = decl.node.parent;
-        if (parentNode) {
-            // Is this a simple assignment (x = y) or an assignment of an instance variable (self.x = y)?
-            if (parentNode.nodeType === ParseNodeType.Assignment) {
-                assignmentNode = parentNode;
-            } else if (
-                parentNode.nodeType === ParseNodeType.MemberAccess &&
-                parentNode.parent?.nodeType === ParseNodeType.Assignment
-            ) {
-                assignmentNode = parentNode.parent;
-            }
-        }
-
-        if (!assignmentNode) {
-            return false;
-        }
-
-        const assignedType = getTypeOfExpression(assignmentNode.d.rightExpr).type;
-
-        // Assume that literal values will always result in the same inferred type.
-        if (isClassInstance(assignedType) && isLiteralType(assignedType)) {
-            return true;
-        }
-
-        // If the assignment is a simple name corresponding to an unambiguous
-        // type, we'll assume the resulting variable will receive the same
-        // unambiguous type.
-        if (assignmentNode.d.rightExpr.nodeType === ParseNodeType.Name && !TypeBase.isAmbiguous(assignedType)) {
-            return true;
-        }
-
-        return false;
+        return symbolResolution.getInferredTypeOfDeclaration(evaluatorInterface, state, symbol, decl);
     }
 
     // If the specified declaration is an alias declaration that points to a symbol,
@@ -19452,128 +19010,23 @@ export function createTypeEvaluator(
     }
 
     function isPossibleTypeAliasDeclaration(decl: Declaration): boolean {
-        if (decl.type !== DeclarationType.Variable || !decl.typeAliasName || decl.typeAnnotationNode) {
-            return false;
-        }
-
-        if (decl.node.parent?.nodeType !== ParseNodeType.Assignment) {
-            return false;
-        }
-
-        // Perform a sanity check on the RHS expression. Some expression
-        // forms should never be considered legitimate for type aliases.
-        return isLegalTypeAliasExpressionForm(decl.node.parent.d.rightExpr, /* allowStrLiteral */ false);
+        return symbolResolution.isPossibleTypeAliasDeclaration(decl);
     }
 
     function isLegalTypeAliasExpressionForm(node: ExpressionNode, allowStrLiteral: boolean): boolean {
-        switch (node.nodeType) {
-            case ParseNodeType.Error:
-            case ParseNodeType.UnaryOperation:
-            case ParseNodeType.AssignmentExpression:
-            case ParseNodeType.TypeAnnotation:
-            case ParseNodeType.Await:
-            case ParseNodeType.Ternary:
-            case ParseNodeType.Unpack:
-            case ParseNodeType.Tuple:
-            case ParseNodeType.Call:
-            case ParseNodeType.Comprehension:
-            case ParseNodeType.Slice:
-            case ParseNodeType.Yield:
-            case ParseNodeType.YieldFrom:
-            case ParseNodeType.Lambda:
-            case ParseNodeType.Number:
-            case ParseNodeType.Dictionary:
-            case ParseNodeType.List:
-            case ParseNodeType.Set:
-                return false;
-
-            case ParseNodeType.StringList:
-            case ParseNodeType.String:
-                return allowStrLiteral;
-
-            case ParseNodeType.Constant:
-                return node.d.constType === KeywordType.None;
-
-            case ParseNodeType.BinaryOperation:
-                return (
-                    node.d.operator === OperatorType.BitwiseOr &&
-                    isLegalTypeAliasExpressionForm(node.d.leftExpr, /* allowStrLiteral */ true) &&
-                    isLegalTypeAliasExpressionForm(node.d.rightExpr, /* allowStrLiteral */ true)
-                );
-
-            case ParseNodeType.Index:
-                return isLegalTypeAliasExpressionForm(node.d.leftExpr, allowStrLiteral);
-
-            case ParseNodeType.MemberAccess:
-                return isLegalTypeAliasExpressionForm(node.d.leftExpr, allowStrLiteral);
-        }
-
-        return true;
+        return symbolResolution.isLegalTypeAliasExpressionForm(node, allowStrLiteral);
     }
 
     function isLegalImplicitTypeAliasType(type: Type) {
-        // We explicitly exclude "..." and "Unknown".
-        if (isEllipsisType(type)) {
-            return false;
-        }
-
-        if (isUnknown(type)) {
-            // If this is a union type, we'll assume that it was meant as a type
-            // alias even though all of the union subtypes are Unknown.
-            if (type.props?.specialForm && ClassType.isBuiltIn(type.props.specialForm, 'UnionType')) {
-                return true;
-            }
-            return false;
-        }
-
-        // Look at the subtypes within the union. If any of them are not
-        // instantiable (other than "None" which is special-cased), it is
-        // not a legal type alias type.
-        let isLegal = true;
-        doForEachSubtype(type, (subtype) => {
-            if (!TypeBase.isInstantiable(subtype) && !isNoneInstance(subtype)) {
-                isLegal = false;
-            }
-        });
-
-        return isLegal;
+        return symbolResolution.isLegalImplicitTypeAliasType(type);
     }
 
     function isPossibleTypeAliasOrTypedDict(decl: Declaration) {
-        return isPossibleTypeAliasDeclaration(decl) || isPossibleTypeDictFactoryCall(decl);
+        return symbolResolution.isPossibleTypeAliasOrTypedDict(evaluatorInterface, decl);
     }
 
     function isPossibleTypeDictFactoryCall(decl: Declaration) {
-        if (
-            decl.type !== DeclarationType.Variable ||
-            !decl.node.parent ||
-            decl.node.parent.nodeType !== ParseNodeType.Assignment ||
-            decl.node.parent.d.rightExpr?.nodeType !== ParseNodeType.Call
-        ) {
-            return false;
-        }
-
-        const callLeftNode = decl.node.parent.d.rightExpr.d.leftExpr;
-
-        // Use a simple heuristic to determine whether this is potentially
-        // a call to the TypedDict call. This avoids the expensive (and potentially
-        // recursive) call to getTypeOfExpression in cases where it's not needed.
-        if (
-            (callLeftNode.nodeType === ParseNodeType.Name && callLeftNode.d.value) === 'TypedDict' ||
-            (callLeftNode.nodeType === ParseNodeType.MemberAccess &&
-                callLeftNode.d.member.d.value === 'TypedDict' &&
-                callLeftNode.d.leftExpr.nodeType === ParseNodeType.Name)
-        ) {
-            // See if this is a call to TypedDict. We want to support
-            // recursive type references in a TypedDict call.
-            const callType = getTypeOfExpression(callLeftNode, EvalFlags.CallBaseDefaults).type;
-
-            if (isInstantiableClass(callType) && ClassType.isBuiltIn(callType, 'TypedDict')) {
-                return true;
-            }
-        }
-
-        return false;
+        return symbolResolution.isPossibleTypeDictFactoryCall(evaluatorInterface, decl);
     }
 
     function printObjectTypeForClass(type: ClassType): string {
