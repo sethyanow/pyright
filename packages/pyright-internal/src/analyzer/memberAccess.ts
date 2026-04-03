@@ -1,21 +1,30 @@
 // Member access, descriptor protocol, and method binding functions
 // extracted from typeEvaluator.ts.
 
+import { AnalyzerFileInfo } from './analyzerFileInfo';
+import * as AnalyzerNodeInfo from './analyzerNodeInfo';
 import { assert } from '../common/debug';
 import { DiagnosticAddendum } from '../common/diagnostic';
 import { LocMessage } from '../localization/localize';
 import { DiagnosticRule } from '../common/diagnosticRules';
-import { ArgCategory, ExpressionNode, ParamCategory } from '../parser/parseNodes';
+import { ArgCategory, ClassNode, ExpressionNode, NameNode, ParamCategory, ParseNode } from '../parser/parseNodes';
 import * as ParseTreeUtils from './parseTreeUtils';
 import { ConstraintTracker } from './constraintTracker';
 import * as specialForms from './specialForms';
 import { makeTupleObject } from './tuples';
+import { Symbol } from './symbol';
+import { isEffectivelyClassVar } from './symbolUtils';
+import { TypeEvaluatorState } from './typeEvaluatorState';
 import { TypeRegistry } from './typeRegistry';
+import * as TypePrinter from './typePrinter';
+import * as typeAssignment from './typeAssignment';
 import {
     Arg,
     AssignTypeFlags,
     CallResult,
+    ClassTypeResult,
     EvalFlags,
+    EvaluatorUsage,
     MagicMethodDeprecationInfo,
     TypeEvaluator,
     TypeResult,
@@ -36,6 +45,7 @@ import {
     isParamSpec,
     isTypeVarTuple,
     isOverloaded,
+    isTypeSame,
     isTypeVar,
     OverloadedType,
     Type,
@@ -48,7 +58,10 @@ import {
     convertToInstance,
     convertToInstantiable,
     InferenceContext,
+    isDescriptorInstance,
     isInstantiableMetaclass,
+    lookUpClassMember,
+    MemberAccessFlags,
     isNoneInstance,
     isNoneTypeClass,
     isSentinelLiteral,
@@ -625,4 +638,111 @@ export function addTypeFormForSymbol(
     }
 
     return type;
+}
+
+export function setSymbolAccessed(
+    state: TypeEvaluatorState,
+    fileInfo: AnalyzerFileInfo,
+    symbol: Symbol,
+    node: ParseNode
+) {
+    if (!state.isSpeculativeModeInUse(node)) {
+        fileInfo.accessedSymbolSet.add(symbol.id);
+    }
+}
+
+export function isAsymmetricDescriptorClass(evaluator: TypeEvaluator, classType: ClassType): boolean {
+    // If the value has already been cached in this type, return the cached value.
+    if (classType.priv.isAsymmetricDescriptor !== undefined) {
+        return classType.priv.isAsymmetricDescriptor;
+    }
+
+    let isAsymmetric = false;
+
+    const getterSymbolResult = lookUpClassMember(classType, '__get__', MemberAccessFlags.SkipBaseClasses);
+    const setterSymbolResult = lookUpClassMember(classType, '__set__', MemberAccessFlags.SkipBaseClasses);
+
+    if (!getterSymbolResult || !setterSymbolResult) {
+        isAsymmetric = false;
+    } else {
+        let getterType = getTypeOfMember(evaluator, getterSymbolResult);
+        const setterType = getTypeOfMember(evaluator, setterSymbolResult);
+
+        // If this is an overload, find the appropriate overload.
+        if (isOverloaded(getterType)) {
+            const getOverloads = OverloadedType.getOverloads(getterType).filter((overload) => {
+                if (overload.shared.parameters.length < 2) {
+                    return false;
+                }
+                const param1Type = FunctionType.getParamType(overload, 1);
+                return !isNoneInstance(param1Type);
+            });
+
+            if (getOverloads.length === 1) {
+                getterType = getOverloads[0];
+            } else {
+                isAsymmetric = true;
+            }
+        }
+
+        // If this is an overload, find the appropriate overload.
+        if (isOverloaded(setterType)) {
+            isAsymmetric = true;
+        }
+
+        // If either the setter or getter is an overload (or some other non-function type),
+        // conservatively assume that it's not asymmetric.
+        if (isFunction(getterType) && isFunction(setterType)) {
+            // If there's no declared return type on the getter, assume it's symmetric.
+            if (setterType.shared.parameters.length >= 3 && getterType.shared.declaredReturnType) {
+                const setterValueType = FunctionType.getParamType(setterType, 2);
+                const getterReturnType = FunctionType.getEffectiveReturnType(getterType) ?? UnknownType.create();
+
+                if (!isTypeSame(setterValueType, getterReturnType)) {
+                    isAsymmetric = true;
+                }
+            }
+        }
+    }
+
+    // Cache the value for next time.
+    classType.priv.isAsymmetricDescriptor = isAsymmetric;
+    return isAsymmetric;
+}
+
+export function isClassWithAsymmetricAttributeAccessor(evaluator: TypeEvaluator, classType: ClassType): boolean {
+    // If the value has already been cached in this type, return the cached value.
+    if (classType.priv.isAsymmetricAttributeAccessor !== undefined) {
+        return classType.priv.isAsymmetricAttributeAccessor;
+    }
+
+    let isAsymmetric = false;
+
+    const getterSymbolResult = lookUpClassMember(classType, '__getattr__', MemberAccessFlags.SkipBaseClasses);
+    const setterSymbolResult = lookUpClassMember(classType, '__setattr__', MemberAccessFlags.SkipBaseClasses);
+
+    if (!getterSymbolResult || !setterSymbolResult) {
+        isAsymmetric = false;
+    } else {
+        const getterType = evaluator.getEffectiveTypeOfSymbol(getterSymbolResult.symbol);
+        const setterType = evaluator.getEffectiveTypeOfSymbol(setterSymbolResult.symbol);
+
+        // If either the setter or getter is an overload (or some other non-function type),
+        // conservatively assume that it's not asymmetric.
+        if (isFunction(getterType) && isFunction(setterType)) {
+            // If there's no declared return type on the getter, assume it's symmetric.
+            if (setterType.shared.parameters.length >= 3 && getterType.shared.declaredReturnType) {
+                const setterValueType = FunctionType.getParamType(setterType, 2);
+                const getterReturnType = FunctionType.getEffectiveReturnType(getterType) ?? UnknownType.create();
+
+                if (!isTypeSame(setterValueType, getterReturnType)) {
+                    isAsymmetric = true;
+                }
+            }
+        }
+    }
+
+    // Cache the value for next time.
+    classType.priv.isAsymmetricAttributeAccessor = isAsymmetric;
+    return isAsymmetric;
 }

@@ -6024,99 +6024,11 @@ export function createTypeEvaluator(
     }
 
     function isAsymmetricDescriptorClass(classType: ClassType): boolean {
-        // If the value has already been cached in this type, return the cached value.
-        if (classType.priv.isAsymmetricDescriptor !== undefined) {
-            return classType.priv.isAsymmetricDescriptor;
-        }
-
-        let isAsymmetric = false;
-
-        const getterSymbolResult = lookUpClassMember(classType, '__get__', MemberAccessFlags.SkipBaseClasses);
-        const setterSymbolResult = lookUpClassMember(classType, '__set__', MemberAccessFlags.SkipBaseClasses);
-
-        if (!getterSymbolResult || !setterSymbolResult) {
-            isAsymmetric = false;
-        } else {
-            let getterType = getTypeOfMember(getterSymbolResult);
-            const setterType = getTypeOfMember(setterSymbolResult);
-
-            // If this is an overload, find the appropriate overload.
-            if (isOverloaded(getterType)) {
-                const getOverloads = OverloadedType.getOverloads(getterType).filter((overload) => {
-                    if (overload.shared.parameters.length < 2) {
-                        return false;
-                    }
-                    const param1Type = FunctionType.getParamType(overload, 1);
-                    return !isNoneInstance(param1Type);
-                });
-
-                if (getOverloads.length === 1) {
-                    getterType = getOverloads[0];
-                } else {
-                    isAsymmetric = true;
-                }
-            }
-
-            // If this is an overload, find the appropriate overload.
-            if (isOverloaded(setterType)) {
-                isAsymmetric = true;
-            }
-
-            // If either the setter or getter is an overload (or some other non-function type),
-            // conservatively assume that it's not asymmetric.
-            if (isFunction(getterType) && isFunction(setterType)) {
-                // If there's no declared return type on the getter, assume it's symmetric.
-                if (setterType.shared.parameters.length >= 3 && getterType.shared.declaredReturnType) {
-                    const setterValueType = FunctionType.getParamType(setterType, 2);
-                    const getterReturnType = FunctionType.getEffectiveReturnType(getterType) ?? UnknownType.create();
-
-                    if (!isTypeSame(setterValueType, getterReturnType)) {
-                        isAsymmetric = true;
-                    }
-                }
-            }
-        }
-
-        // Cache the value for next time.
-        classType.priv.isAsymmetricDescriptor = isAsymmetric;
-        return isAsymmetric;
+        return memberAccessModule.isAsymmetricDescriptorClass(evaluatorInterface, classType);
     }
 
     function isClassWithAsymmetricAttributeAccessor(classType: ClassType): boolean {
-        // If the value has already been cached in this type, return the cached value.
-        if (classType.priv.isAsymmetricAttributeAccessor !== undefined) {
-            return classType.priv.isAsymmetricAttributeAccessor;
-        }
-
-        let isAsymmetric = false;
-
-        const getterSymbolResult = lookUpClassMember(classType, '__getattr__', MemberAccessFlags.SkipBaseClasses);
-        const setterSymbolResult = lookUpClassMember(classType, '__setattr__', MemberAccessFlags.SkipBaseClasses);
-
-        if (!getterSymbolResult || !setterSymbolResult) {
-            isAsymmetric = false;
-        } else {
-            const getterType = getEffectiveTypeOfSymbol(getterSymbolResult.symbol);
-            const setterType = getEffectiveTypeOfSymbol(setterSymbolResult.symbol);
-
-            // If either the setter or getter is an overload (or some other non-function type),
-            // conservatively assume that it's not asymmetric.
-            if (isFunction(getterType) && isFunction(setterType)) {
-                // If there's no declared return type on the getter, assume it's symmetric.
-                if (setterType.shared.parameters.length >= 3 && getterType.shared.declaredReturnType) {
-                    const setterValueType = FunctionType.getParamType(setterType, 2);
-                    const getterReturnType = FunctionType.getEffectiveReturnType(getterType) ?? UnknownType.create();
-
-                    if (!isTypeSame(setterValueType, getterReturnType)) {
-                        isAsymmetric = true;
-                    }
-                }
-            }
-        }
-
-        // Cache the value for next time.
-        classType.priv.isAsymmetricAttributeAccessor = isAsymmetric;
-        return isAsymmetric;
+        return memberAccessModule.isClassWithAsymmetricAttributeAccessor(evaluatorInterface, classType);
     }
 
     // Applies the __getattr__, __setattr__ or __delattr__ method if present.
