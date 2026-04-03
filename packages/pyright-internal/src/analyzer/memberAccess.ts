@@ -7,7 +7,7 @@ import { assert } from '../common/debug';
 import { DiagnosticAddendum } from '../common/diagnostic';
 import { LocAddendum, LocMessage } from '../localization/localize';
 import { DiagnosticRule } from '../common/diagnosticRules';
-import { ArgCategory, ClassNode, ExpressionNode, NameNode, ParamCategory, ParseNode } from '../parser/parseNodes';
+import { ArgCategory, ExpressionNode, ParamCategory, ParseNode } from '../parser/parseNodes';
 import * as ParseTreeUtils from './parseTreeUtils';
 import { ConstraintTracker } from './constraintTracker';
 import { DeclarationType, VariableDeclaration } from './declaration';
@@ -24,7 +24,6 @@ import {
     AssignTypeFlags,
     CallResult,
     ClassMemberLookup,
-    ClassTypeResult,
     EvalFlags,
     EvaluatorUsage,
     MagicMethodDeprecationInfo,
@@ -562,7 +561,11 @@ export function specializeTypeAliasWithDefaults(
                 },
             });
         } else if (isTypeVarTuple(param) && registry.tupleClass && isInstantiableClass(registry.tupleClass)) {
-            defaultType = makeTupleObject(evaluator, [{ type: UnknownType.create(), isUnbounded: true }], /* isUnpacked */ true);
+            defaultType = makeTupleObject(
+                evaluator,
+                [{ type: UnknownType.create(), isUnbounded: true }],
+                /* isUnpacked */ true
+            );
         } else {
             defaultType = UnknownType.create();
         }
@@ -641,7 +644,12 @@ export function addTypeFormForSymbol(
     if (type.props?.typeAliasInfo && TypeBase.isInstantiable(type)) {
         let typeFormType = type;
         if ((flags & EvalFlags.NoSpecialize) === 0) {
-            typeFormType = specializeTypeAliasWithDefaults(evaluator, registry, typeFormType, /* errorNode */ undefined);
+            typeFormType = specializeTypeAliasWithDefaults(
+                evaluator,
+                registry,
+                typeFormType,
+                /* errorNode */ undefined
+            );
         }
 
         type = TypeBase.cloneWithTypeForm(type, convertToInstance(typeFormType));
@@ -797,7 +805,8 @@ export function applyAttributeAccessOverride(
 
     let accessMemberType: Type | undefined;
     if (usage.method === 'get') {
-        accessMemberType = getAttributeAccessMemberType('__getattribute__') ?? getAttributeAccessMemberType('__getattr__');
+        accessMemberType =
+            getAttributeAccessMemberType('__getattribute__') ?? getAttributeAccessMemberType('__getattr__');
     } else if (usage.method === 'set') {
         accessMemberType = getAttributeAccessMemberType('__setattr__');
     } else {
@@ -1202,7 +1211,12 @@ export function getTypeOfMemberInternal(
 
     // Report inappropriate use of variables in type expressions.
     if ((flags & MemberAccessFlags.TypeExpression) !== 0 && errorNode) {
-        typeResult.type = validateSymbolIsTypeExpression(evaluator, errorNode, typeResult.type, !!typeResult.includesVariableDecl);
+        typeResult.type = validateSymbolIsTypeExpression(
+            evaluator,
+            errorNode,
+            typeResult.type,
+            !!typeResult.includesVariableDecl
+        );
     }
 
     // If the type is a function or overloaded function, infer
@@ -1632,8 +1646,7 @@ export function getTypeOfBoundMember(
         );
 
         if (descMemberInfo) {
-            const isProperty =
-                isClassInstance(descMemberInfo.type) && ClassType.isPropertyClass(descMemberInfo.type);
+            const isProperty = isClassInstance(descMemberInfo.type) && ClassType.isPropertyClass(descMemberInfo.type);
             if (isDescriptorInstance(descMemberInfo.type, /* requireSetter */ true) || isProperty) {
                 skipObjectTypeLookup = true;
             }
@@ -1719,11 +1732,7 @@ export function getTypeOfBoundMember(
         };
     }
 
-    if (
-        isClassInstance(objectType) &&
-        ClassType.isBuiltIn(objectType, 'type') &&
-        objectType.priv.includeSubclasses
-    ) {
+    if (isClassInstance(objectType) && ClassType.isBuiltIn(objectType, 'type') && objectType.priv.includeSubclasses) {
         if ((flags & (MemberAccessFlags.SkipTypeBaseClass | MemberAccessFlags.SkipAttributeAccessOverride)) === 0) {
             const typeArg =
                 objectType.priv.typeArgs && objectType.priv.typeArgs.length >= 1
@@ -1860,4 +1869,3 @@ export function getCallbackProtocolType(
 
     return makeFunctionTypeVarsBound(callType);
 }
-

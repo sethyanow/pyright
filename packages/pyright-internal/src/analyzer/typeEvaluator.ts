@@ -103,13 +103,7 @@ import {
 import { ConstraintSet, ConstraintTracker } from './constraintTracker';
 import { createFunctionFromConstructor, getBoundInitMethod, validateConstructorArgs } from './constructors';
 import { applyDataClassClassBehaviorOverrides, synthesizeDataClassMethods } from './dataClasses';
-import {
-    ClassDeclaration,
-    Declaration,
-    DeclarationType,
-    FunctionDeclaration,
-    VariableDeclaration,
-} from './declaration';
+import { ClassDeclaration, Declaration, DeclarationType, FunctionDeclaration } from './declaration';
 import { getNameNodeForDeclaration, ResolvedAliasInfo } from './declarationUtils';
 import { LogWrapper, TypeEvaluatorState } from './typeEvaluatorState';
 import { populateTypeRegistry, TypeRegistry } from './typeRegistry';
@@ -157,7 +151,6 @@ import { createSentinelType } from './sentinel';
 import { evaluateStaticBoolExpression } from './staticExpressions';
 import { indeterminateSymbolId, Symbol, SymbolFlags } from './symbol';
 import { isConstantName, isPrivateName, isPrivateOrProtectedName } from './symbolNameUtils';
-import { isEffectivelyClassVar } from './symbolUtils';
 import { expandTuple, getSlicedTupleType, getTypeOfTuple, makeTupleObject } from './tuples';
 import { SpeculativeModeOptions } from './typeCacheUtils';
 import {
@@ -178,7 +171,6 @@ import {
     CallSignature,
     CallSignatureInfo,
     CallSiteEvaluationInfo,
-    ClassMemberLookup,
     ClassTypeResult,
     DeclaredSymbolTypeInfo,
     EffectiveTypeResult,
@@ -288,10 +280,8 @@ import {
     getTypeCondition,
     getTypeVarArgsRecursive,
     getTypeVarScopeIds,
-    getUnknownTypeForCallable,
     InferenceContext,
     invertVariance,
-    isDescriptorInstance,
     isEffectivelyInstantiable,
     isEllipsisType,
     isIncompleteUnknown,
@@ -311,14 +301,12 @@ import {
     isUnboundedTupleClass,
     lookUpClassMember,
     lookUpObjectMember,
-    makeFunctionTypeVarsBound,
     makeInferenceContext,
     makePacked,
     makeTypeVarsBound,
     makeTypeVarsFree,
     mapSubtypes,
     MemberAccessFlags,
-    partiallySpecializeType,
     preserveUnknown,
     removeNoneFromUnion,
     requiresSpecialization,
@@ -327,7 +315,6 @@ import {
     simplifyFunctionToParamSpec,
     sortTypes,
     specializeForBaseClass,
-    specializeWithDefaultTypeArgs,
     stripTypeForm,
     stripTypeFormRecursive,
     synthesizeTypeVarForSelfCls,
@@ -4044,7 +4031,14 @@ export function createTypeEvaluator(
     }
 
     function addTypeFormForSymbol(node: ExpressionNode, type: Type, flags: EvalFlags, includesVarDecl: boolean): Type {
-        return memberAccessModule.addTypeFormForSymbol(evaluatorInterface, registry, node, type, flags, includesVarDecl);
+        return memberAccessModule.addTypeFormForSymbol(
+            evaluatorInterface,
+            registry,
+            node,
+            type,
+            flags,
+            includesVarDecl
+        );
     }
 
     // Reports diagnostics if type isn't valid within a type expression.
@@ -5185,116 +5179,6 @@ export function createTypeEvaluator(
             memberAccessDeprecationInfo,
             typeErrors,
         };
-    }
-
-    function getTypeOfClassMemberName(
-        errorNode: ExpressionNode | undefined,
-        classType: ClassType,
-        memberName: string,
-        usage: EvaluatorUsage,
-        diag: DiagnosticAddendum | undefined,
-        flags: MemberAccessFlags,
-        selfType?: ClassType | TypeVarType,
-        recursionCount?: number
-    ): ClassMemberLookup | undefined {
-        return memberAccessModule.getTypeOfClassMemberName(
-            evaluatorInterface,
-            state,
-            registry,
-            errorNode,
-            classType,
-            memberName,
-            usage,
-            diag,
-            flags,
-            selfType,
-            recursionCount
-        );
-    }
-
-    // Applies descriptor access methods "__get__", "__set__", or "__delete__"
-    // if they apply.
-    function applyDescriptorAccessMethod(
-        memberType: Type,
-        concreteMemberType: ClassType,
-        memberInfo: ClassMember | undefined,
-        classType: ClassType,
-        selfType: ClassType | TypeVarType | undefined,
-        flags: MemberAccessFlags,
-        errorNode: ExpressionNode,
-        memberName: string,
-        usage: EvaluatorUsage,
-        diag: DiagnosticAddendum | undefined
-    ): MemberAccessTypeResult {
-        return memberAccessModule.applyDescriptorAccessMethod(
-            evaluatorInterface,
-            state,
-            registry,
-            memberType,
-            concreteMemberType,
-            memberInfo,
-            classType,
-            selfType,
-            flags,
-            errorNode,
-            memberName,
-            usage,
-            diag
-        );
-    }
-
-    function bindMethodForMemberAccess(
-        type: Type,
-        concreteType: FunctionType | OverloadedType,
-        memberInfo: ClassMember | undefined,
-        classType: ClassType,
-        selfType: ClassType | TypeVarType | undefined,
-        flags: MemberAccessFlags,
-        memberName: string,
-        usage: EvaluatorUsage,
-        diag: DiagnosticAddendum | undefined,
-        recursionCount = 0
-    ): TypeResult {
-        return memberAccessModule.bindMethodForMemberAccess(
-            evaluatorInterface,
-            type,
-            concreteType,
-            memberInfo,
-            classType,
-            selfType,
-            flags,
-            memberName,
-            usage,
-            diag,
-            recursionCount
-        );
-    }
-
-    function isAsymmetricDescriptorClass(classType: ClassType): boolean {
-        return memberAccessModule.isAsymmetricDescriptorClass(evaluatorInterface, classType);
-    }
-
-    function isClassWithAsymmetricAttributeAccessor(classType: ClassType): boolean {
-        return memberAccessModule.isClassWithAsymmetricAttributeAccessor(evaluatorInterface, classType);
-    }
-
-    function applyAttributeAccessOverride(
-        errorNode: ExpressionNode,
-        classType: ClassType,
-        usage: EvaluatorUsage,
-        memberName: string,
-        selfType?: ClassType | TypeVarType
-    ): MemberAccessTypeResult | undefined {
-        return memberAccessModule.applyAttributeAccessOverride(
-            evaluatorInterface,
-            state,
-            registry,
-            errorNode,
-            classType,
-            usage,
-            memberName,
-            selfType
-        );
     }
 
     function getTypeOfIndex(node: IndexNode, flags = EvalFlags.None): TypeResult {
@@ -16720,15 +16604,6 @@ export function createTypeEvaluator(
 
     function getTypeOfMember(member: ClassMember): Type {
         return memberAccessModule.getTypeOfMember(evaluatorInterface, member);
-    }
-
-    function getTypeOfMemberInternal(
-        errorNode: ExpressionNode | undefined,
-        member: ClassMember,
-        selfClass: ClassType | TypeVarType | undefined,
-        flags: MemberAccessFlags
-    ): TypeResult | undefined {
-        return memberAccessModule.getTypeOfMemberInternal(evaluatorInterface, errorNode, member, selfClass, flags);
     }
 
     function assignClassToSelf(

@@ -12,6 +12,8 @@ parent: pyr-a56
 
 
 
+
+
 ## Context
 
 Member access and descriptor functions handle Python's attribute access protocol — descriptor `__get__`/`__set__`/`__delete__` dispatch, `__getattr__`/`__getattribute__` overrides, method binding to classes/instances, and the complexities of asymmetric accessors (properties with different get/set types).
@@ -112,3 +114,5 @@ Tier 2 (call into tier 1): getBoundMagicMethod, applyDescriptorAccessMethod, bin
 Tier 3 (calls tier 2): getCallbackProtocolType
 
 Nearby helpers to evaluate during extraction: isAsymmetricDescriptorClass, getAttributeAccessMember, isClassWithAsymmetricAttributeAccessor, partiallySpecializeBoundMethod
+- [2026-04-03T13:12:44Z] [Seth] Phase 1 revised: getTypeOfClassMemberName (only called by getTypeOfBoundMember) creates a cycle with batch members. Extracting as cycle batch: getTypeOfBoundMember, getTypeOfClassMemberName, applyDescriptorAccessMethod, bindMethodForMemberAccess, applyAttributeAccessOverride + helpers getTypeOfMemberInternal, isAsymmetricDescriptorClass, getAttributeAccessMember, isClassWithAsymmetricAttributeAccessor, setSymbolAccessed, printObjectTypeForClass, narrowTypeBasedOnAssignment, validateSymbolIsTypeExpression. Then getBoundMagicMethod and getCallbackProtocolType as post-cycle.
+- [2026-04-03T13:22:13Z] [Seth] Pausing mid-cycle batch. Functions in memberAccess.ts but NOT yet wired (cycle incomplete): applyAttributeAccessOverride, bindMethodForMemberAccess, applyDescriptorAccessMethod, validateSymbolIsTypeExpression, getTypeOfMemberInternal. Still need to write: getTypeOfClassMemberName (~300 lines, heaviest function), getTypeOfBoundMember (~180 lines). All non-cycle functions extracted and committed (9 commits). File compiles except for 2 forward refs to getTypeOfBoundMember. No test failures in any committed state.
