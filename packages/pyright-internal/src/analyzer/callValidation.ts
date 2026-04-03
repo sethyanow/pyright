@@ -64,6 +64,7 @@ import {
     isNever,
     isUnpacked,
     isUnpackedClass,
+    isUnion,
     isUnpackedTypeVarTuple,
     isTypeSame,
     isFunctionOrOverloaded,
@@ -107,6 +108,7 @@ import {
     convertTypeToParamSpecValue,
     preserveUnknown,
     addConditionToType,
+    containsAnyOrUnknown,
     containsLiteralType,
     selfSpecializeClass,
     transformExpectedType,
@@ -2725,4 +2727,112 @@ export function validateArgTypesWithExpectedType(
     evaluator.assignType(returnType, expectedType, /* diag */ undefined, constraints, assignFlags);
 
     return validateArgTypes(evaluator, state, registry, errorNode, matchResults, constraints, skipUnknownArgCheck);
+}
+
+export function validateArgTypesWithContext(
+    evaluator: TypeEvaluator,
+    state: TypeEvaluatorState,
+    registry: TypeRegistry,
+    errorNode: ExpressionNode,
+    matchResults: MatchArgsToParamsResult,
+    constraints: ConstraintTracker,
+    skipUnknownArgCheck = false,
+    inferenceContext: InferenceContext | undefined
+): CallResult {
+    const type = matchResults.overload;
+
+    let expectedType: Type | undefined = inferenceContext?.expectedType;
+
+    const returnType = inferenceContext?.returnTypeOverride ?? evaluator.getEffectiveReturnTypeResult(type).type;
+    if (!returnType || !requiresSpecialization(returnType)) {
+        expectedType = undefined;
+    }
+
+    const tryExpectedType = (expectedSubtype: Type): number => {
+        const clonedConstraints = constraints.clone();
+        const callResult = validateArgTypesWithExpectedType(
+            evaluator,
+            state,
+            registry,
+            errorNode,
+            matchResults,
+            clonedConstraints,
+            /* skipUnknownArgCheck */ true,
+            expectedSubtype,
+            returnType
+        );
+
+        if (!callResult.argumentErrors && callResult.returnType) {
+            const resolvedReturnType = inferenceContext?.returnTypeOverride
+                ? evaluator.solveAndApplyConstraints(inferenceContext.returnTypeOverride, clonedConstraints)
+                : callResult.returnType;
+
+            if (
+                evaluator.assignType(
+                    expectedSubtype,
+                    resolvedReturnType,
+                    /* diag */ undefined,
+                    /* constraints */ undefined,
+                    AssignTypeFlags.Default
+                )
+            ) {
+                const anyOrUnknown = containsAnyOrUnknown(callResult.returnType, /* recurse */ true);
+                if (!anyOrUnknown) {
+                    return 3;
+                }
+
+                return isAny(anyOrUnknown) ? 2 : 1;
+            }
+        }
+
+        return 0;
+    };
+
+    if (expectedType) {
+        expectedType = state.useSpeculativeMode(getSpeculativeNodeForCall(errorNode), () => {
+            let validExpectedSubtype: Type | undefined;
+            let bestSubtypeScore = -1;
+
+            if (isUnion(expectedType!)) {
+                doForEachSubtype(
+                    expectedType!,
+                    (expectedSubtype) => {
+                        if (bestSubtypeScore < 3) {
+                            const score = tryExpectedType(expectedSubtype);
+                            if (score > 0 && score > bestSubtypeScore) {
+                                validExpectedSubtype = expectedSubtype;
+                                bestSubtypeScore = score;
+                            }
+                        }
+                    },
+                    /* sortSubtypes */ true
+                );
+            }
+
+            if (bestSubtypeScore < 3) {
+                const score = tryExpectedType(expectedType!);
+                if (score > 0 && score > bestSubtypeScore) {
+                    validExpectedSubtype = expectedType;
+                }
+            }
+
+            return validExpectedSubtype;
+        });
+    }
+
+    if (!expectedType || isAnyOrUnknown(expectedType) || isNever(expectedType)) {
+        return validateArgTypes(evaluator, state, registry, errorNode, matchResults, constraints, skipUnknownArgCheck);
+    }
+
+    return validateArgTypesWithExpectedType(
+        evaluator,
+        state,
+        registry,
+        errorNode,
+        matchResults,
+        constraints,
+        skipUnknownArgCheck,
+        expectedType,
+        returnType
+    );
 }
