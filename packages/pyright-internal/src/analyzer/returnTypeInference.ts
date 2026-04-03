@@ -16,12 +16,7 @@ import * as ParseTreeUtils from './parseTreeUtils';
 import { inferFunctionReturnType } from './symbolResolution';
 import { maxCodeComplexity } from './typeEvaluator';
 import { TypeCacheEntry, TypeEvaluatorState } from './typeEvaluatorState';
-import {
-    CallSiteEvaluationInfo,
-    EvalFlags,
-    TypeEvaluator,
-    TypeResult,
-} from './typeEvaluatorTypes';
+import { CallSiteEvaluationInfo, EvalFlags, TypeEvaluator, TypeResult } from './typeEvaluatorTypes';
 import {
     FunctionParam,
     FunctionType,
@@ -201,10 +196,7 @@ export function inferReturnTypeForCallSite(
             if (!functionTypeResult.functionType.priv.callSiteReturnTypeCache) {
                 functionTypeResult.functionType.priv.callSiteReturnTypeCache = [];
             }
-            if (
-                functionTypeResult.functionType.priv.callSiteReturnTypeCache.length >=
-                maxCallSiteReturnTypeCacheSize
-            ) {
+            if (functionTypeResult.functionType.priv.callSiteReturnTypeCache.length >= maxCallSiteReturnTypeCacheSize) {
                 functionTypeResult.functionType.priv.callSiteReturnTypeCache =
                     functionTypeResult.functionType.priv.callSiteReturnTypeCache.slice(1);
             }
@@ -385,4 +377,3 @@ export function getInferredReturnTypeResultImpl(
 
     return { type: returnType, isIncomplete };
 }
-

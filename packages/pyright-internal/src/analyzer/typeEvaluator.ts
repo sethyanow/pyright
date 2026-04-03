@@ -111,7 +111,7 @@ import {
     VariableDeclaration,
 } from './declaration';
 import { getNameNodeForDeclaration, ResolvedAliasInfo } from './declarationUtils';
-import { LogWrapper, TypeCacheEntry, TypeEvaluatorState } from './typeEvaluatorState';
+import { LogWrapper, TypeEvaluatorState } from './typeEvaluatorState';
 import { populateTypeRegistry, TypeRegistry } from './typeRegistry';
 import {
     addOverloadsToFunctionType,
@@ -16200,7 +16200,6 @@ export function createTypeEvaluator(
             }
         }
     }
-
 
     function evaluateTypesForForStatement(node: ForNode): void {
         if (isTypeCached(node)) {

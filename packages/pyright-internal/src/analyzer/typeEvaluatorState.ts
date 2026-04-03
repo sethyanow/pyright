@@ -136,6 +136,11 @@ export class TypeEvaluatorState {
         return this._codeFlowEngine!;
     }
 
+    get wrapWithLogger(): LogWrapper {
+        assert(this._wrapWithLogger !== undefined, 'wrapWithLogger not yet initialized');
+        return this._wrapWithLogger!;
+    }
+
     setIsNodeReachable(fn: (node: ParseNode) => boolean): void {
         this._isNodeReachable = fn;
     }
@@ -146,11 +151,6 @@ export class TypeEvaluatorState {
 
     setCodeFlowEngine(engine: CodeFlowEngine): void {
         this._codeFlowEngine = engine;
-    }
-
-    get wrapWithLogger(): LogWrapper {
-        assert(this._wrapWithLogger !== undefined, 'wrapWithLogger not yet initialized');
-        return this._wrapWithLogger!;
     }
 
     setWrapWithLogger(wrapper: LogWrapper): void {
