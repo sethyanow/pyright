@@ -16361,6 +16361,14 @@ export function createTypeEvaluator(
         isAbstract: boolean,
         callerNode: ExpressionNode | undefined
     ): TypeResult | undefined {
+        return symbolResolution.inferFunctionReturnType(evaluatorInterface, state, node, isAbstract, callerNode);
+    }
+
+    function _inferFunctionReturnType_dead(
+        node: FunctionNode,
+        isAbstract: boolean,
+        callerNode: ExpressionNode | undefined
+    ): TypeResult | undefined {
         const returnAnnotation = node.d.returnAnnotation || node.d.funcAnnotationComment?.d.returnAnnotation;
 
         // This shouldn't be called if there is a declared return type, but it

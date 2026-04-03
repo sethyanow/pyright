@@ -48,6 +48,7 @@ import {
     Reachability,
     SymbolDeclInfo,
     TypeEvaluator,
+    TypeResult,
 } from './typeEvaluatorTypes';
 import {
     AnyType,
@@ -66,7 +67,9 @@ import {
     isTypeVar,
     isTypeVarTuple,
     ModuleType,
+    NeverType,
     OverloadedType,
+    removeUnbound,
     Type,
     TypeVarType,
     UnboundType,
@@ -82,9 +85,11 @@ import {
     lookUpObjectMember,
     makeTypeVarsBound,
     makeTypeVarsFree,
+    mapSubtypes,
     MemberAccessFlags,
     partiallySpecializeType,
     specializeWithUnknownTypeArgs,
+    stripTypeForm,
 } from './typeUtils';
 import { getTypeOfIndexedTypedDict } from './typedDicts';
 import { makeTupleObject } from './tuples';
@@ -1373,4 +1378,204 @@ export function inferVarianceForClass(evaluator: TypeEvaluator, classType: Class
 
         classType.shared.typeParams[paramIndex].priv.computedVariance = inferredVariance;
     });
+}
+
+const maxInferFunctionReturnRecursionCount = 12;
+
+export function inferFunctionReturnType(
+    evaluator: TypeEvaluator,
+    state: TypeEvaluatorState,
+    node: FunctionNode,
+    isAbstract: boolean,
+    callerNode: ExpressionNode | undefined
+): TypeResult | undefined {
+    const returnAnnotation = node.d.returnAnnotation || node.d.funcAnnotationComment?.d.returnAnnotation;
+
+    if (returnAnnotation) {
+        return undefined;
+    }
+
+    let inferredReturnType = state.readTypeCache(node.d.suite, EvalFlags.None);
+    let isIncomplete = false;
+
+    if (inferredReturnType) {
+        return { type: inferredReturnType, isIncomplete };
+    }
+
+    const recursionEntry = state.functionRecursionMap.get(node.id) ?? [];
+
+    if (state.functionRecursionMap.size >= maxInferFunctionReturnRecursionCount) {
+        inferredReturnType = UnknownType.create();
+        isIncomplete = true;
+    } else if (recursionEntry.some((entry) => entry.callerNode === callerNode)) {
+        inferredReturnType = UnknownType.create();
+        isIncomplete = true;
+    } else {
+        recursionEntry.push({ callerNode });
+        state.functionRecursionMap.set(node.id, recursionEntry);
+
+        try {
+            let functionDecl: FunctionDeclaration | undefined;
+            const decl = AnalyzerNodeInfo.getDeclaration(node);
+            if (decl) {
+                functionDecl = decl as FunctionDeclaration;
+            }
+
+            const functionNeverReturns = !evaluator.isAfterNodeReachable(node);
+            const implicitlyReturnsNone = evaluator.isAfterNodeReachable(node.d.suite);
+
+            if (AnalyzerNodeInfo.getFileInfo(node).isStubFile) {
+                inferredReturnType = UnknownType.create();
+            } else {
+                if (functionNeverReturns) {
+                    if (isAbstract || methodAlwaysRaisesNotImplemented(evaluator, functionDecl)) {
+                        inferredReturnType = UnknownType.create();
+                    } else {
+                        inferredReturnType = NeverType.createNoReturn();
+                    }
+                } else {
+                    const inferredReturnTypes: Type[] = [];
+                    if (functionDecl?.returnStatements) {
+                        functionDecl.returnStatements.forEach((returnNode) => {
+                            if (evaluator.isNodeReachable(returnNode)) {
+                                if (returnNode.d.expr) {
+                                    const returnTypeResult = evaluator.getTypeOfExpression(returnNode.d.expr);
+                                    if (returnTypeResult.isIncomplete) {
+                                        isIncomplete = true;
+                                    }
+
+                                    let returnType = returnTypeResult.type;
+
+                                    if (returnType.props?.specialForm) {
+                                        returnType = returnType.props.specialForm;
+                                    }
+
+                                    returnType = mapSubtypes(returnType, (subtype) => {
+                                        if (isClassInstance(subtype) && subtype.priv.isEmptyContainer) {
+                                            return ClassType.specialize(
+                                                subtype,
+                                                subtype.priv.typeArgs,
+                                                !!subtype.priv.isTypeArgExplicit,
+                                                subtype.priv.includeSubclasses,
+                                                subtype.priv.tupleTypeArgs,
+                                                /* isEmptyContainer */ false
+                                            );
+                                        }
+                                        return subtype;
+                                    });
+
+                                    returnType = stripTypeForm(returnType);
+
+                                    inferredReturnTypes.push(returnType);
+                                } else {
+                                    inferredReturnTypes.push(evaluator.getNoneType());
+                                }
+                            }
+                        });
+                    }
+
+                    if (!functionNeverReturns && implicitlyReturnsNone) {
+                        inferredReturnTypes.push(evaluator.getNoneType());
+                    }
+
+                    inferredReturnType = combineTypes(inferredReturnTypes);
+                    inferredReturnType = removeUnbound(inferredReturnType);
+                }
+
+                if (functionDecl?.isGenerator) {
+                    const inferredYieldTypes: Type[] = [];
+                    let useAwaitableGenerator = false;
+                    let isYieldResultUsed = false;
+
+                    if (functionDecl.yieldStatements) {
+                        functionDecl.yieldStatements.forEach((yieldNode) => {
+                            if (evaluator.isNodeReachable(yieldNode)) {
+                                if (yieldNode.nodeType === ParseNodeType.YieldFrom) {
+                                    isYieldResultUsed = true;
+                                    const iteratorTypeResult = evaluator.getTypeOfExpression(yieldNode.d.expr);
+                                    if (
+                                        isClassInstance(iteratorTypeResult.type) &&
+                                        ClassType.isBuiltIn(iteratorTypeResult.type, ['Coroutine', 'CoroutineType'])
+                                    ) {
+                                        const yieldType =
+                                            iteratorTypeResult.type.priv.typeArgs &&
+                                            iteratorTypeResult.type.priv.typeArgs.length > 0
+                                                ? iteratorTypeResult.type.priv.typeArgs[0]
+                                                : UnknownType.create();
+
+                                        inferredYieldTypes.push(yieldType);
+                                        useAwaitableGenerator = true;
+                                    } else {
+                                        const yieldType = evaluator.getTypeOfIterator(
+                                            iteratorTypeResult,
+                                            /* isAsync */ false,
+                                            yieldNode
+                                        )?.type;
+
+                                        inferredYieldTypes.push(yieldType ?? UnknownType.create());
+                                    }
+                                } else {
+                                    if (yieldNode?.parent?.nodeType !== ParseNodeType.StatementList) {
+                                        isYieldResultUsed = true;
+                                    }
+
+                                    if (yieldNode.d.expr) {
+                                        const yieldType = evaluator.getTypeOfExpression(yieldNode.d.expr).type;
+                                        inferredYieldTypes.push(yieldType ?? UnknownType.create());
+                                    } else {
+                                        inferredYieldTypes.push(evaluator.getNoneType());
+                                    }
+                                }
+                            }
+                        });
+                    }
+
+                    const inferredYieldType = combineTypes(inferredYieldTypes);
+
+                    const generatorType = useAwaitableGenerator
+                        ? evaluator.getTypeCheckerInternalsType(node, 'AwaitableGenerator') ??
+                          evaluator.getTypingType(node, 'AwaitableGenerator')
+                        : evaluator.getTypingType(node, 'Generator');
+
+                    if (generatorType && isInstantiableClass(generatorType)) {
+                        const typeArgs: Type[] = [];
+
+                        const sendType = isYieldResultUsed ? UnknownType.create() : AnyType.create();
+
+                        typeArgs.push(inferredYieldType, sendType, inferredReturnType);
+
+                        if (useAwaitableGenerator) {
+                            typeArgs.push(AnyType.create());
+                        }
+
+                        inferredReturnType = ClassType.cloneAsInstance(
+                            ClassType.specialize(generatorType, typeArgs)
+                        );
+                    } else {
+                        inferredReturnType = UnknownType.create();
+                    }
+                }
+            }
+
+            state.writeTypeCache(node.d.suite, { type: inferredReturnType, isIncomplete }, EvalFlags.None);
+        } catch (err) {
+            if ((err as any)?.message === 'Maximum call stack size exceeded') {
+                const fileInfo = AnalyzerNodeInfo.getFileInfo(node);
+                console.error(
+                    `Overflowed stack when inferring return type for function: ${
+                        node.d.name.d.value
+                    } in file ${fileInfo.fileUri.toUserVisibleString()}`
+                );
+                return;
+            }
+            throw err;
+        } finally {
+            recursionEntry.pop();
+            if (recursionEntry.length === 0) {
+                state.functionRecursionMap.delete(node.id);
+            }
+        }
+    }
+
+    return inferredReturnType ? { type: inferredReturnType, isIncomplete } : undefined;
 }
