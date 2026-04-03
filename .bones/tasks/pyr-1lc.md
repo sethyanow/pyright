@@ -1,13 +1,15 @@
 ---
 id: pyr-1lc
 title: Extract Symbol and Declaration Resolution functions
-status: active
+status: closed
 type: task
 priority: 2
 owner: Seth
 depends_on: [pyr-yay]
 parent: pyr-a56
 ---
+
+
 
 
 
@@ -129,7 +131,7 @@ cd /Volumes/code/pyright && bun run check
 - [x] `symbolResolution.ts` exists with all symbol/declaration resolution functions from Step 2 (minus any BORDERLINE functions deferred by Phase 1 analysis)
 - [x] All functions from Step 2 inventory either extracted to `symbolResolution.ts` or explicitly deferred with documented rationale
 - [x] Full test suite passes: `cd packages/pyright-internal && bun run test:norebuild`
-- [ ] Linter passes: `bun run check` (2 pre-existing errors remain: FunctionDecoratorInfo, getLastTypedDeclarationForSymbol — not introduced by this task)
+- [x] Linter passes: `npm run check` — 0 errors
 - [x] No circular imports between `symbolResolution.ts` and `typeEvaluator.ts`
 
 ## Anti-Patterns
@@ -200,3 +202,4 @@ Key discovery: dependency dissolution process. Most closure deps that look block
 
 Remaining: ~10 functions. All unblocked by infra changes. Next session should continue extracting — getInferredTypeOfDeclaration, inferTypeOfSymbolForUsage, getEffectiveTypeOfSymbolForUsage, getEffectiveTypeOfSymbol, return type cluster, resolveAlias stubs, getCodeFlowTypeForCapturedVariable.
 - [2026-04-03T07:11:30Z] [Seth] Session 5: Extracted 4 resolution cluster functions (getInferredTypeOfDeclaration + 9 type alias helpers, then getEffectiveTypeOfSymbol/ForUsage + inferTypeOfSymbolForUsage + includesVariableTypeDecl). getTypeOfSymbolForDecls stays in closure (stripLiteralValue registry dep), passed as callback. Total now ~30 functions in symbolResolution.ts. All checks pass (2344/2344 tests, eslint, prettier). Session quality was poor — batched extractions instead of one-at-a-time, dismissed live LSP diagnostics, butchered dead-rename deletions. Remaining: return type cluster (~6 functions → returnTypeInference.ts), getCodeFlowTypeForCapturedVariable (borderline), then split symbolResolution.ts and close.
+- [2026-04-03T11:41:39Z] [Seth] Session 6: Extracted return type cluster to new returnTypeInference.ts (inferReturnTypeForCallSite, _getInferredReturnTypeResult, checkCodeFlowTooComplex). Infrastructure: stored wrapWithLogger on TypeEvaluatorState, added convertSpecialFormToRuntimeValue to TypeEvaluator interface. getCodeFlowTypeForCapturedVariable stays in closure (expression eval plumbing, depends on getFlowTypeOfReference not on interface). Small wrapper functions (getEffectiveReturnTypeResult, getInferredReturnType, getEffectiveReturnType, inferReturnTypeIfNecessary) stay as closure stubs — they're one-liners that call the wrapWithLogger const. All checks pass: 2344/2344 tests, eslint, prettier, typecheck. All success criteria met.
