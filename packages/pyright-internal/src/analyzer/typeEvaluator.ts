@@ -17873,15 +17873,7 @@ export function createTypeEvaluator(
     }
 
     function getTypeOfMember(member: ClassMember): Type {
-        if (isInstantiableClass(member.classType)) {
-            return partiallySpecializeType(
-                getEffectiveTypeOfSymbol(member.symbol),
-                member.classType,
-                getTypeClassType(),
-                /* selfClass */ undefined
-            );
-        }
-        return UnknownType.create();
+        return memberAccessModule.getTypeOfMember(evaluatorInterface, member);
     }
 
     function getTypeOfMemberInternal(

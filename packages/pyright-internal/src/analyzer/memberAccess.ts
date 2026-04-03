@@ -3,7 +3,19 @@
 
 import { assert } from '../common/debug';
 import { ParamCategory } from '../parser/parseNodes';
-import { ClassType, FunctionParam, FunctionParamFlags, FunctionType, isClassInstance, isNever } from './types';
+import { TypeEvaluator } from './typeEvaluatorTypes';
+import {
+    ClassType,
+    FunctionParam,
+    FunctionParamFlags,
+    FunctionType,
+    isClassInstance,
+    isInstantiableClass,
+    isNever,
+    Type,
+    UnknownType,
+} from './types';
+import { ClassMember, partiallySpecializeType } from './typeUtils';
 
 // If the function includes a `**kwargs: Unpack[TypedDict]` parameter, the
 // parameter is expanded to include individual keyword args.
@@ -69,4 +81,16 @@ export function expandTypedKwargs(functionType: FunctionType): FunctionType {
     }
 
     return newFunction;
+}
+
+export function getTypeOfMember(evaluator: TypeEvaluator, member: ClassMember): Type {
+    if (isInstantiableClass(member.classType)) {
+        return partiallySpecializeType(
+            evaluator.getEffectiveTypeOfSymbol(member.symbol),
+            member.classType,
+            evaluator.getTypeClassType(),
+            /* selfClass */ undefined
+        );
+    }
+    return UnknownType.create();
 }
