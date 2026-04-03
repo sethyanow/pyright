@@ -10,7 +10,10 @@
 import { ArgumentNode, ExpressionNode, ParseNode, ParseNodeType } from '../parser/parseNodes';
 import * as ParseTreeUtils from './parseTreeUtils';
 import { assert } from '../common/debug';
+import { DiagnosticRule } from '../common/diagnosticRules';
+import { LocMessage } from '../localization/localize';
 import { ConstraintTracker } from './constraintTracker';
+import * as specialForms from './specialForms';
 import {
     Arg,
     ArgResult,
@@ -19,6 +22,7 @@ import {
     ExpectedTypeOptions,
     TypeEvaluator,
     TypeResult,
+    TypeResultWithNode,
     ValidateArgTypeParams,
 } from './typeEvaluatorTypes';
 import {
@@ -27,18 +31,28 @@ import {
     isAnyOrUnknown,
     isClassInstance,
     isFunction,
+    isParamSpec,
+    isTypeVarTuple,
+    isUnpackedClass,
     ParamSpecType,
+    TupleTypeArg,
     Type,
     TypeVarScopeId,
     TypeVarScopeType,
     TypeVarType,
     UnknownType,
 } from './types';
-import { applySolvedTypeVars, getTypeVarArgsRecursive, InferenceContext } from './typeUtils';
 import { ConstraintSolution } from './constraintSolution';
 import { enumerateLiteralsForType } from './typeGuards';
-import { areTypesSame, doForEachSubtype } from './typeUtils';
-import { expandTuple } from './tuples';
+import { expandTuple, makeTupleObject } from './tuples';
+import {
+    applySolvedTypeVars,
+    areTypesSame,
+    convertToInstance,
+    doForEachSubtype,
+    getTypeVarArgsRecursive,
+    InferenceContext,
+} from './typeUtils';
 import { appendArray } from '../common/collectionUtils';
 
 // Redefined locally to avoid circular import from typeEvaluator.ts
@@ -347,4 +361,154 @@ export function adjustCallableReturnType(
         ),
         solution
     );
+}
+
+// Adjusts the type arguments of a generic type alias to account for a
+// TypeVarTuple in the type parameter list.
+export function adjustTypeArgsForTypeVarTuple(
+    evaluator: TypeEvaluator,
+    typeArgs: TypeResultWithNode[],
+    typeParams: TypeVarType[],
+    errorNode: ExpressionNode
+): TypeResultWithNode[] {
+    const variadicIndex = typeParams.findIndex((param) => isTypeVarTuple(param));
+
+    // Is there a *tuple[T, ...] somewhere in the type arguments that we can expand if needed?
+    let srcUnboundedTupleType: Type | undefined;
+    const findUnboundedTupleIndex = (startArgIndex: number) => {
+        return typeArgs.findIndex((arg, index) => {
+            if (index < startArgIndex) {
+                return false;
+            }
+            if (
+                isUnpackedClass(arg.type) &&
+                arg.type.priv.tupleTypeArgs &&
+                arg.type.priv.tupleTypeArgs.length === 1 &&
+                arg.type.priv.tupleTypeArgs[0].isUnbounded
+            ) {
+                srcUnboundedTupleType = arg.type.priv.tupleTypeArgs[0].type;
+                return true;
+            }
+
+            return false;
+        });
+    };
+    let srcUnboundedTupleIndex = findUnboundedTupleIndex(0);
+
+    // Allow only one unpacked tuple that maps to a TypeVarTuple.
+    if (srcUnboundedTupleIndex >= 0) {
+        const secondUnboundedTupleIndex = findUnboundedTupleIndex(srcUnboundedTupleIndex + 1);
+        if (secondUnboundedTupleIndex >= 0) {
+            evaluator.addDiagnostic(
+                DiagnosticRule.reportInvalidTypeForm,
+                LocMessage.variadicTypeArgsTooMany(),
+                typeArgs[secondUnboundedTupleIndex].node
+            );
+        }
+    }
+
+    if (
+        srcUnboundedTupleType &&
+        srcUnboundedTupleIndex >= 0 &&
+        variadicIndex >= 0 &&
+        typeArgs.length < typeParams.length
+    ) {
+        // "Smear" the tuple type across type argument slots prior to the TypeVarTuple.
+        while (variadicIndex > srcUnboundedTupleIndex) {
+            typeArgs = [
+                ...typeArgs.slice(0, srcUnboundedTupleIndex),
+                { node: typeArgs[srcUnboundedTupleIndex].node, type: srcUnboundedTupleType },
+                ...typeArgs.slice(srcUnboundedTupleIndex),
+            ];
+            srcUnboundedTupleIndex++;
+        }
+
+        // "Smear" the tuple type across type argument slots following the TypeVarTuple.
+        while (typeArgs.length < typeParams.length) {
+            typeArgs = [
+                ...typeArgs.slice(0, srcUnboundedTupleIndex + 1),
+                { node: typeArgs[srcUnboundedTupleIndex].node, type: srcUnboundedTupleType },
+                ...typeArgs.slice(srcUnboundedTupleIndex + 1),
+            ];
+        }
+    }
+
+    // Do we need to adjust the type arguments to map to a variadic type
+    // param somewhere in the list?
+    if (variadicIndex >= 0) {
+        const variadicTypeVar = typeParams[variadicIndex];
+
+        // If the type param list ends with a ParamSpec with a default value,
+        // we can ignore it for purposes of finding type args that map to the
+        // TypeVarTuple.
+        let typeParamCount = typeParams.length;
+        while (typeParamCount > 0) {
+            const lastTypeParam = typeParams[typeParamCount - 1];
+            if (!isParamSpec(lastTypeParam) || !lastTypeParam.shared.isDefaultExplicit) {
+                break;
+            }
+
+            typeParamCount--;
+        }
+
+        if (variadicIndex < typeArgs.length) {
+            // If there are typeArg lists at the end, these should map to ParamSpecs rather
+            // than the TypeVarTuple, so exclude them.
+            let variadicEndIndex = variadicIndex + 1 + typeArgs.length - typeParamCount;
+            while (variadicEndIndex > variadicIndex) {
+                if (!typeArgs[variadicEndIndex - 1].typeList) {
+                    break;
+                }
+                variadicEndIndex--;
+            }
+            const variadicTypeResults = typeArgs.slice(variadicIndex, variadicEndIndex);
+
+            // If the type args consist of a lone TypeVarTuple, don't wrap it in a tuple.
+            if (variadicTypeResults.length === 1 && isTypeVarTuple(variadicTypeResults[0].type)) {
+                specialForms.validateTypeVarTupleIsUnpacked(
+                    evaluator,
+                    variadicTypeResults[0].type,
+                    variadicTypeResults[0].node
+                );
+            } else {
+                variadicTypeResults.forEach((arg, index) => {
+                    evaluator.validateTypeArg(arg, {
+                        allowEmptyTuple: index === 0,
+                        allowTypeVarTuple: true,
+                        allowUnpackedTuples: true,
+                    });
+                });
+
+                const variadicTypes: TupleTypeArg[] = [];
+                if (variadicTypeResults.length !== 1 || !variadicTypeResults[0].isEmptyTupleShorthand) {
+                    variadicTypeResults.forEach((typeResult) => {
+                        if (isUnpackedClass(typeResult.type) && typeResult.type.priv.tupleTypeArgs) {
+                            appendArray(variadicTypes, typeResult.type.priv.tupleTypeArgs);
+                        } else {
+                            variadicTypes.push({
+                                type: convertToInstance(typeResult.type),
+                                isUnbounded: false,
+                            });
+                        }
+                    });
+                }
+
+                const tupleObject = makeTupleObject(evaluator, variadicTypes, /* isUnpacked */ true);
+
+                typeArgs = [
+                    ...typeArgs.slice(0, variadicIndex),
+                    { node: typeArgs[variadicIndex].node, type: tupleObject },
+                    ...typeArgs.slice(variadicEndIndex, typeArgs.length),
+                ];
+            }
+        } else if (!variadicTypeVar.shared.isDefaultExplicit) {
+            // Add an empty tuple that maps to the TypeVarTuple type parameter.
+            typeArgs.push({
+                node: errorNode,
+                type: makeTupleObject(evaluator, [], /* isUnpacked */ true),
+            });
+        }
+    }
+
+    return typeArgs;
 }
