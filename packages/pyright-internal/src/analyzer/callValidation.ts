@@ -70,6 +70,7 @@ import {
     isFunctionOrOverloaded,
     OverloadedType,
     maxTypeRecursionCount,
+    NeverType,
     TypeBase,
     AnyType,
     ParamSpecType,
@@ -111,6 +112,7 @@ import {
     addConditionToType,
     containsAnyOrUnknown,
     containsLiteralType,
+    isIncompleteUnknown,
     selfSpecializeClass,
     transformExpectedType,
     makeInferenceContext,
@@ -2956,4 +2958,373 @@ export function getBestOverloadForArgs(
     });
 
     return winningOverloadIndex === undefined ? undefined : matches[winningOverloadIndex].overload;
+}
+
+const maxTotalOverloadArgTypeExpansionCount = 256;
+
+export function validateOverloadsWithExpandedTypes(
+    evaluator: TypeEvaluator,
+    state: TypeEvaluatorState,
+    registry: TypeRegistry,
+    errorNode: ExpressionNode,
+    expandedArgTypes: (Type | undefined)[][],
+    argParamMatches: MatchArgsToParamsResult[],
+    constraints: ConstraintTracker | undefined,
+    skipUnknownArgCheck: boolean | undefined,
+    inferenceContext: InferenceContext | undefined
+): CallResult {
+    const returnTypes: Type[] = [];
+    let matchedOverloads: MatchedOverloadInfo[] = [];
+    let isTypeIncomplete = false;
+    let overloadsUsedForCall: FunctionType[] = [];
+    let isDefinitiveMatchFound = false;
+    const speculativeNode = getSpeculativeNodeForCall(errorNode);
+
+    for (let expandedTypesIndex = 0; expandedTypesIndex < expandedArgTypes.length; expandedTypesIndex++) {
+        let matchedOverload: FunctionType | undefined;
+        const argTypeOverride = expandedArgTypes[expandedTypesIndex];
+        const hasArgTypeOverride = argTypeOverride.some((a) => a !== undefined);
+        let possibleMatchResults: MatchedOverloadInfo[] = [];
+        let possibleMatchInvolvesIncompleteUnknown = false;
+        isDefinitiveMatchFound = false;
+
+        for (let overloadIndex = 0; overloadIndex < argParamMatches.length; overloadIndex++) {
+            const overload = argParamMatches[overloadIndex].overload;
+
+            let matchResults = argParamMatches[overloadIndex];
+            if (hasArgTypeOverride) {
+                matchResults = { ...argParamMatches[overloadIndex] };
+                matchResults.argParams = matchResults.argParams.map((argParam, argIndex) => {
+                    if (!argTypeOverride[argIndex]) {
+                        return argParam;
+                    }
+                    const argParamCopy = { ...argParam };
+                    argParamCopy.argType = argTypeOverride[argIndex];
+                    return argParamCopy;
+                });
+            }
+
+            const effectiveConstraints = constraints?.clone() ?? new ConstraintTracker();
+
+            const callResult = state.useSpeculativeMode(speculativeNode, () => {
+                return validateArgTypesWithContext(
+                    evaluator,
+                    state,
+                    registry,
+                    errorNode,
+                    matchResults,
+                    effectiveConstraints,
+                    /* skipUnknownArgCheck */ true,
+                    inferenceContext
+                );
+            });
+
+            if (callResult.isTypeIncomplete) {
+                isTypeIncomplete = true;
+            }
+
+            if (!callResult.argumentErrors && callResult.returnType) {
+                overloadsUsedForCall.push(overload);
+
+                matchedOverload = overload;
+                const matchedOverloadInfo: MatchedOverloadInfo = {
+                    overload: matchedOverload,
+                    matchResults,
+                    constraints: effectiveConstraints,
+                    returnType: callResult.returnType,
+                    argResults: callResult.argResults ?? [],
+                };
+                matchedOverloads.push(matchedOverloadInfo);
+
+                if (callResult.anyOrUnknownArg || matchResults.unpackedArgOfUnknownLength) {
+                    possibleMatchResults.push(matchedOverloadInfo);
+
+                    if (callResult.anyOrUnknownArg) {
+                        if (isIncompleteUnknown(callResult.anyOrUnknownArg)) {
+                            possibleMatchInvolvesIncompleteUnknown = true;
+                        }
+                    }
+                } else {
+                    returnTypes.push(callResult.returnType);
+                    isDefinitiveMatchFound = true;
+                    break;
+                }
+            }
+        }
+
+        if (!isDefinitiveMatchFound && possibleMatchResults.length > 0) {
+            possibleMatchResults = filterOverloadMatchesForUnpackedArgs(possibleMatchResults);
+            possibleMatchResults = filterOverloadMatchesForAnyArgs(possibleMatchResults);
+
+            if (possibleMatchResults.length === 1) {
+                overloadsUsedForCall = [possibleMatchResults[0].overload];
+                returnTypes.push(possibleMatchResults[0].returnType);
+                matchedOverloads = [possibleMatchResults[0]];
+            } else {
+                let dedupedMatchResults: Type[] = [];
+                let dedupedResultsIncludeAny = false;
+
+                possibleMatchResults.forEach((result) => {
+                    let isSubtypeSubsumed = false;
+
+                    for (let dedupedIndex = 0; dedupedIndex < dedupedMatchResults.length; dedupedIndex++) {
+                        if (evaluator.assignType(dedupedMatchResults[dedupedIndex], result.returnType)) {
+                            const anyOrUnknown = containsAnyOrUnknown(
+                                dedupedMatchResults[dedupedIndex],
+                                /* recurse */ false
+                            );
+                            if (!anyOrUnknown) {
+                                isSubtypeSubsumed = true;
+                            } else if (isAny(anyOrUnknown)) {
+                                dedupedResultsIncludeAny = true;
+                            }
+                            break;
+                        } else if (evaluator.assignType(result.returnType, dedupedMatchResults[dedupedIndex])) {
+                            const anyOrUnknown = containsAnyOrUnknown(result.returnType, /* recurse */ false);
+                            if (!anyOrUnknown) {
+                                dedupedMatchResults[dedupedIndex] = NeverType.createNever();
+                            } else if (isAny(anyOrUnknown)) {
+                                dedupedResultsIncludeAny = true;
+                            }
+                            break;
+                        }
+                    }
+
+                    if (!isSubtypeSubsumed) {
+                        dedupedMatchResults.push(result.returnType);
+                    }
+                });
+
+                dedupedMatchResults = dedupedMatchResults.filter((t) => !isNever(t));
+                const combinedTypes = combineTypes(dedupedMatchResults);
+
+                let returnType = combinedTypes;
+                if (dedupedMatchResults.length > 1) {
+                    if (dedupedResultsIncludeAny) {
+                        returnType = AnyType.create();
+                    } else {
+                        returnType = UnknownType.createPossibleType(
+                            combinedTypes,
+                            possibleMatchInvolvesIncompleteUnknown
+                        );
+                    }
+                }
+
+                returnTypes.push(returnType);
+            }
+        }
+
+        if (!matchedOverload) {
+            return { argumentErrors: true, isTypeIncomplete, overloadsUsedForCall };
+        }
+    }
+
+    if (constraints && isDefinitiveMatchFound) {
+        constraints.copyFromClone(matchedOverloads[matchedOverloads.length - 1].constraints);
+    }
+
+    const finalConstraints = constraints ?? matchedOverloads[0].constraints;
+    const finalCallResult = validateArgTypesWithContext(
+        evaluator,
+        state,
+        registry,
+        errorNode,
+        matchedOverloads[0].matchResults,
+        finalConstraints,
+        skipUnknownArgCheck,
+        inferenceContext
+    );
+
+    if (finalCallResult.isTypeIncomplete) {
+        isTypeIncomplete = true;
+    }
+
+    return {
+        argumentErrors: finalCallResult.argumentErrors,
+        anyOrUnknownArg: finalCallResult.anyOrUnknownArg,
+        returnType: combineTypes(returnTypes),
+        isTypeIncomplete,
+        specializedInitSelfType: finalCallResult.specializedInitSelfType,
+        overloadsUsedForCall,
+    };
+}
+
+export function validateOverloadedArgTypes(
+    evaluator: TypeEvaluator,
+    state: TypeEvaluatorState,
+    registry: TypeRegistry,
+    errorNode: ExpressionNode,
+    argList: Arg[],
+    typeResult: TypeResult<OverloadedType>,
+    constraints: ConstraintTracker | undefined,
+    skipUnknownArgCheck: boolean | undefined,
+    inferenceContext: InferenceContext | undefined
+): CallResult {
+    const filteredMatchResults: MatchArgsToParamsResult[] = [];
+    let contextFreeArgTypes: Type[] | undefined;
+    let isTypeIncomplete = !!typeResult.isIncomplete;
+    const type = typeResult.type;
+    const speculativeNode = getSpeculativeNodeForCall(errorNode);
+
+    state.useSpeculativeMode(speculativeNode, () => {
+        let overloadIndex = 0;
+        OverloadedType.getOverloads(type).forEach((overload) => {
+            const matchResults = matchArgsToParams(
+                evaluator,
+                state,
+                registry,
+                errorNode,
+                argList,
+                { type: overload, isIncomplete: typeResult.isIncomplete },
+                overloadIndex
+            );
+
+            if (!matchResults.argumentErrors) {
+                filteredMatchResults.push(matchResults);
+            }
+
+            overloadIndex++;
+        });
+    });
+
+    if (filteredMatchResults.length === 0) {
+        if (!state.canSkipDiagnosticForNode(errorNode)) {
+            const overloads = OverloadedType.getOverloads(type);
+            const functionName =
+                overloads.length > 0 && overloads[0].shared.name
+                    ? overloads[0].shared.name
+                    : '<anonymous function>';
+            const diagAddendum = new DiagnosticAddendum();
+            const argTypes = argList.map((t) => {
+                const typeString = evaluator.printType(getTypeOfArg(evaluator, t, /* inferenceContext */ undefined).type);
+
+                if (t.argCategory === ArgCategory.UnpackedList) {
+                    return `*${typeString}`;
+                }
+
+                if (t.argCategory === ArgCategory.UnpackedDictionary) {
+                    return `**${typeString}`;
+                }
+
+                return typeString;
+            });
+
+            diagAddendum.addMessage(LocAddendum.argumentTypes().format({ types: argTypes.join(', ') }));
+            evaluator.addDiagnostic(
+                DiagnosticRule.reportCallIssue,
+                LocMessage.noOverload().format({ name: functionName }) + diagAddendum.getString(),
+                errorNode
+            );
+        }
+
+        return { argumentErrors: true, isTypeIncomplete, overloadsUsedForCall: [] };
+    }
+
+    function evaluateUsingBestMatchingOverload(skipUnknownArgCheck: boolean, emitNoOverloadFoundError: boolean) {
+        const bestMatch = filteredMatchResults.reduce((previous, current) => {
+            if (current.argumentMatchScore === previous.argumentMatchScore) {
+                return current.overloadIndex > previous.overloadIndex ? current : previous;
+            }
+            return current.argumentMatchScore < previous.argumentMatchScore ? current : previous;
+        });
+
+        if (emitNoOverloadFoundError) {
+            const functionName = bestMatch.overload.shared.name || '<anonymous function>';
+            const diagnostic = evaluator.addDiagnostic(
+                DiagnosticRule.reportCallIssue,
+                LocMessage.noOverload().format({ name: functionName }),
+                errorNode
+            );
+
+            const overrideDecl = bestMatch.overload.shared.declaration;
+            if (diagnostic && overrideDecl) {
+                diagnostic.addRelatedInfo(
+                    LocAddendum.overloadIndex().format({ index: bestMatch.overloadIndex + 1 }),
+                    overrideDecl.uri,
+                    overrideDecl.range
+                );
+            }
+        }
+
+        const effectiveConstraints = constraints ?? new ConstraintTracker();
+
+        return validateArgTypesWithContext(
+            evaluator,
+            state,
+            registry,
+            errorNode,
+            bestMatch,
+            effectiveConstraints,
+            skipUnknownArgCheck,
+            inferenceContext
+        );
+    }
+
+    if (filteredMatchResults.length === 1) {
+        return evaluateUsingBestMatchingOverload(
+            /* skipUnknownArgCheck */ false,
+            /* emitNoOverloadFoundError */ false
+        );
+    }
+
+    let expandedArgTypes: (Type | undefined)[][] | undefined = [argList.map(() => undefined)];
+
+    while (true) {
+        const callResult = validateOverloadsWithExpandedTypes(
+            evaluator,
+            state,
+            registry,
+            errorNode,
+            expandedArgTypes,
+            filteredMatchResults,
+            constraints,
+            skipUnknownArgCheck,
+            inferenceContext
+        );
+
+        if (callResult.isTypeIncomplete) {
+            isTypeIncomplete = true;
+        }
+
+        if (!callResult.argumentErrors) {
+            return callResult;
+        }
+
+        if (!contextFreeArgTypes) {
+            state.useSpeculativeMode(getSpeculativeNodeForCall(errorNode), () => {
+                contextFreeArgTypes = argList.map((arg) => {
+                    if (arg.typeResult) {
+                        return arg.typeResult.type;
+                    }
+
+                    if (arg.valueExpression) {
+                        const valueExpressionNode = arg.valueExpression;
+                        return state.useSpeculativeMode(valueExpressionNode, () => {
+                            return evaluator.getTypeOfExpression(valueExpressionNode).type;
+                        });
+                    }
+
+                    return AnyType.create();
+                });
+            });
+        }
+
+        expandedArgTypes = expandArgTypes(evaluator, contextFreeArgTypes!, expandedArgTypes);
+
+        if (!expandedArgTypes || expandedArgTypes.length > maxTotalOverloadArgTypeExpansionCount) {
+            break;
+        }
+    }
+
+    if (!state.canSkipDiagnosticForNode(errorNode) && !isTypeIncomplete) {
+        const result = evaluateUsingBestMatchingOverload(
+            /* skipUnknownArgCheck */ true,
+            /* emitNoOverloadFoundError */ true
+        );
+
+        result.returnType = UnknownType.create();
+        return { ...result, argumentErrors: true };
+    }
+
+    return { argumentErrors: true, isTypeIncomplete, overloadsUsedForCall: [] };
 }

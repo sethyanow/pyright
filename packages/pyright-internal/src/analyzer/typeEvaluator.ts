@@ -6924,6 +6924,17 @@ export function createTypeEvaluator(
         skipUnknownArgCheck: boolean | undefined,
         inferenceContext: InferenceContext | undefined
     ): CallResult {
+        return callValidation.validateOverloadedArgTypes(evaluatorInterface, state, registry, errorNode, argList, typeResult, constraints, skipUnknownArgCheck, inferenceContext);
+    }
+
+    function _validateOverloadedArgTypes_dead(
+        errorNode: ExpressionNode,
+        argList: Arg[],
+        typeResult: TypeResult<OverloadedType>,
+        constraints: ConstraintTracker | undefined,
+        skipUnknownArgCheck: boolean | undefined,
+        inferenceContext: InferenceContext | undefined
+    ): CallResult {
         const filteredMatchResults: MatchArgsToParamsResult[] = [];
         let contextFreeArgTypes: Type[] | undefined;
         let isTypeIncomplete = !!typeResult.isIncomplete;
