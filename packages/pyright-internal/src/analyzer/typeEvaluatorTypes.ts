@@ -16,6 +16,7 @@ import { TextRange } from '../common/textRange';
 import {
     ArgCategory,
     ArgumentNode,
+    AssignmentNode,
     CallNode,
     CaseNode,
     ClassNode,
@@ -671,6 +672,7 @@ export interface TypeEvaluator {
     getTypeOfExpressionExpectingType: (node: ExpressionNode, options?: ExpectedTypeOptions) => TypeResult;
     evaluateTypeForSubnode: (subnode: ParseNode, callback: () => void) => TypeResult | undefined;
     evaluateTypesForStatement: (node: ParseNode) => void;
+    evaluateTypesForAssignmentStatement: (node: AssignmentNode) => void;
     evaluateTypesForMatchStatement: (node: MatchNode) => void;
     evaluateTypesForCaseStatement: (node: CaseNode) => void;
     evaluateTypeOfParam: (node: ParameterNode) => void;

@@ -16,8 +16,9 @@ import { assert, fail } from '../common/debug';
 import { convertOffsetToPosition } from '../common/positionUtils';
 import { TextRange } from '../common/textRange';
 import { ExpressionNode, FunctionNode, ParseNode } from '../parser/parseNodes';
+import { ImportLookup } from './analyzerFileInfo';
 import * as AnalyzerNodeInfo from './analyzerNodeInfo';
-import { CodeFlowAnalyzer } from './codeFlowEngine';
+import { CodeFlowAnalyzer, CodeFlowEngine } from './codeFlowEngine';
 import { Declaration } from './declaration';
 import * as ParseTreeUtils from './parseTreeUtils';
 import { Symbol } from './symbol';
@@ -107,8 +108,10 @@ export class TypeEvaluatorState {
     returnTypeInferenceTypeCache: Map<number, TypeCacheEntry> | undefined;
     signatureTrackerStack: SignatureTrackerStackEntry[] = [];
 
-    // Post-construction dependency: set after evaluatorInterface is created.
+    // Post-construction dependencies: set after evaluatorInterface and codeFlowEngine are created.
     private _isNodeReachable: ((node: ParseNode) => boolean) | undefined;
+    private _importLookup: ImportLookup | undefined;
+    private _codeFlowEngine: CodeFlowEngine | undefined;
 
     private _evaluatorOptions: EvaluatorOptions;
 
@@ -122,6 +125,24 @@ export class TypeEvaluatorState {
 
     setIsNodeReachable(fn: (node: ParseNode) => boolean): void {
         this._isNodeReachable = fn;
+    }
+
+    setImportLookup(importLookup: ImportLookup): void {
+        this._importLookup = importLookup;
+    }
+
+    get importLookup(): ImportLookup {
+        assert(this._importLookup !== undefined, 'importLookup not yet initialized');
+        return this._importLookup!;
+    }
+
+    setCodeFlowEngine(engine: CodeFlowEngine): void {
+        this._codeFlowEngine = engine;
+    }
+
+    get codeFlowEngine(): CodeFlowEngine {
+        assert(this._codeFlowEngine !== undefined, 'codeFlowEngine not yet initialized');
+        return this._codeFlowEngine!;
     }
 
     // --- Cache management (7 methods) ---

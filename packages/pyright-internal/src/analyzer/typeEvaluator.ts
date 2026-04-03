@@ -543,6 +543,7 @@ export function createTypeEvaluator(
     wrapWithLogger: LogWrapper
 ): TypeEvaluator {
     const state = new TypeEvaluatorState(evaluatorOptions);
+    state.setImportLookup(importLookup);
     const isTypeFormSupported = specialForms.isTypeFormSupported;
     const applyUnpackToTupleLike = specialForms.applyUnpackToTupleLike;
     const getFunctionFullName = specialForms.getFunctionFullName;
@@ -20237,6 +20238,7 @@ export function createTypeEvaluator(
         getExpectedType,
         evaluateTypeForSubnode,
         evaluateTypesForStatement,
+        evaluateTypesForAssignmentStatement,
         evaluateTypesForMatchStatement,
         evaluateTypesForCaseStatement,
         evaluateTypeOfParam,
@@ -20354,6 +20356,7 @@ export function createTypeEvaluator(
     state.setIsNodeReachable(isNodeReachable);
 
     const codeFlowEngine = getCodeFlowEngine(evaluatorInterface, state.speculativeTypeTracker);
+    state.setCodeFlowEngine(codeFlowEngine);
 
     return evaluatorInterface;
 }
