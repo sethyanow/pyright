@@ -103,12 +103,7 @@ export function expandTypedKwargs(functionType: FunctionType): FunctionType {
     if (extraItemsType && !isNever(extraItemsType)) {
         FunctionType.addParam(
             newFunction,
-            FunctionParam.create(
-                ParamCategory.KwargsDict,
-                extraItemsType,
-                FunctionParamFlags.TypeDeclared,
-                'kwargs'
-            )
+            FunctionParam.create(ParamCategory.KwargsDict, extraItemsType, FunctionParamFlags.TypeDeclared, 'kwargs')
         );
     }
 

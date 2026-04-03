@@ -1,12 +1,16 @@
 ---
 id: pyr-p1w
 title: Extract Member Access and Descriptor functions
-status: open
+status: active
 type: task
 priority: 2
+owner: Seth
 depends_on: [pyr-1lc]
 parent: pyr-a56
 ---
+
+
+
 
 ## Context
 
@@ -87,7 +91,6 @@ cd /Volumes/code/pyright && bun run check
 ## Success Criteria
 
 - [ ] `memberAccess.ts` exists with member access and descriptor functions
-- [ ] `typeEvaluator.ts` reduced by ~1500 lines
 - [ ] Full test suite passes
 - [ ] Linter passes
 - [ ] No circular imports
@@ -96,3 +99,16 @@ cd /Volumes/code/pyright && bun run check
 
 - **Don't extract member access assignment functions (`assignTypeToMemberAccessNode`, `assignTypeToMemberVariable`) here.** Those were scoped in pyr-yay (Type Assignment). If they weren't extracted there, they stay in the closure. REASON: member access RESOLUTION and member access ASSIGNMENT are different concerns — don't mix them.
 - **Don't split `getTypeOfBoundMember` from its helper functions.** It calls `applyDescriptorAccessMethod` and `bindMethodForMemberAccess` directly — they move together. REASON: dense internal call graph.
+
+## Log
+
+- [2026-04-03T12:48:22Z] [Seth] Session start. Claiming task. Beginning Phase 1: dependency mapping via LSP.
+- [2026-04-03T12:53:48Z] [Seth] Phase 1 complete. No cycles — all one-at-a-time extraction.
+
+Tier 1 (leaves): expandTypedKwargs, addTypeFormForSymbol, applyAttributeAccessOverride, getTypeOfMagicMethodCall, getTypeOfMember, getGetterTypeFromProperty, bindFunctionToClassOrObject, getTypeOfBoundMember
+
+Tier 2 (call into tier 1): getBoundMagicMethod, applyDescriptorAccessMethod, bindMethodForMemberAccess
+
+Tier 3 (calls tier 2): getCallbackProtocolType
+
+Nearby helpers to evaluate during extraction: isAsymmetricDescriptorClass, getAttributeAccessMember, isClassWithAsymmetricAttributeAccessor, partiallySpecializeBoundMethod
