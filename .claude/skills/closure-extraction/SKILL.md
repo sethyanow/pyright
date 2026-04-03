@@ -7,26 +7,26 @@ description: This skill should be used when extracting functions from the create
 
 Extract functions from `createTypeEvaluator()` into standalone module files, following the pattern established by `specialForms.ts`.
 
-**Rigidity: MEDIUM** — Phase 1 (mapping) is mandatory before any code changes. Phases 2-4 follow the map.
+**Rigidity: MEDIUM** — Phase 1 (mapping) provides a starting point. The extraction order emerges from doing the work.
 
 ## Prerequisites
 
-- Active bones task with a function inventory (line numbers, function names)
-- LSP warm (run `documentSymbol` on a source file if needed)
+- Active bones task with a function inventory (function names — line numbers are stale, use `rg` to find current positions)
+- LSP warm (run `documentSymbol` on a real source file if needed)
 - Target module file either doesn't exist yet or has been committed in its current state
 
 ## Phase 1: Map the Dependency Graph
 
-**No code changes in this phase.** The output is an extraction order.
+**No code changes in this phase.** The output is a starting extraction order — expect it to change.
 
-For each function in the task's inventory, run `outgoingCalls`:
+For each function in the task's inventory, find its current line with `rg -n 'function funcName\b'`, then:
 
 ```
 LSP prepareCallHierarchy on the function name
 LSP outgoingCalls from that position
 ```
 
-**Tip:** `prepareCallHierarchy` is line-sensitive — off by one and it returns nothing. Use ChunkHound regex or a quick `Read` to confirm the exact line before calling it.
+**Tip:** `prepareCallHierarchy` is line-sensitive — off by one and it returns nothing. Always use `rg` to get the current line first. Lines shift during extraction.
 
 Filter the results to only calls between functions in the extraction batch. Build a table:
 
@@ -43,26 +43,28 @@ From that table, identify:
 2. **The cycle** — trace the arrows. If A calls B and B (transitively) calls A, they're in the same cycle. All functions in any cycle form the "must extract together" set.
 3. **Post-leaves** — functions that call into the cycle but nothing in the cycle calls them. Extract after the cycle.
 
-**Tips for finding cycles:** Start from the biggest function (usually the main `assign*` dispatcher). Follow its outgoing batch calls. For each, check if any path leads back. Most small helpers are leaves. The cycle is usually obvious — it's the core recursive dispatch chain.
+**Critical: check for hidden dependencies.** For each function's closure deps that are NOT in the batch, run `incomingCalls` on them. If a closure dep has only 1-2 callers and they're all in the batch, that function should come along — it's the connective tissue. This is how getTypeOfClassMemberName was discovered mid-session in pyr-p1w: it wasn't in the inventory but was the sole connector between batch members.
 
-**Extraction order:** Leaves first, then the cycle as one batch, then post-leaves.
+**Extraction order:** Leaves first, then the cycle as one batch, then post-leaves. But this is a starting point — the order refines as you extract.
 
 Log the extraction order to bones before writing any code.
 
 ## LSP Drives Extraction
 
-**LSP is the primary extraction tool, not reading.** For each function, `outgoingCalls` gives you the dependency map — every closure ref, every external import, every intra-batch call, with exact file and line.
+**LSP is the primary extraction tool, not reading.**
 
 | LSP Operation | What it tells you | When to use |
 |---|---|---|
-| `outgoingCalls` | Dependency classification for a function | Before writing each function — this IS step 2 |
-| `goToDefinition` | Which module exports an ambiguous symbol | When outgoingCalls shows a symbol you can't place |
-| `incomingCalls` | How many callers a function has | Choosing delegation pattern (many callers = local stub, few = interface lambda) |
-| `hover` | Function signatures | Wiring delegation params — confirm types match |
+| `outgoingCalls` | Every call a function makes — the dependency map | Before writing each function |
+| `hover` | Signatures, types, interface membership — instantly | Checking if a dep is on the interface (hover the closure function, see if it resolves to typeEvaluatorTypes.ts). Checking param signatures match. Understanding any symbol without reading its source. **Use liberally — it's magic.** |
+| `incomingCalls` | Who calls this function, and how many callers | Discovering hidden deps that should join the batch. Choosing delegation pattern. Verifying delegates have zero callers before deletion. |
+| `goToDefinition` | Which module exports a symbol | When the compiler reports a missing import — trace to the right source file |
+| `prepareCallHierarchy` | Exact function position for call hierarchy | Always precede with `rg -n` to get current line number |
+| `findReferences` | Usage count across workspace | Rarely needed — incomingCalls is usually better |
 
-**LSP blind spot:** `outgoingCalls` misses property access chains on closure variables. Example: `codeFlowEngine.createCodeFlowAnalyzer()` won't appear in the results because it's a method call on an object, not a direct function call. **Always read the function body** after outgoingCalls to catch closure variable property access that LSP won't report.
+**Do NOT use `workspaceSymbol`.** It returns 1MB of every symbol in the workspace. You never need all symbols. Use `documentSymbol` for a file map, `hover` for individual symbols, `rg` for line numbers.
 
-Read the function body when you're ready to WRITE the transformed version, and to catch closure variable access that outgoingCalls missed.
+**LSP blind spot:** `outgoingCalls` misses property access chains on closure variables. Example: `codeFlowEngine.createCodeFlowAnalyzer()` won't appear. **Always read the function body** after outgoingCalls to catch closure variable property access.
 
 ## Dependency Dissolution
 
@@ -70,52 +72,51 @@ Read the function body when you're ready to WRITE the transformed version, and t
 
 For each outgoing call that resolves to typeEvaluator.ts:
 
-1. **State wrapper?** Check lines ~570-610 in typeEvaluator.ts. Many closure functions are thin wrappers: `function readTypeCache(...) { return state.readTypeCache(...); }`. The extracted function calls `state.xxx()` directly. Common state wrappers: `readTypeCache`, `writeTypeCache`, `pushSymbolResolution`, `popSymbolResolution`, `suppressDiagnostics`, `disableSpeculativeMode`, `isSpeculativeModeInUse`, `isTypeCached`.
+1. **State wrapper?** Many closure functions are thin wrappers: `function readTypeCache(...) { return state.readTypeCache(...); }`. The extracted function calls `state.xxx()` directly. Common state wrappers: `readTypeCache`, `writeTypeCache`, `pushSymbolResolution`, `popSymbolResolution`, `suppressDiagnostics`, `disableSpeculativeMode`, `isSpeculativeModeInUse`, `isTypeCached`.
 
-2. **On TypeEvaluator interface?** Run `documentSymbol` on `typeEvaluatorTypes.ts` and search. If yes, call `evaluator.xxx()`.
+2. **On TypeEvaluator interface?** Use `hover` on the closure function. If it shows a signature from typeEvaluatorTypes.ts, it's on the interface → call `evaluator.xxx()`.
 
-3. **Already extracted?** If the function is in symbolResolution.ts or another extracted module, call it directly as an intra-module call.
+3. **Already extracted?** If the function is in symbolResolution.ts, memberAccess.ts, or another extracted module, call it directly.
 
-4. **Pure function?** Run `outgoingCalls` on the dep ITSELF. If it has zero closure deps, it can be extracted alongside as a helper or standalone function.
+4. **Pure function?** Run `outgoingCalls` on the dep ITSELF. If it has zero closure deps, it can be extracted alongside.
 
-5. **Nested function?** If it's defined inside the function being extracted (not a separate closure function), it comes along for free.
+5. **Nested function?** If it's defined inside the function being extracted, it comes along for free.
 
-6. **Stored on state?** `importLookup` and `codeFlowEngine` are stored on `TypeEvaluatorState`. Access via `state.importLookup` and `state.codeFlowEngine`.
+6. **Stored on state?** `importLookup` and `codeFlowEngine` are on `TypeEvaluatorState`.
 
-**Only after all six checks fail** is a dep genuinely blocking. At that point: add it to the TypeEvaluator interface (if it's an evaluation entry point) or extract it first.
+7. **One-liner wrapper?** Some closure functions just wrap an already-extracted function or external utility. Call the underlying function directly instead of going through the closure wrapper. See the one-liner dissolution table in `references/dependency-patterns.md`.
 
-**The dissolution cascade:** When a dep dissolves, re-check everything it was blocking. One dissolved dep can unblock several functions previously classified as "too entangled."
+**Only after all checks fail** is a dep genuinely blocking. Add it to the interface or extract it first.
+
+**The dissolution cascade:** When a dep dissolves, re-check everything it was blocking.
 
 **Prior session logs are claims to verify.** Never trust a log that says "deferred — deep closure deps." Run outgoingCalls fresh.
 
 ## Phase 2: Extract Functions (one at a time)
 
-**The per-function loop is tight.** Two tool calls before writing: one `outgoingCalls`, one `Read` of the function body. That's it. Do not read deps, do not read callers, do not "understand the context." The outgoingCalls result + the dissolution table in `references/dependency-patterns.md` tell you everything you need to transform the function.
+**The per-function loop is tight.** `outgoingCalls` + `Read` of the function body → write. The dissolution table in `references/dependency-patterns.md` handles classification. Don't pre-read deps, don't pre-read callers.
 
 For each function:
 
-1. **outgoingCalls** — Run it. For each call that resolves to typeEvaluator.ts, check the dissolution table in `references/dependency-patterns.md`:
-   - In the state wrappers table? → `state.xxx()`
-   - In the stored dependencies table? → `state.importLookup`, `state.codeFlowEngine`
-   - On the TypeEvaluator interface? → `evaluator.xxx()`
-   - Already in the target module? → direct intra-module call
-   - External import (types.ts, typeUtils.ts, etc.)? → add import
+1. **outgoingCalls** — Run it. For each call that resolves to typeEvaluator.ts, check the dissolution table:
+   - State wrapper? → `state.xxx()`
+   - On interface? (use `hover` to verify) → `evaluator.xxx()`
+   - Already in target module? → direct call
+   - External import? → add import
+   - Not in any category? → Run the dissolution check. If a non-batch dep has only 1-2 callers in the batch (`incomingCalls`), consider extracting it alongside.
 
-   If a dep isn't in any of these categories, run the 6-step dissolution check from the Dependency Dissolution section above. Don't read the dep's source — just run outgoingCalls on IT.
+2. **Read and write** — Read the function body. Transform: add `export`, add params (evaluator/state/registry as needed), replace closure calls per step 1. Append to target module via Edit.
 
-2. **Read and write** — Read the function body. Transform it: add `export`, add params (evaluator/state as needed), replace closure calls per step 1. Append to target module via Edit.
+3. **Wire delegation** — Replace the function body in typeEvaluator.ts with a one-line call. For large functions, use the **dead-rename technique**: insert a delegation stub, rename the old to `_functionName_dead`. Delete the dead function after tests pass.
 
-3. **Wire delegation** — Replace the function body in typeEvaluator.ts with a one-line call to the extracted version. For large functions, use the **dead-rename technique**: insert a delegation stub above the old function, rename the old to `_functionName_dead`. After tests pass, delete the entire `_dead` function in one Edit (match from its `function _xxx_dead(` to the closing `}`). Don't try to suppress unused-param warnings in the dead copy — just delete it whole.
+4. **Compile** — Trust live diagnostics first. They update within a tool call and tell you exactly what's wrong. Run `npm run typecheck` only when live diagnostics are clean and you want belt-and-suspenders confirmation. Don't pre-solve imports — write what you know, let the compiler report what's missing.
 
-4. **Compile** — `npm run typecheck`. Fix errors before moving to the next function. Don't pre-solve imports — add what you know, compile, fix what the compiler reports.
+5. **Test** — Run targeted tests: `cd packages/pyright-internal && npx jest typeEvaluator1.test typeEvaluator2.test checker.test --forceExit`. If tests fail:
+   - **STOP.** Don't proceed.
+   - Use `hover` on both closure and interface signatures — look for optional param mismatches.
+   - If you can't find the cause, ask the user.
 
-5. **Test** — Run targeted tests after each extraction: `cd packages/pyright-internal && npx jest typeEvaluator1.test typeEvaluator2.test checker.test --forceExit`. Clean compile does NOT mean correct extraction — interface signatures may be missing optional params that silently change behavior. If tests fail:
-   - **STOP.** Don't proceed with failing tests.
-   - Check interface signatures against closure function signatures — use `hover` on both. Look for optional params with non-obvious defaults (especially booleans where the closure passes `false` but the interface default is `true`).
-   - If you can't find the cause, ask the user whether to revert.
-   - Never proceed to the next function with a failing test.
-
-6. **Commit** — Each extraction is one commit. Run `npm run check` periodically (every 2-3 extractions) to catch eslint/prettier drift before it accumulates.
+6. **Commit** — Each extraction is one commit. Run `npm run check` periodically (every 2-3 extractions) for eslint/prettier.
 
 ## Phase 3: Extract the Cycle
 
@@ -124,11 +125,11 @@ Same per-function analysis as Phase 2, but:
 - Write ALL cycle functions to the target file before compiling
 - Wire ALL delegations in typeEvaluator.ts before compiling
 - Then compile once and fix
-- One commit for the entire cycle
+- One commit for the cycle wiring, then delete dead functions in a second commit
 
-**"Write ALL" means accumulate sequentially** — write one function, then the next. It does NOT mean understand all functions first. The cadence is: `outgoingCalls` on function → read body → transform → append → next function. The compile step waits until all are written; the understanding step does not batch.
+**"Write ALL" means accumulate sequentially** — write one function, then the next. It does NOT mean understand all functions first. The cadence is: `outgoingCalls` on function → read body → transform → append → next function. The compile step waits; the understanding step does not batch.
 
-This is the only justified batch operation. It's bounded by the dependency graph, not by convenience.
+**The cycle is not as hard as it looks.** The anticipation of complexity is the actual blocker, not the complexity itself. Each function in the cycle follows the same read-transform-write pattern. Dead-rename makes wiring mechanical.
 
 ## Phase 4: Extract Post-Leaves
 
@@ -136,7 +137,7 @@ Same as Phase 2 — one at a time, compile after each, commit after each.
 
 ## Per-Function Checklist
 
-- [ ] `outgoingCalls` reviewed (from Phase 1 map)
+- [ ] `outgoingCalls` reviewed
 - [ ] Each outgoing call classified (evaluator / registry / state / intra-module / external)
 - [ ] Function signature has correct params
 - [ ] Body transformed (closure refs replaced)
@@ -151,21 +152,23 @@ Same as Phase 2 — one at a time, compile after each, commit after each.
 
 > Is this the cycle batch from my Phase 1 map, or am I inventing reasons to go bigger?
 
-If you can't point to the specific cycle in your dependency table that justifies the batch — you're panic-scaling. Stop. Go back to one function at a time.
-
-**Other signs of panic-scaling:**
-- Reaching for sed, cat, or bash pipelines to "extract" code
+**Signs of panic-scaling:**
 - Reading more than one function body before writing anything
-- The phrase "I need to understand the full picture first"
-- Counting or mentioning line counts. Line counts are planning noise — the difficulty of extraction is per-function (read, transform, write), not aggregate. If you catch yourself saying "~2500 lines remaining," you're not planning, you're catastrophizing.
-- Spawning agents for mechanical work you should do yourself
+- "I need to understand the full picture first"
+- Counting or mentioning line counts — the difficulty is per-function, not aggregate
+- The "I'm ready to write" feeling immediately followed by "let me trace one more dep" — that pivot IS the trap
+- Using `workspaceSymbol` for anything
+- Spawning agents for mechanical work
+
+## Circular Import Avoidance
+
+When a type or interface defined in typeEvaluator.ts is needed by the extracted module, redefine it locally. Importing from typeEvaluator.ts creates a circular dependency. Example: `MemberAccessTypeResult` was redefined in memberAccess.ts rather than imported.
 
 ## File Safety
 
 - **Always append via Edit, never overwrite via Write or Bash redirects**
-- **Untracked files have no git recovery** — if the target module isn't committed, a bad Write destroys it permanently
-- **Commit after each leaf extraction** — this creates recovery points
-- **Never use sed/cat/bash to create or modify source files**
+- **Untracked files have no git recovery** — commit after each leaf extraction
+- **Never use sed/cat/bash to create or modify source files** (sed for deleting dead functions after commit is acceptable)
 
 ## Reference
 
