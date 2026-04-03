@@ -93,7 +93,6 @@ import {
     isCodeFlowSupportedForReference,
     wildcardImportReferenceKey,
 } from './codeFlowTypes';
-import { ConstraintSolution } from './constraintSolution';
 import {
     addConstraintsForExpectedType,
     applySourceSolutionToConstraints,
@@ -10005,49 +10004,7 @@ export function createTypeEvaluator(
         returnType: Type,
         liveTypeVarScopes: TypeVarScopeId[]
     ): Type {
-        if (!isFunction(returnType)) {
-            return returnType;
-        }
-
-        // What type variables are referenced in the callable return type? Do not include any live type variables.
-        const typeParams = getTypeVarArgsRecursive(returnType).filter(
-            (t) => !liveTypeVarScopes.some((scopeId) => t.priv.scopeId === scopeId)
-        );
-
-        // If there are no unsolved type variables, we're done. If there are
-        // unsolved type variables, rescope them to the callable.
-        if (typeParams.length === 0) {
-            return returnType;
-        }
-
-        inferReturnTypeIfNecessary(returnType);
-
-        // Create a new scope ID based on the caller's position. This
-        // will guarantee uniqueness. If another caller uses the same
-        // call and arguments, the type vars will not conflict.
-        const newScopeId = ParseTreeUtils.getScopeIdForNode(callNode);
-        const solution = new ConstraintSolution();
-
-        const newTypeParams = typeParams.map((typeVar) => {
-            const newTypeParam = TypeVarType.cloneForScopeId(
-                typeVar,
-                newScopeId,
-                typeVar.priv.scopeName,
-                TypeVarScopeType.Function
-            );
-            solution.setType(typeVar, newTypeParam);
-            return newTypeParam;
-        });
-
-        return applySolvedTypeVars(
-            FunctionType.cloneWithNewTypeVarScopeId(
-                returnType,
-                newScopeId,
-                /* constructorTypeVarScopeId */ undefined,
-                newTypeParams
-            ),
-            solution
-        );
+        return callValidation.adjustCallableReturnType(evaluatorInterface, callNode, returnType, liveTypeVarScopes);
     }
 
     // Tries to assign the call arguments to the function parameter

@@ -21,8 +21,21 @@ import {
     TypeResult,
     ValidateArgTypeParams,
 } from './typeEvaluatorTypes';
-import { FunctionParam, FunctionType, isAnyOrUnknown, isClassInstance, ParamSpecType, Type, UnknownType } from './types';
-import { InferenceContext } from './typeUtils';
+import {
+    FunctionParam,
+    FunctionType,
+    isAnyOrUnknown,
+    isClassInstance,
+    isFunction,
+    ParamSpecType,
+    Type,
+    TypeVarScopeId,
+    TypeVarScopeType,
+    TypeVarType,
+    UnknownType,
+} from './types';
+import { applySolvedTypeVars, getTypeVarArgsRecursive, InferenceContext } from './typeUtils';
+import { ConstraintSolution } from './constraintSolution';
 import { enumerateLiteralsForType } from './typeGuards';
 import { areTypesSame, doForEachSubtype } from './typeUtils';
 import { expandTuple } from './tuples';
@@ -281,4 +294,57 @@ export function getTypeOfArgExpectingType(evaluator: TypeEvaluator, arg: Arg, op
     // be a value expression from which we can retrieve the type.
     assert(arg.valueExpression !== undefined);
     return evaluator.getTypeOfExpressionExpectingType(arg.valueExpression, options);
+}
+
+// If the return type from a function is a callable with type variables
+// that are not scoped, rescope them to the caller.
+export function adjustCallableReturnType(
+    evaluator: TypeEvaluator,
+    callNode: ExpressionNode,
+    returnType: Type,
+    liveTypeVarScopes: TypeVarScopeId[]
+): Type {
+    if (!isFunction(returnType)) {
+        return returnType;
+    }
+
+    // What type variables are referenced in the callable return type? Do not include any live type variables.
+    const typeParams = getTypeVarArgsRecursive(returnType).filter(
+        (t) => !liveTypeVarScopes.some((scopeId) => t.priv.scopeId === scopeId)
+    );
+
+    // If there are no unsolved type variables, we're done. If there are
+    // unsolved type variables, rescope them to the callable.
+    if (typeParams.length === 0) {
+        return returnType;
+    }
+
+    evaluator.inferReturnTypeIfNecessary(returnType);
+
+    // Create a new scope ID based on the caller's position. This
+    // will guarantee uniqueness. If another caller uses the same
+    // call and arguments, the type vars will not conflict.
+    const newScopeId = ParseTreeUtils.getScopeIdForNode(callNode);
+    const solution = new ConstraintSolution();
+
+    const newTypeParams = typeParams.map((typeVar) => {
+        const newTypeParam = TypeVarType.cloneForScopeId(
+            typeVar,
+            newScopeId,
+            typeVar.priv.scopeName,
+            TypeVarScopeType.Function
+        );
+        solution.setType(typeVar, newTypeParam);
+        return newTypeParam;
+    });
+
+    return applySolvedTypeVars(
+        FunctionType.cloneWithNewTypeVarScopeId(
+            returnType,
+            newScopeId,
+            /* constructorTypeVarScopeId */ undefined,
+            newTypeParams
+        ),
+        solution
+    );
 }
