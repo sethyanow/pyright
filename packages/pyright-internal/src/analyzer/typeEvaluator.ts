@@ -92,13 +92,8 @@ import {
     isCodeFlowSupportedForReference,
     wildcardImportReferenceKey,
 } from './codeFlowTypes';
-import {
-    addConstraintsForExpectedType,
-    applySourceSolutionToConstraints,
-    solveConstraints,
-    solveConstraintSet,
-} from './constraintSolver';
-import { ConstraintSet, ConstraintTracker } from './constraintTracker';
+import { addConstraintsForExpectedType, solveConstraints } from './constraintSolver';
+import { ConstraintTracker } from './constraintTracker';
 import { createFunctionFromConstructor, getBoundInitMethod, validateConstructorArgs } from './constructors';
 import { applyDataClassClassBehaviorOverrides, synthesizeDataClassMethods } from './dataClasses';
 import { ClassDeclaration, Declaration, DeclarationType, FunctionDeclaration } from './declaration';
@@ -130,8 +125,6 @@ import {
 } from './operations';
 import {
     getParamListDetails,
-    isParamSpecArgs,
-    isParamSpecKwargs,
     ParamKind,
     ParamListDetails,
 } from './parameterUtils';
@@ -264,7 +257,6 @@ import {
     containsLiteralType,
     convertToInstance,
     convertToInstantiable,
-    convertTypeToParamSpecValue,
     derivesFromAnyOrUnknown,
     derivesFromClassRecursive,
     derivesFromStdlibClass,
@@ -301,7 +293,6 @@ import {
     makeTypeVarsFree,
     mapSubtypes,
     MemberAccessFlags,
-    preserveUnknown,
     removeNoneFromUnion,
     requiresSpecialization,
     requiresTypeArgs,
@@ -409,11 +400,6 @@ const typePromotions: Map<string, string[]> = new Map([
     ['builtins.complex', ['builtins.float', 'builtins.int']],
     ['builtins.bytes', ['builtins.bytearray', 'builtins.memoryview']],
 ]);
-
-interface ParamSpecArgResult {
-    argumentErrors: boolean;
-    constraintTrackers: (ConstraintTracker | undefined)[];
-}
 
 // How many levels deep should we attempt to infer return
 // How many entries in a list, set, or dict should we examine
@@ -7493,10 +7479,6 @@ export function createTypeEvaluator(
         };
     }
 
-    function getAbstractSymbolInfo(classType: ClassType, symbolName: string): AbstractSymbol | undefined {
-        return symbolResolution.getAbstractSymbolInfo(evaluatorInterface, classType, symbolName);
-    }
-
     function validateCallForOverloaded(
         errorNode: ExpressionNode,
         argList: Arg[],
@@ -8193,347 +8175,7 @@ export function createTypeEvaluator(
         return callValidation.validateArgTypes(evaluatorInterface, state, registry, errorNode, matchResults, constraints, skipUnknownArgCheck);
     }
 
-    function _validateArgTypes_dead(
-        errorNode: ExpressionNode,
-        matchResults: MatchArgsToParamsResult,
-        constraints: ConstraintTracker,
-        skipUnknownArgCheck: boolean | undefined
-    ): CallResult {
-        const type = matchResults.overload;
-        let isTypeIncomplete = matchResults.isTypeIncomplete;
-        let argumentErrors = false;
-        let argumentMatchScore = 0;
-        let specializedInitSelfType: Type | undefined;
-        let anyOrUnknownArg: UnknownType | AnyType | undefined;
-        const speculativeNode = getSpeculativeNodeForCall(errorNode);
-        const typeCondition = getTypeCondition(type);
-        const paramSpec = FunctionType.getParamSpecFromArgsKwargs(type);
 
-        // Check for an attempt to invoke an unimplemented abstract method.
-        if (type.priv.boundToType && !type.priv.boundToType.priv.includeSubclasses && type.shared.methodClass) {
-            const abstractSymbolInfo = getAbstractSymbolInfo(type.shared.methodClass, type.shared.name);
-
-            if (abstractSymbolInfo && !abstractSymbolInfo.hasImplementation) {
-                addDiagnostic(
-                    DiagnosticRule.reportAbstractUsage,
-                    LocMessage.abstractMethodInvocation().format({
-                        method: type.shared.name,
-                    }),
-                    errorNode.nodeType === ParseNodeType.Call ? errorNode.d.leftExpr : errorNode
-                );
-            }
-        }
-
-        // The type annotation for the "self" parameter in an __init__ method to
-        // can influence the type being constructed.
-        if (
-            type.shared.name === '__init__' &&
-            type.priv.strippedFirstParamType &&
-            type.priv.boundToType &&
-            isClassInstance(type.priv.strippedFirstParamType) &&
-            isClassInstance(type.priv.boundToType) &&
-            ClassType.isSameGenericClass(type.priv.strippedFirstParamType, type.priv.boundToType) &&
-            type.priv.strippedFirstParamType.priv.typeArgs
-        ) {
-            const typeParams = type.priv.strippedFirstParamType.shared.typeParams;
-            specializedInitSelfType = type.priv.strippedFirstParamType;
-            type.priv.strippedFirstParamType.priv.typeArgs.forEach((typeArg, index) => {
-                if (index < typeParams.length) {
-                    const typeParam = typeParams[index];
-                    if (!isTypeSame(typeParam, typeArg, { ignorePseudoGeneric: true })) {
-                        constraints.setBounds(typeParams[index], typeArg);
-                    }
-                }
-            });
-        }
-
-        // Special-case a few built-in calls that are often used for
-        // casting or checking for unknown types.
-        if (
-            FunctionType.isBuiltIn(type, [
-                'typing.cast',
-                'typing_extensions.cast',
-                'builtins.isinstance',
-                'builtins.issubclass',
-            ])
-        ) {
-            skipUnknownArgCheck = true;
-        }
-
-        // Run through all args and validate them against their matched parameter.
-        // We'll do two phases. The first one establishes constraints for type
-        // variables. The second perform type validation using the solved
-        // types. We can skip the first pass if there are no type vars to solve.
-        const typeVarCount = matchResults.argParams.filter((arg) => arg.requiresTypeVarMatching).length;
-        if (typeVarCount > 0) {
-            // Do up to two passes.
-            let passCount = Math.min(typeVarCount, 2);
-
-            for (let i = 0; i < passCount; i++) {
-                useSpeculativeMode(speculativeNode, () => {
-                    matchResults.argParams.forEach((argParam) => {
-                        if (!argParam.requiresTypeVarMatching) {
-                            return;
-                        }
-
-                        const argResult = validateArgType(
-                            argParam,
-                            constraints,
-                            { type, isIncomplete: matchResults.isTypeIncomplete },
-                            {
-                                skipUnknownArgCheck,
-                                isArgFirstPass: passCount > 1 && i === 0,
-                                conditionFilter: typeCondition,
-                                skipReportError: true,
-                            }
-                        );
-
-                        if (argResult.isTypeIncomplete) {
-                            isTypeIncomplete = true;
-                        }
-
-                        // If we skipped a bare type var during the first pass, add
-                        // another pass to ensure that we handle all of the type variables.
-                        if (i === 0 && passCount < 2 && argResult.skippedBareTypeVarExpectedType) {
-                            passCount++;
-                        }
-                    });
-                });
-            }
-        }
-
-        let sawParamSpecArgs = false;
-        let sawParamSpecKwargs = false;
-
-        let condition: TypeCondition[] = [];
-        const argResults: ArgResult[] = [];
-
-        matchResults.argParams.forEach((argParam, argParamIndex) => {
-            const argResult = validateArgType(
-                argParam,
-                constraints,
-                { type, isIncomplete: matchResults.isTypeIncomplete },
-                {
-                    skipUnknownArgCheck,
-                    conditionFilter: typeCondition,
-                }
-            );
-
-            argResults.push(argResult);
-
-            if (!argResult.isCompatible) {
-                argumentErrors = true;
-
-                // Add the inverse index so earlier parameters represent larger errors.
-                // This will help the heuristics in the overload error paths to pick the
-                // most likely intended overload if none of them match.
-                argumentMatchScore += 1 + (matchResults.argParams.length - argParamIndex);
-            }
-
-            if (argResult.isTypeIncomplete) {
-                isTypeIncomplete = true;
-            }
-
-            if (argResult.condition) {
-                condition = TypeCondition.combine(condition, argResult.condition) ?? [];
-            }
-
-            if (isAnyOrUnknown(argResult.argType)) {
-                anyOrUnknownArg = anyOrUnknownArg
-                    ? preserveUnknown(argResult.argType, anyOrUnknownArg)
-                    : argResult.argType;
-            }
-
-            if (paramSpec) {
-                if (argParam.argument.argCategory === ArgCategory.UnpackedList) {
-                    if (isParamSpecArgs(paramSpec, argResult.argType)) {
-                        if (sawParamSpecArgs) {
-                            addDiagnostic(
-                                DiagnosticRule.reportCallIssue,
-                                LocMessage.paramSpecArgsKwargsDuplicate().format({ type: printType(paramSpec) }),
-                                argParam.errorNode
-                            );
-                        }
-
-                        sawParamSpecArgs = true;
-                    }
-                }
-
-                if (argParam.argument.argCategory === ArgCategory.UnpackedDictionary) {
-                    if (isParamSpecKwargs(paramSpec, argResult.argType)) {
-                        if (sawParamSpecKwargs) {
-                            addDiagnostic(
-                                DiagnosticRule.reportCallIssue,
-                                LocMessage.paramSpecArgsKwargsDuplicate().format({ type: printType(paramSpec) }),
-                                argParam.errorNode
-                            );
-                        }
-
-                        sawParamSpecKwargs = true;
-                    }
-                }
-            }
-        });
-
-        let paramSpecConstraints: (ConstraintTracker | undefined)[] = [];
-
-        // Handle the assignment of additional arguments that map to a param spec.
-        if (matchResults.paramSpecArgList && matchResults.paramSpecTarget) {
-            const paramSpecArgResult = validateArgTypesForParamSpec(
-                errorNode,
-                matchResults.paramSpecArgList,
-                matchResults.paramSpecTarget,
-                constraints
-            );
-
-            if (paramSpecArgResult.argumentErrors) {
-                argumentErrors = true;
-                argumentMatchScore += 1;
-            }
-
-            paramSpecConstraints = paramSpecArgResult.constraintTrackers;
-        } else if (paramSpec) {
-            if (!sawParamSpecArgs || !sawParamSpecKwargs) {
-                if (!isTypeIncomplete) {
-                    addDiagnostic(
-                        DiagnosticRule.reportCallIssue,
-                        LocMessage.paramSpecArgsMissing().format({ type: printType(paramSpec) }),
-                        errorNode
-                    );
-                }
-                argumentErrors = true;
-                argumentMatchScore += 1;
-            }
-        }
-
-        // Calculate the return type.
-        const returnTypeResult = getEffectiveReturnTypeResult(type, {
-            callSiteInfo: { args: matchResults.argParams, errorNode },
-        });
-        let returnType = returnTypeResult.type;
-        if (returnTypeResult.isIncomplete) {
-            isTypeIncomplete = true;
-        }
-
-        if (condition.length > 0) {
-            returnType = TypeBase.cloneForCondition(returnType, condition);
-        }
-
-        let eliminateUnsolvedInUnions = true;
-
-        // If the function is returning a callable, don't eliminate unsolved
-        // type vars within a union. There are legit uses for unsolved type vars
-        // within a callable.
-        if (isFunctionOrOverloaded(returnType)) {
-            eliminateUnsolvedInUnions = false;
-        }
-
-        let specializedReturnType = solveAndApplyConstraints(returnType, constraints, {
-            replaceUnsolved: {
-                scopeIds: getTypeVarScopeIds(type),
-                unsolvedExemptTypeVars: getUnknownExemptTypeVarsForReturnType(type, returnType),
-                tupleClassType: getTupleClassType(),
-                eliminateUnsolvedInUnions,
-            },
-        });
-        specializedReturnType = addConditionToType(specializedReturnType, typeCondition, { skipBoundTypeVars: true });
-
-        // If the function includes a ParamSpec and the captured signature(s) includes
-        // generic types, we may need to apply those solved TypeVars.
-        if (paramSpecConstraints.length > 0) {
-            paramSpecConstraints.forEach((paramSpecConstraints) => {
-                if (paramSpecConstraints) {
-                    specializedReturnType = solveAndApplyConstraints(specializedReturnType, paramSpecConstraints);
-
-                    // It's possible that one or more of the TypeVars or ParamSpecs
-                    // in the constraints refer to TypeVars that were solved in
-                    // the paramSpecConstraints. Apply these solved TypeVars accordingly.
-                    applySourceSolutionToConstraints(
-                        constraints,
-                        solveConstraints(evaluatorInterface, paramSpecConstraints)
-                    );
-                }
-            });
-        }
-
-        // If the final return type is an unpacked tuple, turn it into a normal (unpacked) tuple.
-        if (isUnpackedClass(specializedReturnType)) {
-            specializedReturnType = ClassType.cloneForPacked(specializedReturnType);
-        }
-
-        const liveTypeVarScopes = ParseTreeUtils.getTypeVarScopesForNode(errorNode);
-        specializedReturnType = adjustCallableReturnType(errorNode, specializedReturnType, liveTypeVarScopes);
-
-        if (specializedInitSelfType) {
-            specializedInitSelfType = solveAndApplyConstraints(specializedInitSelfType, constraints);
-        }
-
-        matchResults.argumentMatchScore = argumentMatchScore;
-
-        return {
-            argumentErrors,
-            argResults,
-            anyOrUnknownArg,
-            returnType: specializedReturnType,
-            isTypeIncomplete,
-            activeParam: matchResults.activeParam,
-            specializedInitSelfType,
-            overloadsUsedForCall: argumentErrors ? [] : [type],
-        };
-    }
-
-    // In general, all in-scope type variables left in a return type should be
-    // replaced with Unknown. However, if the return type is a callable that uses
-    // type vars that are found nowhere within the function's input parameters,
-    // we'll treat these as though they're scoped to the callable and leave them
-    // unsolved.
-    function getUnknownExemptTypeVarsForReturnType(functionType: FunctionType, returnType: Type): TypeVarType[] {
-        if (isFunction(returnType) && !returnType.shared.name) {
-            const returnTypeScopeId = returnType.shared.typeVarScopeId;
-
-            // If one or more type vars found within the return type are scoped to
-            // the functionType but don't appear anywhere else within the functionType's
-            // input parameters, rescope them to the return type callable so they are
-            // not replaced with Unknown.
-            if (returnTypeScopeId && functionType.shared.typeVarScopeId) {
-                let typeVarsInReturnType = getTypeVarArgsRecursive(returnType);
-
-                // Remove any type variables that appear in the function's input parameters.
-                functionType.shared.parameters.forEach((param, index) => {
-                    if (FunctionParam.isTypeDeclared(param)) {
-                        const typeVarsInInputParam = getTypeVarArgsRecursive(
-                            FunctionType.getParamType(functionType, index)
-                        );
-                        typeVarsInReturnType = typeVarsInReturnType.filter(
-                            (returnTypeVar) =>
-                                !typeVarsInInputParam.some((inputTypeVar) => isTypeSame(returnTypeVar, inputTypeVar))
-                        );
-                    }
-                });
-
-                return typeVarsInReturnType;
-            }
-        }
-
-        return [];
-    }
-
-    // If the return type includes a generic Callable type, set the type var
-    // scope to the scope of the function it was originally associated with
-    // to allow these type vars to be solved. This won't work with overloads
-    // or unions of callables. It's intended for a specific use case. We may
-    // need to make this more sophisticated in the future.
-    function adjustCallableReturnType(
-        callNode: ExpressionNode,
-        returnType: Type,
-        liveTypeVarScopes: TypeVarScopeId[]
-    ): Type {
-        return callValidation.adjustCallableReturnType(evaluatorInterface, callNode, returnType, liveTypeVarScopes);
-    }
-
-    // Tries to assign the call arguments to the function parameter
-    // list and reports any mismatches in types or counts. Returns the
-    // specialized return type of the call.
     function validateArgs(
         errorNode: ExpressionNode,
         argList: Arg[],
@@ -8545,9 +8187,6 @@ export function createTypeEvaluator(
         const matchResults = matchArgsToParams(errorNode, argList, typeResult, 0);
 
         if (matchResults.argumentErrors) {
-            // Evaluate types of all args. This will ensure that referenced symbols are
-            // not reported as unaccessed. Also pass the expected parameter type as
-            // inference context to enable proper completions even when there are errors.
             matchResults.argParams.forEach((argParam) => {
                 if (argParam.argument.valueExpression && !isSpeculativeModeInUse(argParam.argument.valueExpression)) {
                     getTypeOfExpression(
@@ -8558,18 +8197,15 @@ export function createTypeEvaluator(
                 }
             });
 
-            // Also evaluate any arguments that weren't matched to parameters
             argList.forEach((arg) => {
                 if (arg.valueExpression && !isSpeculativeModeInUse(arg.valueExpression)) {
-                    // Check if this argument was already evaluated above
                     const wasEvaluated = matchResults.argParams.some((argParam) => argParam.argument === arg);
                     if (!wasEvaluated) {
                         getTypeOfExpression(arg.valueExpression);
                     }
                 }
             });
-            // Use a return type of Unknown but attach a "possible type" to it
-            // so the completion provider can suggest better completions.
+
             const possibleType = FunctionType.getEffectiveReturnType(typeResult.type);
             return {
                 returnType:
@@ -8593,140 +8229,6 @@ export function createTypeEvaluator(
                 inferenceContext?.returnTypeOverride
             )
         );
-    }
-
-    // Determines whether the specified argument list satisfies the function
-    // signature bound to the specified ParamSpec. Return value indicates success.
-    function validateArgTypesForParamSpec(
-        errorNode: ExpressionNode,
-        argList: Arg[],
-        paramSpec: ParamSpecType,
-        destConstraints: ConstraintTracker
-    ): ParamSpecArgResult {
-        const sets = destConstraints.getConstraintSets();
-
-        // Handle the common case where there is only one signature context.
-        if (sets.length === 1) {
-            return validateArgTypesForParamSpecSignature(errorNode, argList, paramSpec, sets[0]);
-        }
-
-        const filteredSets: ConstraintSet[] = [];
-        const constraintTrackers: (ConstraintTracker | undefined)[] = [];
-        const speculativeNode = getSpeculativeNodeForCall(errorNode);
-
-        sets.forEach((context) => {
-            // Use speculative mode to avoid emitting errors or caching types.
-            useSpeculativeMode(speculativeNode, () => {
-                const paramSpecArgResult = validateArgTypesForParamSpecSignature(
-                    errorNode,
-                    argList,
-                    paramSpec,
-                    context
-                );
-
-                if (!paramSpecArgResult.argumentErrors) {
-                    filteredSets.push(context);
-                }
-
-                appendArray(constraintTrackers, paramSpecArgResult.constraintTrackers);
-            });
-        });
-
-        // Copy back any compatible signature contexts if any were compatible.
-        if (filteredSets.length > 0) {
-            destConstraints.addConstraintSets(filteredSets);
-        }
-
-        // Evaluate non-speculatively to produce a final result and cache types.
-        const paramSpecArgResult = validateArgTypesForParamSpecSignature(
-            errorNode,
-            argList,
-            paramSpec,
-            filteredSets.length > 0 ? filteredSets[0] : sets[0]
-        );
-
-        return { argumentErrors: paramSpecArgResult.argumentErrors, constraintTrackers: constraintTrackers };
-    }
-
-    function validateArgTypesForParamSpecSignature(
-        errorNode: ExpressionNode,
-        argList: Arg[],
-        paramSpec: ParamSpecType,
-        constraintSet: ConstraintSet
-    ): ParamSpecArgResult {
-        const solutionSet = solveConstraintSet(evaluatorInterface, constraintSet);
-        let paramSpecType = solutionSet.getType(paramSpec);
-        paramSpecType = convertTypeToParamSpecValue(paramSpecType ?? paramSpec);
-
-        const matchResults = matchArgsToParams(errorNode, argList, { type: paramSpecType }, 0);
-        const functionType = matchResults.overload;
-        const constraints = new ConstraintTracker();
-
-        if (matchResults.argumentErrors) {
-            // Evaluate types of all args. This will ensure that referenced symbols are
-            // not reported as unaccessed.
-            argList.forEach((arg) => {
-                if (arg.valueExpression && !isSpeculativeModeInUse(arg.valueExpression)) {
-                    getTypeOfExpression(arg.valueExpression);
-                }
-            });
-
-            return { argumentErrors: true, constraintTrackers: [constraints] };
-        }
-
-        const functionParamSpec = FunctionType.getParamSpecFromArgsKwargs(functionType);
-        const functionWithoutParamSpec = FunctionType.cloneRemoveParamSpecArgsKwargs(functionType);
-
-        // Handle the recursive case where we're passing (*args: P.args, **kwargs: P.args)
-        // a remaining function of type (*P).
-        if (
-            functionParamSpec &&
-            functionWithoutParamSpec.shared.parameters.length === 0 &&
-            isTypeSame(functionParamSpec, paramSpec)
-        ) {
-            // If there are any arguments other than *args: P.args or **kwargs: P.kwargs,
-            // report an error.
-            let argsCount = 0;
-            let kwargsCount = 0;
-            let argumentErrors = false;
-            let argErrorNode: ExpressionNode | undefined;
-
-            for (const arg of argList) {
-                const argType = getTypeOfArg(arg, /* inferenceContext */ undefined)?.type;
-
-                if (arg.argCategory === ArgCategory.UnpackedList) {
-                    if (isParamSpecArgs(paramSpec, argType)) {
-                        argsCount++;
-                    }
-                } else if (arg.argCategory === ArgCategory.UnpackedDictionary) {
-                    if (isParamSpecKwargs(paramSpec, argType)) {
-                        kwargsCount++;
-                    }
-                } else {
-                    argErrorNode = argErrorNode ?? arg.valueExpression;
-                    argumentErrors = true;
-                }
-            }
-
-            if (argsCount !== 1 || kwargsCount !== 1) {
-                argumentErrors = true;
-            }
-
-            if (argumentErrors) {
-                addDiagnostic(
-                    DiagnosticRule.reportCallIssue,
-                    LocMessage.paramSpecArgsMissing().format({
-                        type: printType(functionParamSpec),
-                    }),
-                    argErrorNode ?? errorNode
-                );
-            }
-
-            return { argumentErrors, constraintTrackers: [constraints] };
-        }
-
-        const result = validateArgTypes(errorNode, matchResults, constraints, /* skipUnknownArgCheck */ undefined);
-        return { argumentErrors: !!result.argumentErrors, constraintTrackers: [constraints] };
     }
 
     function validateArgType(
