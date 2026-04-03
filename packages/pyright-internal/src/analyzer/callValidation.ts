@@ -45,7 +45,10 @@ import {
     isTypeVarTuple,
     isUnknown,
     combineTypes,
+    ClassType,
+    isClass,
     isUnpackedClass,
+    maxTypeRecursionCount,
     ParamSpecType,
     removeUnbound,
     TupleTypeArg,
@@ -55,6 +58,7 @@ import {
     TypeVarScopeType,
     TypeVarType,
     UnknownType,
+    Variance,
 } from './types';
 import { ConstraintSolution } from './constraintSolution';
 import { enumerateLiteralsForType } from './typeGuards';
@@ -71,6 +75,7 @@ import {
     isEllipsisType,
     isOptionalType,
     isPartlyUnknown,
+    getTypeCondition,
     isTupleClass,
     makeInferenceContext,
     requiresSpecialization,
@@ -960,6 +965,63 @@ export function adjustParamAnnotatedType(evaluator: TypeEvaluator, param: Parame
         !AnalyzerNodeInfo.getFileInfo(param).diagnosticRuleSet.strictParameterNoneValue
     ) {
         return combineTypes([type, evaluator.getNoneType()]);
+    }
+
+    return type;
+}
+
+export function applyConditionFilterToType(
+    evaluator: TypeEvaluator,
+    type: Type,
+    conditionFilter: TypeCondition[],
+    recursionCount: number
+): Type | undefined {
+    if (recursionCount > maxTypeRecursionCount) {
+        return type;
+    }
+    recursionCount++;
+
+    if (!TypeCondition.isCompatible(getTypeCondition(type), conditionFilter)) {
+        return undefined;
+    }
+
+    if (isClass(type) && type.priv.typeArgs && !type.priv.tupleTypeArgs) {
+        evaluator.inferVarianceForClass(type);
+
+        let typeWasTransformed = false;
+
+        const filteredTypeArgs = type.priv.typeArgs.map((typeArg, index) => {
+            if (index >= type.shared.typeParams.length) {
+                return typeArg;
+            }
+
+            const variance = TypeVarType.getVariance(type.shared.typeParams[index]);
+            if (variance !== Variance.Covariant) {
+                return typeArg;
+            }
+
+            if (isTypeVar(typeArg) && typeArg.shared.recursiveAlias) {
+                return typeArg;
+            }
+
+            const filteredTypeArg = evaluator.mapSubtypesExpandTypeVars(
+                typeArg,
+                { conditionFilter },
+                (expandedSubtype) => {
+                    return expandedSubtype;
+                }
+            );
+
+            if (filteredTypeArg !== typeArg) {
+                typeWasTransformed = true;
+            }
+
+            return filteredTypeArg;
+        });
+
+        if (typeWasTransformed) {
+            return ClassType.specialize(type, filteredTypeArgs);
+        }
     }
 
     return type;

@@ -3444,63 +3444,7 @@ export function createTypeEvaluator(
         conditionFilter: TypeCondition[],
         recursionCount: number
     ): Type | undefined {
-        if (recursionCount > maxTypeRecursionCount) {
-            return type;
-        }
-        recursionCount++;
-
-        // If the type has a condition associated with it, make sure it's compatible.
-        if (!TypeCondition.isCompatible(getTypeCondition(type), conditionFilter)) {
-            return undefined;
-        }
-
-        // If the type is generic, see if any of its type arguments should be filtered.
-        // This is possible only in cases where the type parameter is covariant.
-
-        // TODO - handle functions and tuples
-        if (isClass(type) && type.priv.typeArgs && !type.priv.tupleTypeArgs) {
-            inferVarianceForClass(type);
-
-            let typeWasTransformed = false;
-
-            const filteredTypeArgs = type.priv.typeArgs.map((typeArg, index) => {
-                if (index >= type.shared.typeParams.length) {
-                    return typeArg;
-                }
-
-                const variance = TypeVarType.getVariance(type.shared.typeParams[index]);
-                if (variance !== Variance.Covariant) {
-                    return typeArg;
-                }
-
-                // Don't expand recursive type aliases because they can
-                // cause infinite recursion.
-                if (isTypeVar(typeArg) && typeArg.shared.recursiveAlias) {
-                    return typeArg;
-                }
-
-                const filteredTypeArg = mapSubtypesExpandTypeVars(
-                    typeArg,
-                    { conditionFilter },
-                    (expandedSubtype) => {
-                        return expandedSubtype;
-                    },
-                    recursionCount
-                );
-
-                if (filteredTypeArg !== typeArg) {
-                    typeWasTransformed = true;
-                }
-
-                return filteredTypeArg;
-            });
-
-            if (typeWasTransformed) {
-                return ClassType.specialize(type, filteredTypeArgs);
-            }
-        }
-
-        return type;
+        return callValidation.applyConditionFilterToType(evaluatorInterface, type, conditionFilter, recursionCount);
     }
 
     function markNamesAccessed(node: ParseNode, names: string[]) {
