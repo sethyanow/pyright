@@ -8219,15 +8219,6 @@ export function createTypeEvaluator(
         typeResult: TypeResult<FunctionType>,
         overloadIndex: number
     ): MatchArgsToParamsResult {
-        return callValidation.matchArgsToParams(evaluatorInterface, state, registry, errorNode, argList, typeResult, overloadIndex);
-    }
-
-    function _matchArgsToParams_dead(
-        errorNode: ExpressionNode,
-        argList: Arg[],
-        typeResult: TypeResult<FunctionType>,
-        overloadIndex: number
-    ): MatchArgsToParamsResult {
         const overload = typeResult.type;
         const paramDetails = getParamListDetails(overload, { disallowExtraKwargsForTd: true });
         const paramSpec = FunctionType.getParamSpecFromArgsKwargs(overload);
