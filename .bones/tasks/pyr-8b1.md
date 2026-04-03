@@ -11,6 +11,7 @@ parent: pyr-a56
 
 
 
+
 ## Context
 
 Call validation and overload resolution functions handle Python's complex calling conventions — positional args, keyword args, *args/**kwargs, overloaded functions, ParamSpec, TypeVarTuple in arg positions, and the interaction between overload selection and type narrowing. This is the last domain extraction, sitting just below the expression evaluation orchestration layer.
@@ -125,3 +126,4 @@ cd /Volumes/code/pyright && bun run check
 ## Log
 
 - [2026-04-03T16:41:52Z] [Seth] Phase 1 partial map complete. Baseline: 2344/2344 pass. Hidden deps discovered via incomingCalls (all callers in batch): validateCallArgsForSubtype, matchArgsToParams, evaluateUsingBestMatchingOverload, validateOverloadsWithExpandedTypes, validateArgTypes, validateArgType, validateArgs, validateArgTypesForParamSpecSignature, validateArgTypesWithContext, validateArgTypesWithExpectedType. Starting leaf extraction: convertNodeToArg, getIndexAccessMagicMethodName, getSpeculativeNodeForCall, filterOverloadMatchesForAnyArgs, filterOverloadMatchesForUnpackedArgs, expandArgType, getTypeOfArgExpectingType, evaluateCastCall, applyConditionFilterToType. Will refine order as extraction proceeds.
+- [2026-04-03T17:10:26Z] [Seth] Cycle batch in progress. 13 functions extracted to callValidation.ts: convertNodeToArg, getSpeculativeNodeForCall, getIndexAccessMagicMethodName, filterOverloadMatchesForUnpackedArgs, filterOverloadMatchesForAnyArgs, expandArgType, expandArgTypes, getTypeOfArg, getTypeOfArgExpectingType, adjustCallableReturnType, adjustTypeArgsForTypeVarTuple, validateTypeArg, expandArgList. Plus interfaces MatchArgsToParamsResult and MatchedOverloadInfo. Cycle functions validateArgs and validateArgTypesWithContext and validateArgTypesWithExpectedType written to callValidation.ts (not yet compiled). Blocker: validateArgTypes needs getEffectiveReturnTypeResult which is NOT on TypeEvaluator interface — it wraps FunctionType.getEffectiveReturnType + getInferredReturnTypeResult (logged/wrapped closure). Options: add to interface, or extract alongside.
