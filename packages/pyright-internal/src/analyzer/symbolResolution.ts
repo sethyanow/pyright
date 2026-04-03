@@ -1347,13 +1347,23 @@ export function inferVarianceForClass(evaluator: TypeEvaluator, classType: Class
         const srcType = ClassType.specialize(classType, srcTypeArgs);
         const destType = ClassType.specialize(classType, destTypeArgs);
 
-        const isDestSubtypeOfSrc = evaluator.assignClassToSelf(srcType, destType, Variance.Covariant);
+        const isDestSubtypeOfSrc = evaluator.assignClassToSelf(
+            srcType,
+            destType,
+            Variance.Covariant,
+            /* ignoreBaseClassVariance */ false
+        );
 
         let inferredVariance: Variance;
         if (isDestSubtypeOfSrc) {
             inferredVariance = Variance.Covariant;
         } else {
-            const isSrcSubtypeOfDest = evaluator.assignClassToSelf(destType, srcType, Variance.Contravariant);
+            const isSrcSubtypeOfDest = evaluator.assignClassToSelf(
+                destType,
+                srcType,
+                Variance.Contravariant,
+                /* ignoreBaseClassVariance */ false
+            );
             if (isSrcSubtypeOfDest) {
                 inferredVariance = Variance.Contravariant;
             } else {
