@@ -4,14 +4,24 @@
 import { assert } from '../common/debug';
 import { DiagnosticAddendum } from '../common/diagnostic';
 import { LocMessage } from '../localization/localize';
-import { ParamCategory } from '../parser/parseNodes';
+import { ArgCategory, ExpressionNode, ParamCategory } from '../parser/parseNodes';
 import { ConstraintTracker } from './constraintTracker';
-import { AssignTypeFlags, TypeEvaluator } from './typeEvaluatorTypes';
+import { TypeRegistry } from './typeRegistry';
+import {
+    Arg,
+    AssignTypeFlags,
+    CallResult,
+    MagicMethodDeprecationInfo,
+    TypeEvaluator,
+    TypeResult,
+} from './typeEvaluatorTypes';
 import {
     ClassType,
     FunctionParam,
     FunctionParamFlags,
     FunctionType,
+    isAnyOrUnknown,
+    isClass,
     isClassInstance,
     isFunction,
     isFunctionOrOverloaded,
@@ -28,9 +38,13 @@ import {
 import {
     ClassMember,
     convertToInstance,
+    InferenceContext,
     convertToInstantiable,
     isInstantiableMetaclass,
+    isNoneInstance,
+    isNoneTypeClass,
     mapSignatures,
+    mapSubtypes,
     partiallySpecializeType,
     specializeWithDefaultTypeArgs,
 } from './typeUtils';
@@ -330,4 +344,128 @@ function partiallySpecializeBoundMethod(
     }
 
     return undefined;
+}
+
+export function getTypeOfMagicMethodCall(
+    evaluator: TypeEvaluator,
+    registry: TypeRegistry,
+    objType: Type,
+    methodName: string,
+    argList: TypeResult[],
+    errorNode: ExpressionNode,
+    inferenceContext?: InferenceContext,
+    diag?: DiagnosticAddendum
+): TypeResult | undefined {
+    let magicMethodSupported = true;
+    let isIncomplete = false;
+    let deprecationInfo: MagicMethodDeprecationInfo | undefined;
+    const overloadsUsedForCall: FunctionType[] = [];
+
+    // Create a helper lambda for object subtypes.
+    const handleSubtype = (subtype: ClassType | TypeVarType) => {
+        let magicMethodType: Type | undefined;
+        const concreteSubtype = evaluator.makeTopLevelTypeVarsConcrete(subtype);
+
+        if (isClass(concreteSubtype)) {
+            magicMethodType = evaluator.getBoundMagicMethod(concreteSubtype, methodName, subtype, errorNode, diag);
+        }
+
+        if (magicMethodType) {
+            const functionArgs: Arg[] = argList.map((arg) => {
+                return {
+                    argCategory: ArgCategory.Simple,
+                    typeResult: arg,
+                };
+            });
+
+            let callResult: CallResult | undefined;
+
+            callResult = evaluator.useSpeculativeMode(errorNode, () => {
+                assert(magicMethodType !== undefined);
+                return evaluator.validateCallArgs(
+                    errorNode,
+                    functionArgs,
+                    { type: magicMethodType },
+                    /* constraints */ undefined,
+                    /* skipUnknownArgCheck */ true,
+                    inferenceContext
+                );
+            });
+
+            // If there were errors with the expected type, try
+            // to evaluate without the expected type.
+            if (callResult.argumentErrors && inferenceContext) {
+                callResult = evaluator.useSpeculativeMode(errorNode, () => {
+                    assert(magicMethodType !== undefined);
+                    return evaluator.validateCallArgs(
+                        errorNode,
+                        functionArgs,
+                        { type: magicMethodType },
+                        /* constraints */ undefined,
+                        /* skipUnknownArgCheck */ true,
+                        /* inferenceContext */ undefined
+                    );
+                });
+            }
+
+            if (callResult.argumentErrors) {
+                magicMethodSupported = false;
+            } else if (callResult.overloadsUsedForCall) {
+                callResult.overloadsUsedForCall.forEach((overload) => {
+                    overloadsUsedForCall.push(overload);
+
+                    // If one of the overloads is deprecated, note the message.
+                    if (overload.shared.deprecatedMessage && isClass(concreteSubtype)) {
+                        deprecationInfo = {
+                            deprecatedMessage: overload.shared.deprecatedMessage,
+                            className: concreteSubtype.shared.name,
+                            methodName,
+                        };
+                    }
+                });
+            }
+
+            if (callResult.isTypeIncomplete) {
+                isIncomplete = true;
+            }
+
+            return callResult.returnType;
+        }
+
+        magicMethodSupported = false;
+        return undefined;
+    };
+
+    const returnType = mapSubtypes(objType, (subtype) => {
+        if (isAnyOrUnknown(subtype)) {
+            return subtype;
+        }
+
+        if (isClassInstance(subtype) || isInstantiableClass(subtype) || isTypeVar(subtype)) {
+            return handleSubtype(subtype);
+        }
+
+        if (isNoneInstance(subtype)) {
+            if (registry.objectClass && isInstantiableClass(registry.objectClass)) {
+                // Use 'object' for 'None'.
+                return handleSubtype(ClassType.cloneAsInstance(registry.objectClass));
+            }
+        }
+
+        if (isNoneTypeClass(subtype)) {
+            if (registry.typeClass && isInstantiableClass(registry.typeClass)) {
+                // Use 'type' for 'type[None]'.
+                return handleSubtype(ClassType.cloneAsInstance(registry.typeClass));
+            }
+        }
+
+        magicMethodSupported = false;
+        return undefined;
+    });
+
+    if (!magicMethodSupported) {
+        return undefined;
+    }
+
+    return { type: returnType, isIncomplete, magicMethodDeprecationInfo: deprecationInfo, overloadsUsedForCall };
 }

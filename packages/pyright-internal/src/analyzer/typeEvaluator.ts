@@ -11914,118 +11914,16 @@ export function createTypeEvaluator(
         inferenceContext?: InferenceContext,
         diag?: DiagnosticAddendum
     ): TypeResult | undefined {
-        let magicMethodSupported = true;
-        let isIncomplete = false;
-        let deprecationInfo: MagicMethodDeprecationInfo | undefined;
-        const overloadsUsedForCall: FunctionType[] = [];
-
-        // Create a helper lambda for object subtypes.
-        const handleSubtype = (subtype: ClassType | TypeVarType) => {
-            let magicMethodType: Type | undefined;
-            const concreteSubtype = makeTopLevelTypeVarsConcrete(subtype);
-
-            if (isClass(concreteSubtype)) {
-                magicMethodType = getBoundMagicMethod(concreteSubtype, methodName, subtype, errorNode, diag);
-            }
-
-            if (magicMethodType) {
-                const functionArgs: Arg[] = argList.map((arg) => {
-                    return {
-                        argCategory: ArgCategory.Simple,
-                        typeResult: arg,
-                    };
-                });
-
-                let callResult: CallResult | undefined;
-
-                callResult = useSpeculativeMode(errorNode, () => {
-                    assert(magicMethodType !== undefined);
-                    return validateCallArgs(
-                        errorNode,
-                        functionArgs,
-                        { type: magicMethodType },
-                        /* constraints */ undefined,
-                        /* skipUnknownArgCheck */ true,
-                        inferenceContext
-                    );
-                });
-
-                // If there were errors with the expected type, try
-                // to evaluate without the expected type.
-                if (callResult.argumentErrors && inferenceContext) {
-                    callResult = useSpeculativeMode(errorNode, () => {
-                        assert(magicMethodType !== undefined);
-                        return validateCallArgs(
-                            errorNode,
-                            functionArgs,
-                            { type: magicMethodType },
-                            /* constraints */ undefined,
-                            /* skipUnknownArgCheck */ true,
-                            /* inferenceContext */ undefined
-                        );
-                    });
-                }
-
-                if (callResult.argumentErrors) {
-                    magicMethodSupported = false;
-                } else if (callResult.overloadsUsedForCall) {
-                    callResult.overloadsUsedForCall.forEach((overload) => {
-                        overloadsUsedForCall.push(overload);
-
-                        // If one of the overloads is deprecated, note the message.
-                        if (overload.shared.deprecatedMessage && isClass(concreteSubtype)) {
-                            deprecationInfo = {
-                                deprecatedMessage: overload.shared.deprecatedMessage,
-                                className: concreteSubtype.shared.name,
-                                methodName,
-                            };
-                        }
-                    });
-                }
-
-                if (callResult.isTypeIncomplete) {
-                    isIncomplete = true;
-                }
-
-                return callResult.returnType;
-            }
-
-            magicMethodSupported = false;
-            return undefined;
-        };
-
-        const returnType = mapSubtypes(objType, (subtype) => {
-            if (isAnyOrUnknown(subtype)) {
-                return subtype;
-            }
-
-            if (isClassInstance(subtype) || isInstantiableClass(subtype) || isTypeVar(subtype)) {
-                return handleSubtype(subtype);
-            }
-
-            if (isNoneInstance(subtype)) {
-                if (registry.objectClass && isInstantiableClass(registry.objectClass)) {
-                    // Use 'object' for 'None'.
-                    return handleSubtype(ClassType.cloneAsInstance(registry.objectClass));
-                }
-            }
-
-            if (isNoneTypeClass(subtype)) {
-                if (registry.typeClass && isInstantiableClass(registry.typeClass)) {
-                    // Use 'type' for 'type[None]'.
-                    return handleSubtype(ClassType.cloneAsInstance(registry.typeClass));
-                }
-            }
-
-            magicMethodSupported = false;
-            return undefined;
-        });
-
-        if (!magicMethodSupported) {
-            return undefined;
-        }
-
-        return { type: returnType, isIncomplete, magicMethodDeprecationInfo: deprecationInfo, overloadsUsedForCall };
+        return memberAccessModule.getTypeOfMagicMethodCall(
+            evaluatorInterface,
+            registry,
+            objType,
+            methodName,
+            argList,
+            errorNode,
+            inferenceContext,
+            diag
+        );
     }
 
     function getTypeOfDictionary(
