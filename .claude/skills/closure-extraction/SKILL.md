@@ -88,29 +88,34 @@ For each outgoing call that resolves to typeEvaluator.ts:
 
 **Prior session logs are claims to verify.** Never trust a log that says "deferred — deep closure deps." Run outgoingCalls fresh.
 
-## Phase 2: Extract Leaves (one at a time)
+## Phase 2: Extract Functions (one at a time)
 
-For each leaf function:
+**The per-function loop is tight.** Two tool calls before writing: one `outgoingCalls`, one `Read` of the function body. That's it. Do not read deps, do not read callers, do not "understand the context." The outgoingCalls result + the dissolution table in `references/dependency-patterns.md` tell you everything you need to transform the function.
 
-1. **Classify dependencies** — Run `outgoingCalls` on the function. The result classifies every call:
+For each function:
 
-   | Resolves to | What it means | Transformation |
-   |---|---|---|
-   | Another extracted function | Intra-module call | Direct call, pass evaluator/registry/state through |
-   | Closure function on TypeEvaluator interface | Evaluator method | `evaluator.xxx(...)` |
-   | `registry.xxxClass` | Registry lookup | Needs `registry` param |
-   | `state.xxxStack` / `state.xxxCache` | State access | Needs `state` param |
-   | Function in types.ts, typeUtils.ts, etc. | External import | Add import statement |
+1. **outgoingCalls** — Run it. For each call that resolves to typeEvaluator.ts, check the dissolution table in `references/dependency-patterns.md`:
+   - In the state wrappers table? → `state.xxx()`
+   - In the stored dependencies table? → `state.importLookup`, `state.codeFlowEngine`
+   - On the TypeEvaluator interface? → `evaluator.xxx()`
+   - Already in the target module? → direct intra-module call
+   - External import (types.ts, typeUtils.ts, etc.)? → add import
 
-   Use `goToDefinition` on ambiguous symbols to confirm which module they come from.
+   If a dep isn't in any of these categories, run the 6-step dissolution check from the Dependency Dissolution section above. Don't read the dep's source — just run outgoingCalls on IT.
 
-2. **Read and write the function** — Read the function body, transform it, append to the target module file via Edit. Add `export`, add the needed params (evaluator/registry/state) as first arguments, replace `evaluatorInterface` with `evaluator`, replace bare closure calls with `evaluator.xxx(...)`.
+2. **Read and write** — Read the function body. Transform it: add `export`, add params (evaluator/state as needed), replace closure calls per step 1. Append to target module via Edit.
 
-3. **Wire delegation** — In typeEvaluator.ts, replace the function body with a call to the extracted version. For large functions, use the **dead-rename technique**: insert a delegation stub above the old function, rename the old to `_functionName_dead`. After tests pass, delete the entire `_dead` function in one Edit (match from its `function _xxx_dead(` to the closing `}`). Don't try to suppress unused-param warnings in the dead copy — just delete it whole.
+3. **Wire delegation** — Replace the function body in typeEvaluator.ts with a one-line call to the extracted version. For large functions, use the **dead-rename technique**: insert a delegation stub above the old function, rename the old to `_functionName_dead`. After tests pass, delete the entire `_dead` function in one Edit (match from its `function _xxx_dead(` to the closing `}`). Don't try to suppress unused-param warnings in the dead copy — just delete it whole.
 
 4. **Compile** — `npm run typecheck`. Fix errors before moving to the next function. Don't pre-solve imports — add what you know, compile, fix what the compiler reports.
 
-5. **Commit** — Each leaf extraction is one commit. Run `npm run check` periodically (every 2-3 extractions) to catch eslint/prettier drift before it accumulates.
+5. **Test** — Run targeted tests after each extraction: `cd packages/pyright-internal && npx jest typeEvaluator1.test typeEvaluator2.test checker.test --forceExit`. Clean compile does NOT mean correct extraction — interface signatures may be missing optional params that silently change behavior. If tests fail:
+   - **STOP.** Don't proceed with failing tests.
+   - Check interface signatures against closure function signatures — use `hover` on both. Look for optional params with non-obvious defaults (especially booleans where the closure passes `false` but the interface default is `true`).
+   - If you can't find the cause, ask the user whether to revert.
+   - Never proceed to the next function with a failing test.
+
+6. **Commit** — Each extraction is one commit. Run `npm run check` periodically (every 2-3 extractions) to catch eslint/prettier drift before it accumulates.
 
 ## Phase 3: Extract the Cycle
 
