@@ -20,12 +20,9 @@ import {
     ImportFromAsNode,
     ImportFromNode,
     NameNode,
-    ParameterNode,
     ParseNode,
     ParseNodeType,
     StringNode,
-    TypeAliasNode,
-    TypeParameterNode,
 } from '../parser/parseNodes';
 import { isAnnotationEvaluationPostponed } from './analyzerFileInfo';
 import * as AnalyzerNodeInfo from './analyzerNodeInfo';
@@ -169,7 +166,10 @@ export function isExplicitTypeAliasDeclaration(evaluator: TypeEvaluator, decl: D
         return false;
     }
 
-    const type = evaluator.getTypeOfAnnotation(decl.typeAnnotationNode, { varTypeAnnotation: true, allowClassVar: true });
+    const type = evaluator.getTypeOfAnnotation(decl.typeAnnotationNode, {
+        varTypeAnnotation: true,
+        allowClassVar: true,
+    });
     return isClassInstance(type) && ClassType.isBuiltIn(type, 'TypeAlias');
 }
 
@@ -364,11 +364,7 @@ export function getDeclInfoForNameNode(
                 appendArray(decls, getDeclarationsWithUsesLocalNameRemoved(declsForThisImport));
             }
         }
-    } else if (
-        node.parent &&
-        node.parent.nodeType === ParseNodeType.MemberAccess &&
-        node === node.parent.d.member
-    ) {
+    } else if (node.parent && node.parent.nodeType === ParseNodeType.MemberAccess && node === node.parent.d.member) {
         let baseType = evaluator.getType(node.parent.d.leftExpr);
         if (baseType) {
             baseType = evaluator.makeTopLevelTypeVarsConcrete(baseType);
@@ -538,11 +534,7 @@ export function getDeclInfoForNameNode(
         const isWithinTypeAliasStatement = !!ParseTreeUtils.getParentNodeOfType(node, ParseNodeType.TypeAlias);
         const allowForwardReferences = isWithinTypeAnnotation || isWithinTypeAliasStatement || fileInfo.isStubFile;
 
-        const symbolWithScope = evaluator.lookUpSymbolRecursive(
-            node,
-            node.d.value,
-            !allowForwardReferences
-        );
+        const symbolWithScope = evaluator.lookUpSymbolRecursive(node, node.d.value, !allowForwardReferences);
 
         if (symbolWithScope) {
             appendArray(decls, symbolWithScope.symbol.getDeclarations());
@@ -588,9 +580,7 @@ export function getAliasedSymbolTypeForName(
     // case, we want to choose the last declaration.
     const filteredDecls = symbolWithScope.symbol
         .getDeclarations()
-        .filter(
-            (decl) => ParseTreeUtils.isNodeContainedWithin(node, decl.node) && decl.type === DeclarationType.Alias
-        );
+        .filter((decl) => ParseTreeUtils.isNodeContainedWithin(node, decl.node) && decl.type === DeclarationType.Alias);
     let aliasDecl = filteredDecls.length > 0 ? filteredDecls[filteredDecls.length - 1] : undefined;
 
     // If we didn't find an exact match, look for any alias associated with
@@ -882,8 +872,7 @@ export function lookUpSymbolRecursive(
             curSymbolWithScope = curSymbolWithScope.scope.parent.lookUpSymbolRecursive(name, {
                 isOutsideCallerModule: curSymbolWithScope.isOutsideCallerModule,
                 isBeyondExecutionScope:
-                    curSymbolWithScope.isBeyondExecutionScope ||
-                    curSymbolWithScope.scope.isIndependentlyExecutable(),
+                    curSymbolWithScope.isBeyondExecutionScope || curSymbolWithScope.scope.isIndependentlyExecutable(),
             });
             if (!curSymbolWithScope) {
                 break;
@@ -984,10 +973,7 @@ export function getTypeForDeclaration(evaluator: TypeEvaluator, declaration: Dec
             if (!typeAnnotationNode) {
                 if (declaration.node.parent?.nodeType === ParseNodeType.Function) {
                     const functionNode = declaration.node.parent;
-                    if (
-                        functionNode.d.funcAnnotationComment &&
-                        !functionNode.d.funcAnnotationComment.d.isEllipsis
-                    ) {
+                    if (functionNode.d.funcAnnotationComment && !functionNode.d.funcAnnotationComment.d.isEllipsis) {
                         const paramIndex = functionNode.d.params.findIndex((param) => param === declaration.node);
                         typeAnnotationNode = ParseTreeUtils.getTypeAnnotationForParam(functionNode, paramIndex);
                     }
@@ -1554,9 +1540,7 @@ export function inferFunctionReturnType(
                             typeArgs.push(AnyType.create());
                         }
 
-                        inferredReturnType = ClassType.cloneAsInstance(
-                            ClassType.specialize(generatorType, typeArgs)
-                        );
+                        inferredReturnType = ClassType.cloneAsInstance(ClassType.specialize(generatorType, typeArgs));
                     } else {
                         inferredReturnType = UnknownType.create();
                     }

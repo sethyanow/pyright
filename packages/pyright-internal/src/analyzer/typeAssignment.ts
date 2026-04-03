@@ -17,23 +17,14 @@ import { assignTypeVar } from './constraintSolver';
 import { ConstraintSet, ConstraintTracker } from './constraintTracker';
 import { createFunctionFromConstructor } from './constructors';
 import { DeclarationType } from './declaration';
-import {
-    getParamListDetails,
-    ParamKind,
-    ParamListDetails,
-    VirtualParamDetails,
-} from './parameterUtils';
+import { getParamListDetails, ParamKind, ParamListDetails, VirtualParamDetails } from './parameterUtils';
 import { assignProperty } from './properties';
 import { assignClassToProtocol, assignModuleToProtocol } from './protocols';
 import { assignTupleTypeArgs, makeTupleObject } from './tuples';
 import { AssignTypeFlags, TypeEvaluator, TypeResult } from './typeEvaluatorTypes';
 import { TypeEvaluatorState } from './typeEvaluatorState';
 import { TypeRegistry } from './typeRegistry';
-import {
-    assignTypedDictToTypedDict,
-    getTypedDictDictEquivalent,
-    getTypedDictMappingEquivalent,
-} from './typedDicts';
+import { assignTypedDictToTypedDict, getTypedDictDictEquivalent, getTypedDictMappingEquivalent } from './typedDicts';
 import {
     AnyType,
     ClassType,
@@ -228,18 +219,13 @@ export function adjustSourceParamDetailsForDestVariadic(
                 index: -1,
                 kind: ParamKind.Positional,
             },
-            ...srcDetails.params.slice(
-                destDetails.argsIndex + srcPositionalsToPack.length,
-                srcDetails.params.length
-            ),
+            ...srcDetails.params.slice(destDetails.argsIndex + srcPositionalsToPack.length, srcDetails.params.length),
         ];
 
         const argsIndex = srcDetails.params.findIndex((param) => param.param.category === ParamCategory.ArgsList);
         srcDetails.argsIndex = argsIndex >= 0 ? argsIndex : undefined;
 
-        const kwargsIndex = srcDetails.params.findIndex(
-            (param) => param.param.category === ParamCategory.KwargsDict
-        );
+        const kwargsIndex = srcDetails.params.findIndex((param) => param.param.category === ParamCategory.KwargsDict);
         srcDetails.kwargsIndex = kwargsIndex >= 0 ? kwargsIndex : undefined;
 
         const firstKeywordOnlyIndex = srcDetails.params.findIndex((param) => param.kind === ParamKind.Keyword);
@@ -248,8 +234,7 @@ export function adjustSourceParamDetailsForDestVariadic(
         srcDetails.positionOnlyParamCount = Math.max(
             0,
             srcDetails.params.findIndex(
-                (p) =>
-                    p.kind !== ParamKind.Positional || p.param.category !== ParamCategory.Simple || !!p.defaultType
+                (p) => p.kind !== ParamKind.Positional || p.param.category !== ParamCategory.Simple || !!p.defaultType
             )
         );
     }
@@ -372,7 +357,19 @@ export function assignRecursiveTypeAliasToSelf(
             adjFlags ^= AssignTypeFlags.Contravariant;
         }
 
-        if (!assignType(evaluator, registry, state, destTypeArg, srcTypeArg, diag, constraints, adjFlags, recursionCount)) {
+        if (
+            !assignType(
+                evaluator,
+                registry,
+                state,
+                destTypeArg,
+                srcTypeArg,
+                diag,
+                constraints,
+                adjFlags,
+                recursionCount
+            )
+        ) {
             isAssignable = false;
         }
     });
@@ -413,10 +410,7 @@ export function assignConditionalTypeToTypeVar(
         return !applicableConditions.some((condition) => {
             if (condition.typeVar.priv.nameWithScope === TypeVarType.getNameWithScope(destType)) {
                 if (destType.shared.boundType) {
-                    assert(
-                        condition.constraintIndex === 0,
-                        'Expected constraint for bound TypeVar to have index of 0'
-                    );
+                    assert(condition.constraintIndex === 0, 'Expected constraint for bound TypeVar to have index of 0');
 
                     return assignType(
                         evaluator,
@@ -494,9 +488,14 @@ export function assignParam(
             doSpecializationStep = requiresSpecialization(specializedDestType);
         } else {
             if (!isFirstPass) {
-                specializedSrcType = evaluator.solveAndApplyConstraints(srcType, constraints, /* applyOptions */ undefined, {
-                    useLowerBoundOnly: true,
-                });
+                specializedSrcType = evaluator.solveAndApplyConstraints(
+                    srcType,
+                    constraints,
+                    /* applyOptions */ undefined,
+                    {
+                        useLowerBoundOnly: true,
+                    }
+                );
             }
             doSpecializationStep = requiresSpecialization(specializedSrcType);
         }
@@ -572,25 +571,45 @@ export function assignClass(
                 return false;
             }
             if ((flags & AssignTypeFlags.Invariant) !== 0) {
-                return assignTypedDictToTypedDict(evaluator, srcType, destType, undefined, undefined, flags, recursionCount);
+                return assignTypedDictToTypedDict(
+                    evaluator,
+                    srcType,
+                    destType,
+                    undefined,
+                    undefined,
+                    flags,
+                    recursionCount
+                );
             }
             return true;
         }
 
         if (ClassType.isBuiltIn(destType, 'Mapping')) {
             const mappingValueType = getTypedDictMappingEquivalent(evaluator, srcType);
-            if (mappingValueType && registry.mappingClass && isInstantiableClass(registry.mappingClass) &&
-                registry.strClass && isInstantiableClass(registry.strClass)) {
+            if (
+                mappingValueType &&
+                registry.mappingClass &&
+                isInstantiableClass(registry.mappingClass) &&
+                registry.strClass &&
+                isInstantiableClass(registry.strClass)
+            ) {
                 srcType = ClassType.specialize(registry.mappingClass, [
-                    ClassType.cloneAsInstance(registry.strClass), mappingValueType,
+                    ClassType.cloneAsInstance(registry.strClass),
+                    mappingValueType,
                 ]);
             }
         } else if (ClassType.isBuiltIn(destType, ['dict', 'MutableMapping'])) {
             const dictValueType = getTypedDictDictEquivalent(evaluator, srcType, recursionCount);
-            if (dictValueType && registry.dictClass && isInstantiableClass(registry.dictClass) &&
-                registry.strClass && isInstantiableClass(registry.strClass)) {
+            if (
+                dictValueType &&
+                registry.dictClass &&
+                isInstantiableClass(registry.dictClass) &&
+                registry.strClass &&
+                isInstantiableClass(registry.strClass)
+            ) {
                 srcType = ClassType.specialize(registry.dictClass, [
-                    ClassType.cloneAsInstance(registry.strClass), dictValueType,
+                    ClassType.cloneAsInstance(registry.strClass),
+                    dictValueType,
                 ]);
             }
         }
@@ -598,9 +617,12 @@ export function assignClass(
 
     if (destType.priv.includePromotions) {
         const promotionList = typePromotions.get(destType.shared.fullName);
-        if (promotionList && promotionList.some((srcName) =>
-            srcType.shared.mro.some((mroClass) => isClass(mroClass) && srcName === mroClass.shared.fullName)
-        )) {
+        if (
+            promotionList &&
+            promotionList.some((srcName) =>
+                srcType.shared.mro.some((mroClass) => isClass(mroClass) && srcName === mroClass.shared.fullName)
+            )
+        ) {
             if ((flags & AssignTypeFlags.Invariant) === 0) {
                 return true;
             }
@@ -611,12 +633,23 @@ export function assignClass(
     const isDerivedFrom = ClassType.isDerivedFrom(srcType, destType, inheritanceChain);
 
     if (ClassType.isProtocolClass(destType) && !isDerivedFrom) {
-        if (!assignClassToProtocol(evaluator, destType, ClassType.cloneAsInstance(srcType),
-            diag?.createAddendum(), constraints, flags, recursionCount)) {
-            diag?.addMessage(LocAddendum.protocolIncompatible().format({
-                sourceType: evaluator.printType(convertToInstance(srcType)),
-                destType: evaluator.printType(convertToInstance(destType)),
-            }));
+        if (
+            !assignClassToProtocol(
+                evaluator,
+                destType,
+                ClassType.cloneAsInstance(srcType),
+                diag?.createAddendum(),
+                constraints,
+                flags,
+                recursionCount
+            )
+        ) {
+            diag?.addMessage(
+                LocAddendum.protocolIncompatible().format({
+                    sourceType: evaluator.printType(convertToInstance(srcType)),
+                    destType: evaluator.printType(convertToInstance(destType)),
+                })
+            );
             return false;
         }
         return true;
@@ -625,8 +658,20 @@ export function assignClass(
     if ((flags & AssignTypeFlags.Invariant) === 0 || ClassType.isSameGenericClass(srcType, destType)) {
         if (isDerivedFrom) {
             assert(inheritanceChain.length > 0);
-            if (assignClassWithTypeArgs(evaluator, registry, state, destType, srcType, inheritanceChain,
-                diag?.createAddendum(), constraints, flags, recursionCount)) {
+            if (
+                assignClassWithTypeArgs(
+                    evaluator,
+                    registry,
+                    state,
+                    destType,
+                    srcType,
+                    inheritanceChain,
+                    diag?.createAddendum(),
+                    constraints,
+                    flags,
+                    recursionCount
+                )
+            ) {
                 return true;
             }
         }
@@ -647,9 +692,12 @@ export function assignClass(
             destErrorTypeText = destType.shared.fullName;
             srcErrorTypeText = srcType.shared.fullName;
         }
-        diag?.addMessage(LocAddendum.typeIncompatible().format({
-            sourceType: srcErrorTypeText, destType: destErrorTypeText,
-        }));
+        diag?.addMessage(
+            LocAddendum.typeIncompatible().format({
+                sourceType: srcErrorTypeText,
+                destType: destErrorTypeText,
+            })
+        );
         if (ClassType.isBuiltIn(destType, 'bytes')) {
             const promotions = typePromotions.get(destType.shared.fullName);
             if (promotions && promotions.some((name) => name === srcType.shared.fullName)) {
@@ -697,25 +745,52 @@ export function assignClassToSelf(
             const srcMemberType = evaluator.getTypeOfMember(memberInfo!);
             destMemberType = partiallySpecializeType(destMemberType, destType, evaluator.getTypeClassType());
 
-            if (isClassInstance(destMemberType) && ClassType.isPropertyClass(destMemberType) &&
-                isClassInstance(srcMemberType) && ClassType.isPropertyClass(srcMemberType)) {
-                if (!assignProperty(evaluator, ClassType.cloneAsInstantiable(destMemberType),
-                    ClassType.cloneAsInstantiable(srcMemberType), destType, srcType,
-                    undefined, undefined, undefined, recursionCount)) {
+            if (
+                isClassInstance(destMemberType) &&
+                ClassType.isPropertyClass(destMemberType) &&
+                isClassInstance(srcMemberType) &&
+                ClassType.isPropertyClass(srcMemberType)
+            ) {
+                if (
+                    !assignProperty(
+                        evaluator,
+                        ClassType.cloneAsInstantiable(destMemberType),
+                        ClassType.cloneAsInstantiable(srcMemberType),
+                        destType,
+                        srcType,
+                        undefined,
+                        undefined,
+                        undefined,
+                        recursionCount
+                    )
+                ) {
                     isAssignable = false;
                 }
             } else {
                 const primaryDecl = symbol.getDeclarations()[0];
                 let flagsLocal = AssignTypeFlags.Default;
-                if (primaryDecl?.type === DeclarationType.Variable &&
+                if (
+                    primaryDecl?.type === DeclarationType.Variable &&
                     !evaluator.isFinalVariableDeclaration(primaryDecl) &&
-                    !isMemberReadOnly(destType, name)) {
+                    !isMemberReadOnly(destType, name)
+                ) {
                     if (!isPrivateOrProtectedName(name)) {
                         flagsLocal |= AssignTypeFlags.Invariant;
                     }
                 }
-                if (!assignType(evaluator, registry, state, destMemberType, srcMemberType,
-                    undefined, undefined, flagsLocal | AssignTypeFlags.SkipSelfClsParamCheck, recursionCount)) {
+                if (
+                    !assignType(
+                        evaluator,
+                        registry,
+                        state,
+                        destMemberType,
+                        srcMemberType,
+                        undefined,
+                        undefined,
+                        flagsLocal | AssignTypeFlags.SkipSelfClsParamCheck,
+                        recursionCount
+                    )
+                ) {
                     isAssignable = false;
                 }
             }
@@ -726,9 +801,12 @@ export function assignClassToSelf(
         }
 
         destType.shared.baseClasses.forEach((baseClass) => {
-            if (!isAssignable || !isInstantiableClass(baseClass) ||
+            if (
+                !isAssignable ||
+                !isInstantiableClass(baseClass) ||
                 ClassType.isBuiltIn(baseClass, ['object', 'Protocol', 'Generic']) ||
-                baseClass.shared.typeParams.length === 0) {
+                baseClass.shared.typeParams.length === 0
+            ) {
                 return;
             }
 
@@ -740,8 +818,12 @@ export function assignClassToSelf(
                     if (isParamSpec(param) || isTypeVarTuple(param) || param.shared.isSynthesized) {
                         return;
                     }
-                    if (!specializedSrcBaseClass.priv.typeArgs || index >= specializedSrcBaseClass.priv.typeArgs.length ||
-                        !specializedDestBaseClass.priv.typeArgs || index >= specializedDestBaseClass.priv.typeArgs.length) {
+                    if (
+                        !specializedSrcBaseClass.priv.typeArgs ||
+                        index >= specializedSrcBaseClass.priv.typeArgs.length ||
+                        !specializedDestBaseClass.priv.typeArgs ||
+                        index >= specializedDestBaseClass.priv.typeArgs.length
+                    ) {
                         return;
                     }
                     const paramVariance = param.shared.declaredVariance;
@@ -768,8 +850,18 @@ export function assignClassToSelf(
                 return;
             }
 
-            if (!assignClassToSelf(evaluator, registry, state, specializedDestBaseClass, specializedSrcBaseClass,
-                assumedVariance, ignoreBaseClassVariance, recursionCount)) {
+            if (
+                !assignClassToSelf(
+                    evaluator,
+                    registry,
+                    state,
+                    specializedDestBaseClass,
+                    specializedSrcBaseClass,
+                    assumedVariance,
+                    ignoreBaseClassVariance,
+                    recursionCount
+                )
+            ) {
                 isAssignable = false;
             }
         });
@@ -816,8 +908,11 @@ export function assignClassWithTypeArgs(
 
         if (ancestorIndex < inheritanceChain.length - 1) {
             let effectiveCurSrcType = curSrcType;
-            if (ClassType.isBuiltIn(curSrcType, 'NamedTuple') &&
-                ClassType.isBuiltIn(ancestorType, 'tuple') && prevSrcType) {
+            if (
+                ClassType.isBuiltIn(curSrcType, 'NamedTuple') &&
+                ClassType.isBuiltIn(ancestorType, 'tuple') &&
+                prevSrcType
+            ) {
                 effectiveCurSrcType = prevSrcType;
             }
             curSrcType = specializeForBaseClass(effectiveCurSrcType, ancestorType);
@@ -840,8 +935,17 @@ export function assignClassWithTypeArgs(
     }
 
     if (destType.priv.typeArgs) {
-        return assignTypeArgs(evaluator, registry, state, destType, curSrcType,
-            (flags & AssignTypeFlags.Invariant) === 0 ? diag : undefined, constraints, flags, recursionCount);
+        return assignTypeArgs(
+            evaluator,
+            registry,
+            state,
+            destType,
+            curSrcType,
+            (flags & AssignTypeFlags.Invariant) === 0 ? diag : undefined,
+            constraints,
+            flags,
+            recursionCount
+        );
     }
 
     if (constraints && curSrcType.priv.typeArgs) {
@@ -852,9 +956,7 @@ export function assignClassWithTypeArgs(
             const variance = TypeVarType.getVariance(typeParam);
 
             if (curSrcType.priv.tupleTypeArgs) {
-                typeArgType = convertToInstance(
-                    makeTupleObject(evaluator, curSrcType.priv.tupleTypeArgs, true)
-                );
+                typeArgType = convertToInstance(makeTupleObject(evaluator, curSrcType.priv.tupleTypeArgs, true));
             } else {
                 typeArgType = i < srcTypeArgs.length ? srcTypeArgs[i] : UnknownType.create();
             }
@@ -914,7 +1016,8 @@ export function assignTypeArgs(
         const destTypeArg = destArgIndex >= 0 ? destTypeArgs[destArgIndex] : UnknownType.create();
         const destTypeParam = destArgIndex < destTypeParams.length ? destTypeParams[destArgIndex] : undefined;
         const assignmentDiag = new DiagnosticAddendum();
-        const variance = assumedVariance ?? (destTypeParam ? TypeVarType.getVariance(destTypeParam) : Variance.Covariant);
+        const variance =
+            assumedVariance ?? (destTypeParam ? TypeVarType.getVariance(destTypeParam) : Variance.Covariant);
         let effectiveFlags: AssignTypeFlags;
         let errorSource: () => { format: (args: { name: string; sourceType: string; destType: string }) => string };
         let includeDiagAddendum = true;
@@ -935,18 +1038,29 @@ export function assignTypeArgs(
             effectiveFlags |= AssignTypeFlags.RetainLiteralsForTypeVar;
         }
 
-        if (!assignType(evaluator, registry, state,
-            variance === Variance.Contravariant ? srcTypeArg : destTypeArg,
-            variance === Variance.Contravariant ? destTypeArg : srcTypeArg,
-            assignmentDiag, constraints, effectiveFlags, recursionCount)) {
+        if (
+            !assignType(
+                evaluator,
+                registry,
+                state,
+                variance === Variance.Contravariant ? srcTypeArg : destTypeArg,
+                variance === Variance.Contravariant ? destTypeArg : srcTypeArg,
+                assignmentDiag,
+                constraints,
+                effectiveFlags,
+                recursionCount
+            )
+        ) {
             if (!ClassType.isPseudoGenericClass(destType)) {
                 if (diag) {
                     if (destTypeParam) {
                         const childDiag = diag.createAddendum();
-                        childDiag.addMessage(errorSource().format({
-                            name: TypeVarType.getReadableName(destTypeParam),
-                            ...evaluator.printSrcDestTypes(srcTypeArg, destTypeArg),
-                        }));
+                        childDiag.addMessage(
+                            errorSource().format({
+                                name: TypeVarType.getReadableName(destTypeParam),
+                                ...evaluator.printSrcDestTypes(srcTypeArg, destTypeArg),
+                            })
+                        );
                         if (includeDiagAddendum) {
                             childDiag.addAddendum(assignmentDiag);
                         }
@@ -1000,7 +1114,17 @@ export function assignFromUnionType(
     if (isUnion(destType)) {
         const nonAnySubtypes = destType.priv.subtypes.filter((t) => !isAnyOrUnknown(t));
         if (nonAnySubtypes.length === 1 && isTypeVar(nonAnySubtypes[0])) {
-            assignType(evaluator, registry, state, nonAnySubtypes[0], srcType, undefined, constraints, flags, recursionCount);
+            assignType(
+                evaluator,
+                registry,
+                state,
+                nonAnySubtypes[0],
+                srcType,
+                undefined,
+                constraints,
+                flags,
+                recursionCount
+            );
             return true;
         }
 
@@ -1029,14 +1153,28 @@ export function assignFromUnionType(
                 if (isTypeSame(destSubtype, srcSubtype)) {
                     return true;
                 }
-                if (isClass(srcSubtype) && isClass(destSubtype) &&
-                    TypeBase.isInstance(srcSubtype) === TypeBase.isInstance(destSubtype)) {
+                if (
+                    isClass(srcSubtype) &&
+                    isClass(destSubtype) &&
+                    TypeBase.isInstance(srcSubtype) === TypeBase.isInstance(destSubtype)
+                ) {
                     if (ClassType.isSameGenericClass(srcSubtype, destSubtype)) {
                         return true;
                     }
                     if (ClassType.isTypedDictClass(srcSubtype) && ClassType.isTypedDictClass(destSubtype)) {
-                        if (assignType(evaluator, registry, state, srcSubtype, destSubtype,
-                            undefined, undefined, flags, recursionCount)) {
+                        if (
+                            assignType(
+                                evaluator,
+                                registry,
+                                state,
+                                srcSubtype,
+                                destSubtype,
+                                undefined,
+                                undefined,
+                                flags,
+                                recursionCount
+                            )
+                        ) {
                             return true;
                         }
                     }
@@ -1048,8 +1186,19 @@ export function assignFromUnionType(
             });
 
             if (destTypeIndex >= 0) {
-                if (assignType(evaluator, registry, state, remainingDestSubtypes[destTypeIndex], srcSubtype,
-                    undefined, constraints, flags, recursionCount)) {
+                if (
+                    assignType(
+                        evaluator,
+                        registry,
+                        state,
+                        remainingDestSubtypes[destTypeIndex],
+                        srcSubtype,
+                        undefined,
+                        constraints,
+                        flags,
+                        recursionCount
+                    )
+                ) {
                     matchedSomeSubtypes = true;
                 } else {
                     canUseFastPath = false;
@@ -1063,7 +1212,15 @@ export function assignFromUnionType(
             if ((flags & AssignTypeFlags.Invariant) !== 0) {
                 if (remainingSrcSubtypes.length === 0) {
                     return remainingDestSubtypes.every((destSubtype) =>
-                        isTypeSubsumedByOtherType(evaluator, registry, state, destSubtype, destType, true, recursionCount)
+                        isTypeSubsumedByOtherType(
+                            evaluator,
+                            registry,
+                            state,
+                            destSubtype,
+                            destType,
+                            true,
+                            recursionCount
+                        )
                     );
                 }
             }
@@ -1080,8 +1237,19 @@ export function assignFromUnionType(
                 for (let srcIndex = 0; srcIndex < remainingSrcSubtypes.length; srcIndex++) {
                     let foundMatchForSrc = false;
                     for (let destIndex = 0; destIndex < reorderedDestSubtypes.length; destIndex++) {
-                        if (assignType(evaluator, registry, state, reorderedDestSubtypes[destIndex],
-                            remainingSrcSubtypes[srcIndex], diag?.createAddendum(), constraints, flags, recursionCount)) {
+                        if (
+                            assignType(
+                                evaluator,
+                                registry,
+                                state,
+                                reorderedDestSubtypes[destIndex],
+                                remainingSrcSubtypes[srcIndex],
+                                diag?.createAddendum(),
+                                constraints,
+                                flags,
+                                recursionCount
+                            )
+                        ) {
                             foundMatchForSrc = true;
                             reorderedDestSubtypes.push(...reorderedDestSubtypes.splice(destIndex, 1));
                             break;
@@ -1096,14 +1264,33 @@ export function assignFromUnionType(
             } else if (remainingSrcSubtypes.length === 0) {
                 if ((flags & AssignTypeFlags.PopulateExpectedType) !== 0) {
                     remainingDestSubtypes.forEach((destSubtype) => {
-                        assignType(evaluator, registry, state, destSubtype, srcType, undefined, constraints, flags, recursionCount);
+                        assignType(
+                            evaluator,
+                            registry,
+                            state,
+                            destSubtype,
+                            srcType,
+                            undefined,
+                            constraints,
+                            flags,
+                            recursionCount
+                        );
                     });
                 }
             } else {
-                if (!assignType(evaluator, registry, state,
-                    isContra ? destType : remainingDestSubtypes[0],
-                    isContra ? remainingSrcSubtypes[0] : combineTypes(remainingSrcSubtypes),
-                    diag?.createAddendum(), constraints, flags, recursionCount)) {
+                if (
+                    !assignType(
+                        evaluator,
+                        registry,
+                        state,
+                        isContra ? destType : remainingDestSubtypes[0],
+                        isContra ? remainingSrcSubtypes[0] : combineTypes(remainingSrcSubtypes),
+                        diag?.createAddendum(),
+                        constraints,
+                        flags,
+                        recursionCount
+                    )
+                ) {
                     canUseFastPath = false;
                 }
             }
@@ -1126,11 +1313,30 @@ export function assignFromUnionType(
         }
 
         if (!assignType(evaluator, registry, state, destType, subtype, undefined, constraints, flags, recursionCount)) {
-            const isSubtypeSubsumed = isTypeSubsumedByOtherType(evaluator, registry, state,
-                subtype, srcType, false, recursionCount);
+            const isSubtypeSubsumed = isTypeSubsumedByOtherType(
+                evaluator,
+                registry,
+                state,
+                subtype,
+                srcType,
+                false,
+                recursionCount
+            );
 
-            if (!isSubtypeSubsumed &&
-                !assignType(evaluator, registry, state, destType, subtype, diag?.createAddendum(), constraints, flags, recursionCount)) {
+            if (
+                !isSubtypeSubsumed &&
+                !assignType(
+                    evaluator,
+                    registry,
+                    state,
+                    destType,
+                    subtype,
+                    diag?.createAddendum(),
+                    constraints,
+                    flags,
+                    recursionCount
+                )
+            ) {
                 isIncompatible = true;
             }
         } else {
@@ -1166,7 +1372,17 @@ export function assignToUnionType(
         doForEachSubtype(destType, (subtype, index) => {
             if (
                 !isIncompatible &&
-                !assignType(evaluator, registry, state, subtype, srcType, diag?.createAddendum(), constraints, flags, recursionCount)
+                !assignType(
+                    evaluator,
+                    registry,
+                    state,
+                    subtype,
+                    srcType,
+                    diag?.createAddendum(),
+                    constraints,
+                    flags,
+                    recursionCount
+                )
             ) {
                 let skipSubtype = false;
                 if (!isAnyOrUnknown(subtype)) {
@@ -1174,8 +1390,19 @@ export function assignToUnionType(
                     doForEachSubtype(destType, (otherSubtype, otherIndex) => {
                         if (index !== otherIndex && !skipSubtype) {
                             const adjOtherSubtype = makeTypeVarsBound(otherSubtype, undefined);
-                            if (assignType(evaluator, registry, state, adjOtherSubtype, adjSubtype,
-                                undefined, undefined, AssignTypeFlags.Default, recursionCount)) {
+                            if (
+                                assignType(
+                                    evaluator,
+                                    registry,
+                                    state,
+                                    adjOtherSubtype,
+                                    adjSubtype,
+                                    undefined,
+                                    undefined,
+                                    AssignTypeFlags.Default,
+                                    recursionCount
+                                )
+                            ) {
                                 skipSubtype = true;
                             }
                         }
@@ -1188,7 +1415,9 @@ export function assignToUnionType(
         });
 
         if (isIncompatible) {
-            diag?.addMessage(LocAddendum.typeAssignmentMismatch().format(evaluator.printSrcDestTypes(srcType, destType)));
+            diag?.addMessage(
+                LocAddendum.typeAssignmentMismatch().format(evaluator.printSrcDestTypes(srcType, destType))
+            );
             return false;
         }
 
@@ -1200,7 +1429,19 @@ export function assignToUnionType(
 
     if (!requiresSpecialization(destType)) {
         for (const subtype of destType.priv.subtypes) {
-            if (assignType(evaluator, registry, state, subtype, srcType, diagAddendum?.createAddendum(), constraints, flags, recursionCount)) {
+            if (
+                assignType(
+                    evaluator,
+                    registry,
+                    state,
+                    subtype,
+                    srcType,
+                    diagAddendum?.createAddendum(),
+                    constraints,
+                    flags,
+                    recursionCount
+                )
+            ) {
                 foundMatch = true;
                 break;
             }
@@ -1214,35 +1455,51 @@ export function assignToUnionType(
             let nakedTypeVarMatches = 0;
 
             if (
-                isClassInstance(srcType) && isLiteralType(srcType) &&
+                isClassInstance(srcType) &&
+                isLiteralType(srcType) &&
                 UnionType.containsType(destType, srcType, undefined, undefined, recursionCount)
             ) {
                 return true;
             }
 
-            doForEachSubtype(destType, (subtype) => {
-                const constraintsClone = constraints?.clone();
-                if (assignType(evaluator, registry, state, subtype, srcType,
-                    diagAddendum?.createAddendum(), constraintsClone, flags, recursionCount)) {
-                    foundMatch = true;
-                    if (constraintsClone) {
-                        let constraintsScore = constraintsClone.getScore();
-                        if (isTypeVar(subtype)) {
-                            if (!constraints?.getMainConstraintSet().getTypeVar(subtype)) {
-                                nakedTypeVarMatches++;
-                                constraintsScore += 0.001;
+            doForEachSubtype(
+                destType,
+                (subtype) => {
+                    const constraintsClone = constraints?.clone();
+                    if (
+                        assignType(
+                            evaluator,
+                            registry,
+                            state,
+                            subtype,
+                            srcType,
+                            diagAddendum?.createAddendum(),
+                            constraintsClone,
+                            flags,
+                            recursionCount
+                        )
+                    ) {
+                        foundMatch = true;
+                        if (constraintsClone) {
+                            let constraintsScore = constraintsClone.getScore();
+                            if (isTypeVar(subtype)) {
+                                if (!constraints?.getMainConstraintSet().getTypeVar(subtype)) {
+                                    nakedTypeVarMatches++;
+                                    constraintsScore += 0.001;
+                                }
+                            }
+                            if (isTypeSame(subtype, evaluator.stripLiteralValue(srcType))) {
+                                constraintsScore = Number.POSITIVE_INFINITY;
+                            }
+                            if (bestConstraintsScore === undefined || bestConstraintsScore <= constraintsScore) {
+                                bestConstraintsScore = constraintsScore;
+                                bestConstraints = constraintsClone;
                             }
                         }
-                        if (isTypeSame(subtype, evaluator.stripLiteralValue(srcType))) {
-                            constraintsScore = Number.POSITIVE_INFINITY;
-                        }
-                        if (bestConstraintsScore === undefined || bestConstraintsScore <= constraintsScore) {
-                            bestConstraintsScore = constraintsScore;
-                            bestConstraints = constraintsClone;
-                        }
                     }
-                }
-            }, true);
+                },
+                true
+            );
 
             if (nakedTypeVarMatches > 1 && (flags & AssignTypeFlags.ArgAssignmentFirstPass) !== 0) {
                 bestConstraints = undefined;
@@ -1256,15 +1513,25 @@ export function assignToUnionType(
 
     if (!foundMatch) {
         if (isTypeVar(srcType) && TypeVarType.hasConstraints(srcType)) {
-            foundMatch = assignType(evaluator, registry, state, destType,
+            foundMatch = assignType(
+                evaluator,
+                registry,
+                state,
+                destType,
                 evaluator.makeTopLevelTypeVarsConcrete(srcType),
-                diagAddendum?.createAddendum(), constraints, flags, recursionCount);
+                diagAddendum?.createAddendum(),
+                constraints,
+                flags,
+                recursionCount
+            );
         }
     }
 
     if (!foundMatch) {
         if (diag && diagAddendum) {
-            diag.addMessage(LocAddendum.typeAssignmentMismatch().format(evaluator.printSrcDestTypes(srcType, destType)));
+            diag.addMessage(
+                LocAddendum.typeAssignmentMismatch().format(evaluator.printSrcDestTypes(srcType, destType))
+            );
             diag.addAddendum(diagAddendum);
         }
         return false;
@@ -1325,8 +1592,7 @@ export function assignFunction(
 
     // Match positional parameters.
     for (let paramIndex = 0; paramIndex < positionalsToMatch; paramIndex++) {
-        if (paramIndex === 0 && destType.shared.methodClass &&
-            (flags & AssignTypeFlags.SkipSelfClsParamCheck) !== 0) {
+        if (paramIndex === 0 && destType.shared.methodClass && (flags & AssignTypeFlags.SkipSelfClsParamCheck) !== 0) {
             if (FunctionType.isInstanceMethod(destType) || FunctionType.isClassMethod(destType)) {
                 continue;
             }
@@ -1347,14 +1613,22 @@ export function assignFunction(
         const srcParamName = srcParam.param.name ?? '';
 
         if (destParamName) {
-            const isDestPositionalOnly = destParam.kind === ParamKind.Positional || destParam.kind === ParamKind.ExpandedArgs;
-            if (!isDestPositionalOnly && destParam.param.category !== ParamCategory.ArgsList &&
-                srcParam.param.category !== ParamCategory.ArgsList) {
+            const isDestPositionalOnly =
+                destParam.kind === ParamKind.Positional || destParam.kind === ParamKind.ExpandedArgs;
+            if (
+                !isDestPositionalOnly &&
+                destParam.param.category !== ParamCategory.ArgsList &&
+                srcParam.param.category !== ParamCategory.ArgsList
+            ) {
                 if (srcParam.kind === ParamKind.Positional || srcParam.kind === ParamKind.ExpandedArgs) {
-                    diag?.createAddendum().addMessage(LocAddendum.functionParamPositionOnly().format({ name: destParamName }));
+                    diag?.createAddendum().addMessage(
+                        LocAddendum.functionParamPositionOnly().format({ name: destParamName })
+                    );
                     canAssign = false;
                 } else if (destParamName !== srcParamName) {
-                    diag?.createAddendum().addMessage(LocAddendum.functionParamName().format({ srcName: srcParamName, destName: destParamName }));
+                    diag?.createAddendum().addMessage(
+                        LocAddendum.functionParamName().format({ srcName: srcParamName, destName: destParamName })
+                    );
                     canAssign = false;
                 }
             }
@@ -1362,7 +1636,9 @@ export function assignFunction(
 
         if (destParam.defaultType) {
             if (!srcParam.defaultType && paramIndex !== srcParamDetails.argsIndex) {
-                diag?.createAddendum().addMessage(LocAddendum.functionParamDefaultMissing().format({ name: srcParamName }));
+                diag?.createAddendum().addMessage(
+                    LocAddendum.functionParamDefaultMissing().format({ name: srcParamName })
+                );
                 canAssign = false;
             }
             if ((flags & AssignTypeFlags.PartialOverloadOverlap) !== 0 && srcParam.defaultType) {
@@ -1370,37 +1646,69 @@ export function assignFunction(
             }
         }
 
-        if (paramIndex === 0 && srcType.shared.name === '__init__' && FunctionType.isInstanceMethod(srcType) &&
-            destType.shared.name === '__init__' && FunctionType.isInstanceMethod(destType) &&
-            FunctionType.isOverloaded(destType) && FunctionParam.isTypeDeclared(destParam.param)) {
+        if (
+            paramIndex === 0 &&
+            srcType.shared.name === '__init__' &&
+            FunctionType.isInstanceMethod(srcType) &&
+            destType.shared.name === '__init__' &&
+            FunctionType.isInstanceMethod(destType) &&
+            FunctionType.isOverloaded(destType) &&
+            FunctionParam.isTypeDeclared(destParam.param)
+        ) {
             continue;
         }
 
         if (isUnpacked(srcParamType)) {
             canAssign = false;
-        } else if (!assignParam(evaluator, registry, state, destParamType, srcParamType, paramIndex,
-            diag?.createAddendum(), constraints, flags, recursionCount)) {
-            if ((flags & AssignTypeFlags.SkipSelfClsTypeCheck) === 0 ||
-                !isTypeVar(srcParamType) || !srcParamType.shared.isSynthesized) {
+        } else if (
+            !assignParam(
+                evaluator,
+                registry,
+                state,
+                destParamType,
+                srcParamType,
+                paramIndex,
+                diag?.createAddendum(),
+                constraints,
+                flags,
+                recursionCount
+            )
+        ) {
+            if (
+                (flags & AssignTypeFlags.SkipSelfClsTypeCheck) === 0 ||
+                !isTypeVar(srcParamType) ||
+                !srcParamType.shared.isSynthesized
+            ) {
                 canAssign = false;
             }
-        } else if (destParam.kind !== ParamKind.Positional && destParam.kind !== ParamKind.ExpandedArgs &&
-            srcParam.kind === ParamKind.Positional && srcParamDetails.kwargsIndex === undefined &&
-            !srcParamDetails.params.some((p) =>
-                p.kind === ParamKind.Keyword && p.param.category === ParamCategory.Simple &&
-                p.param.name === destParam.param.name)) {
+        } else if (
+            destParam.kind !== ParamKind.Positional &&
+            destParam.kind !== ParamKind.ExpandedArgs &&
+            srcParam.kind === ParamKind.Positional &&
+            srcParamDetails.kwargsIndex === undefined &&
+            !srcParamDetails.params.some(
+                (p) =>
+                    p.kind === ParamKind.Keyword &&
+                    p.param.category === ParamCategory.Simple &&
+                    p.param.name === destParam.param.name
+            )
+        ) {
             diag?.addMessage(LocAddendum.namedParamMissingInSource().format({ name: destParam.param.name ?? '' }));
             canAssign = false;
         }
     }
 
-    if (!FunctionType.isGradualCallableForm(destType) &&
+    if (
+        !FunctionType.isGradualCallableForm(destType) &&
         destParamDetails.firstPositionOrKeywordIndex < srcParamDetails.positionOnlyParamCount &&
-        !targetIncludesParamSpec) {
-        diag?.createAddendum().addMessage(LocAddendum.argsPositionOnly().format({
-            expected: srcParamDetails.positionOnlyParamCount,
-            received: destParamDetails.firstPositionOrKeywordIndex,
-        }));
+        !targetIncludesParamSpec
+    ) {
+        diag?.createAddendum().addMessage(
+            LocAddendum.argsPositionOnly().format({
+                expected: srcParamDetails.positionOnlyParamCount,
+                received: destParamDetails.firstPositionOrKeywordIndex,
+            })
+        );
         canAssign = false;
     }
 
@@ -1413,8 +1721,20 @@ export function assignFunction(
             if (destParamDetails.argsIndex !== undefined) {
                 const destArgsType = destParamDetails.params[destParamDetails.argsIndex].type;
                 const srcParamType = srcParamDetails.params[i].type;
-                if (!assignParam(evaluator, registry, state, destArgsType, srcParamType, i,
-                    diag?.createAddendum(), constraints, flags, recursionCount)) {
+                if (
+                    !assignParam(
+                        evaluator,
+                        registry,
+                        state,
+                        destArgsType,
+                        srcParamType,
+                        i,
+                        diag?.createAddendum(),
+                        constraints,
+                        flags,
+                        recursionCount
+                    )
+                ) {
                     canAssign = false;
                 }
                 continue;
@@ -1424,8 +1744,20 @@ export function assignFunction(
             if (srcParam.defaultType) {
                 const paramInfo = srcParamDetails.params[i];
                 const defaultArgType = paramInfo.defaultType ?? paramInfo.defaultType;
-                if (defaultArgType && !assignType(evaluator, registry, state, paramInfo.type, defaultArgType,
-                    diag?.createAddendum(), constraints, flags, recursionCount)) {
+                if (
+                    defaultArgType &&
+                    !assignType(
+                        evaluator,
+                        registry,
+                        state,
+                        paramInfo.type,
+                        defaultArgType,
+                        diag?.createAddendum(),
+                        constraints,
+                        flags,
+                        recursionCount
+                    )
+                ) {
                     if ((flags & AssignTypeFlags.PartialOverloadOverlap) === 0) {
                         canAssign = false;
                     }
@@ -1443,9 +1775,12 @@ export function assignFunction(
             const nonDefaultSrcParamCount = srcParamDetails.params.filter(
                 (p) => !!p.param.name && !p.defaultType && p.param.category === ParamCategory.Simple
             ).length;
-            diag?.createAddendum().addMessage(LocAddendum.functionTooFewParams().format({
-                expected: nonDefaultSrcParamCount, received: destPositionalCount,
-            }));
+            diag?.createAddendum().addMessage(
+                LocAddendum.functionTooFewParams().format({
+                    expected: nonDefaultSrcParamCount,
+                    received: destPositionalCount,
+                })
+            );
             canAssign = false;
             break;
         }
@@ -1461,16 +1796,33 @@ export function assignFunction(
                     diag?.addMessage(LocAddendum.typeVarTupleRequiresKnownLength());
                     canAssign = false;
                 } else {
-                    if (!assignParam(evaluator, registry, state, destParamType, srcArgsType, paramIndex,
-                        diag?.createAddendum(), constraints, flags, recursionCount)) {
+                    if (
+                        !assignParam(
+                            evaluator,
+                            registry,
+                            state,
+                            destParamType,
+                            srcArgsType,
+                            paramIndex,
+                            diag?.createAddendum(),
+                            constraints,
+                            flags,
+                            recursionCount
+                        )
+                    ) {
                         canAssign = false;
                     }
                     const destParamKind = destParamDetails.params[paramIndex].kind;
-                    if (destParamKind !== ParamKind.Positional && destParamKind !== ParamKind.ExpandedArgs &&
-                        srcParamDetails.kwargsIndex === undefined) {
-                        diag?.addMessage(LocAddendum.namedParamMissingInSource().format({
-                            name: destParamDetails.params[paramIndex].param.name ?? '',
-                        }));
+                    if (
+                        destParamKind !== ParamKind.Positional &&
+                        destParamKind !== ParamKind.ExpandedArgs &&
+                        srcParamDetails.kwargsIndex === undefined
+                    ) {
+                        diag?.addMessage(
+                            LocAddendum.namedParamMissingInSource().format({
+                                name: destParamDetails.params[paramIndex].param.name ?? '',
+                            })
+                        );
                         canAssign = false;
                     }
                 }
@@ -1486,17 +1838,23 @@ export function assignFunction(
                 }
             }
             if (srcPositionalCount < adjDestPositionalCount) {
-                diag?.addMessage(LocAddendum.functionTooManyParams().format({
-                    expected: srcPositionalCount, received: destPositionalCount,
-                }));
+                diag?.addMessage(
+                    LocAddendum.functionTooManyParams().format({
+                        expected: srcPositionalCount,
+                        received: destPositionalCount,
+                    })
+                );
                 canAssign = false;
             }
         }
     }
 
     // *args compatibility
-    if (srcParamDetails.argsIndex !== undefined && destParamDetails.argsIndex !== undefined &&
-        !FunctionType.isGradualCallableForm(destType)) {
+    if (
+        srcParamDetails.argsIndex !== undefined &&
+        destParamDetails.argsIndex !== undefined &&
+        !FunctionType.isGradualCallableForm(destType)
+    ) {
         let destArgsType = destParamDetails.params[destParamDetails.argsIndex].type;
         let srcArgsType = srcParamDetails.params[srcParamDetails.argsIndex].type;
         if (!isUnpacked(destArgsType)) {
@@ -1505,19 +1863,36 @@ export function assignFunction(
         if (!isUnpacked(srcArgsType)) {
             srcArgsType = makeTupleObject(evaluator, [{ type: srcArgsType, isUnbounded: true }], true);
         }
-        if (!assignParam(evaluator, registry, state, destArgsType, srcArgsType,
-            destParamDetails.params[destParamDetails.argsIndex].index,
-            diag?.createAddendum(), constraints, flags, recursionCount)) {
+        if (
+            !assignParam(
+                evaluator,
+                registry,
+                state,
+                destArgsType,
+                srcArgsType,
+                destParamDetails.params[destParamDetails.argsIndex].index,
+                diag?.createAddendum(),
+                constraints,
+                flags,
+                recursionCount
+            )
+        ) {
             canAssign = false;
         }
     }
 
-    if (!FunctionType.isGradualCallableForm(destType) && srcParamDetails.argsIndex === undefined &&
-        srcParamSpec === undefined && destParamDetails.argsIndex !== undefined &&
-        !destParamDetails.hasUnpackedTypeVarTuple) {
-        diag?.createAddendum().addMessage(LocAddendum.argsParamMissing().format({
-            paramName: destParamDetails.params[destParamDetails.argsIndex].param.name ?? '',
-        }));
+    if (
+        !FunctionType.isGradualCallableForm(destType) &&
+        srcParamDetails.argsIndex === undefined &&
+        srcParamSpec === undefined &&
+        destParamDetails.argsIndex !== undefined &&
+        !destParamDetails.hasUnpackedTypeVarTuple
+    ) {
+        diag?.createAddendum().addMessage(
+            LocAddendum.argsParamMissing().format({
+                paramName: destParamDetails.params[destParamDetails.argsIndex].param.name ?? '',
+            })
+        );
         canAssign = false;
     }
 
@@ -1526,16 +1901,22 @@ export function assignFunction(
         const destParamMap = new Map<string, VirtualParamDetails>();
         if (destParamDetails.firstKeywordOnlyIndex !== undefined) {
             destParamDetails.params.forEach((param, index) => {
-                if (index >= destParamDetails.firstKeywordOnlyIndex! &&
-                    param.param.name && param.param.category === ParamCategory.Simple &&
-                    param.kind !== ParamKind.Positional && param.kind !== ParamKind.ExpandedArgs) {
+                if (
+                    index >= destParamDetails.firstKeywordOnlyIndex! &&
+                    param.param.name &&
+                    param.param.category === ParamCategory.Simple &&
+                    param.kind !== ParamKind.Positional &&
+                    param.kind !== ParamKind.ExpandedArgs
+                ) {
                     destParamMap.set(param.param.name, param);
                 }
             });
         }
 
-        let srcStartOfNamed = srcParamDetails.firstKeywordOnlyIndex !== undefined
-            ? srcParamDetails.firstKeywordOnlyIndex : srcParamDetails.params.length;
+        let srcStartOfNamed =
+            srcParamDetails.firstKeywordOnlyIndex !== undefined
+                ? srcParamDetails.firstKeywordOnlyIndex
+                : srcParamDetails.params.length;
         if (destPositionalCount < srcPositionalCount && destParamDetails.argsIndex === undefined) {
             srcStartOfNamed = destPositionalCount;
         }
@@ -1543,8 +1924,12 @@ export function assignFunction(
         if (srcStartOfNamed >= 0) {
             srcParamDetails.params.forEach((srcParamInfo, index) => {
                 if (index < srcStartOfNamed) return;
-                if (!srcParamInfo.param.name || srcParamInfo.param.category !== ParamCategory.Simple ||
-                    srcParamInfo.kind === ParamKind.Positional) return;
+                if (
+                    !srcParamInfo.param.name ||
+                    srcParamInfo.param.category !== ParamCategory.Simple ||
+                    srcParamInfo.kind === ParamKind.Positional
+                )
+                    return;
 
                 const destParamInfo = destParamMap.get(srcParamInfo.param.name);
                 const paramDiag = diag?.createAddendum();
@@ -1552,19 +1937,43 @@ export function assignFunction(
 
                 if (!destParamInfo) {
                     if (destParamDetails.kwargsIndex === undefined && !srcParamInfo.defaultType) {
-                        paramDiag?.addMessage(LocAddendum.namedParamMissingInDest().format({ name: srcParamInfo.param.name }));
+                        paramDiag?.addMessage(
+                            LocAddendum.namedParamMissingInDest().format({ name: srcParamInfo.param.name })
+                        );
                         canAssign = false;
                     } else if (destParamDetails.kwargsIndex !== undefined) {
-                        if (!assignParam(evaluator, registry, state,
-                            destParamDetails.params[destParamDetails.kwargsIndex].type, srcParamType,
-                            destParamDetails.params[destParamDetails.kwargsIndex].index,
-                            diag?.createAddendum(), constraints, flags, recursionCount)) {
+                        if (
+                            !assignParam(
+                                evaluator,
+                                registry,
+                                state,
+                                destParamDetails.params[destParamDetails.kwargsIndex].type,
+                                srcParamType,
+                                destParamDetails.params[destParamDetails.kwargsIndex].index,
+                                diag?.createAddendum(),
+                                constraints,
+                                flags,
+                                recursionCount
+                            )
+                        ) {
                             canAssign = false;
                         }
                     } else if (srcParamInfo.defaultType) {
                         const defaultArgType = srcParamInfo.defaultType;
-                        if (defaultArgType && !assignType(evaluator, registry, state, srcParamInfo.type, defaultArgType,
-                            diag?.createAddendum(), constraints, flags, recursionCount)) {
+                        if (
+                            defaultArgType &&
+                            !assignType(
+                                evaluator,
+                                registry,
+                                state,
+                                srcParamInfo.type,
+                                defaultArgType,
+                                diag?.createAddendum(),
+                                constraints,
+                                flags,
+                                recursionCount
+                            )
+                        ) {
                             if ((flags & AssignTypeFlags.PartialOverloadOverlap) === 0) {
                                 canAssign = false;
                             }
@@ -1573,30 +1982,50 @@ export function assignFunction(
                     return;
                 }
 
-                if (srcParamInfo.defaultType && destParamInfo.defaultType &&
-                    (flags & AssignTypeFlags.PartialOverloadOverlap) !== 0) {
+                if (
+                    srcParamInfo.defaultType &&
+                    destParamInfo.defaultType &&
+                    (flags & AssignTypeFlags.PartialOverloadOverlap) !== 0
+                ) {
                     destParamMap.delete(srcParamInfo.param.name);
                     return;
                 }
 
                 const destParamType = destParamInfo.type;
                 const specializedDestParamType = constraints
-                    ? evaluator.solveAndApplyConstraints(destParamType, constraints) : destParamType;
+                    ? evaluator.solveAndApplyConstraints(destParamType, constraints)
+                    : destParamType;
 
-                if (!assignParam(evaluator, registry, state, destParamInfo.type, srcParamType, undefined,
-                    paramDiag?.createAddendum(), constraints, flags, recursionCount)) {
-                    paramDiag?.addMessage(LocAddendum.namedParamTypeMismatch().format({
-                        name: srcParamInfo.param.name,
-                        sourceType: evaluator.printType(specializedDestParamType),
-                        destType: evaluator.printType(srcParamType),
-                    }));
+                if (
+                    !assignParam(
+                        evaluator,
+                        registry,
+                        state,
+                        destParamInfo.type,
+                        srcParamType,
+                        undefined,
+                        paramDiag?.createAddendum(),
+                        constraints,
+                        flags,
+                        recursionCount
+                    )
+                ) {
+                    paramDiag?.addMessage(
+                        LocAddendum.namedParamTypeMismatch().format({
+                            name: srcParamInfo.param.name,
+                            sourceType: evaluator.printType(specializedDestParamType),
+                            destType: evaluator.printType(srcParamType),
+                        })
+                    );
                     canAssign = false;
                 }
 
                 if (destParamInfo.defaultType && !srcParamInfo.defaultType) {
-                    diag?.createAddendum().addMessage(LocAddendum.functionParamDefaultMissing().format({
-                        name: srcParamInfo.param.name,
-                    }));
+                    diag?.createAddendum().addMessage(
+                        LocAddendum.functionParamDefaultMissing().format({
+                            name: srcParamInfo.param.name,
+                        })
+                    );
                     canAssign = false;
                 }
 
@@ -1606,9 +2035,20 @@ export function assignFunction(
 
         destParamMap.forEach((destParamInfo, paramName) => {
             if (srcParamDetails.kwargsIndex !== undefined && destParamInfo.param.name) {
-                if (!assignParam(evaluator, registry, state, destParamInfo.type,
-                    srcParamDetails.params[srcParamDetails.kwargsIndex].type, destParamInfo.index,
-                    diag?.createAddendum(), constraints, flags, recursionCount)) {
+                if (
+                    !assignParam(
+                        evaluator,
+                        registry,
+                        state,
+                        destParamInfo.type,
+                        srcParamDetails.params[srcParamDetails.kwargsIndex].type,
+                        destParamInfo.index,
+                        diag?.createAddendum(),
+                        constraints,
+                        flags,
+                        recursionCount
+                    )
+                ) {
                     canAssign = false;
                 }
                 destParamMap.delete(paramName);
@@ -1619,20 +2059,35 @@ export function assignFunction(
         });
 
         if (srcParamDetails.kwargsIndex !== undefined && destParamDetails.kwargsIndex !== undefined) {
-            if (!assignParam(evaluator, registry, state,
-                destParamDetails.params[destParamDetails.kwargsIndex].type,
-                srcParamDetails.params[srcParamDetails.kwargsIndex].type,
-                destParamDetails.params[destParamDetails.kwargsIndex].index,
-                diag?.createAddendum(), constraints, flags, recursionCount)) {
+            if (
+                !assignParam(
+                    evaluator,
+                    registry,
+                    state,
+                    destParamDetails.params[destParamDetails.kwargsIndex].type,
+                    srcParamDetails.params[srcParamDetails.kwargsIndex].type,
+                    destParamDetails.params[destParamDetails.kwargsIndex].index,
+                    diag?.createAddendum(),
+                    constraints,
+                    flags,
+                    recursionCount
+                )
+            ) {
                 canAssign = false;
             }
         }
 
-        if (!FunctionType.isGradualCallableForm(destType) && srcParamDetails.kwargsIndex === undefined &&
-            srcParamSpec === undefined && destParamDetails.kwargsIndex !== undefined) {
-            diag?.createAddendum().addMessage(LocAddendum.kwargsParamMissing().format({
-                paramName: destParamDetails.params[destParamDetails.kwargsIndex].param.name!,
-            }));
+        if (
+            !FunctionType.isGradualCallableForm(destType) &&
+            srcParamDetails.kwargsIndex === undefined &&
+            srcParamSpec === undefined &&
+            destParamDetails.kwargsIndex !== undefined
+        ) {
+            diag?.createAddendum().addMessage(
+                LocAddendum.kwargsParamMissing().format({
+                    paramName: destParamDetails.params[destParamDetails.kwargsIndex].param.name!,
+                })
+            );
             canAssign = false;
         }
     }
@@ -1675,20 +2130,31 @@ export function assignFunction(
                     if (p.category !== ParamCategory.ArgsList) return;
                 }
                 if (isPositionOnlySeparator(p) && remainingParams.length === 0) return;
-                remainingParams.push(FunctionParam.create(
-                    p.category, FunctionType.getParamType(effectiveSrcType, index), p.flags, p.name,
-                    FunctionType.getParamDefaultType(effectiveSrcType, index), p.defaultExpr
-                ));
+                remainingParams.push(
+                    FunctionParam.create(
+                        p.category,
+                        FunctionType.getParamType(effectiveSrcType, index),
+                        p.flags,
+                        p.name,
+                        FunctionType.getParamDefaultType(effectiveSrcType, index),
+                        p.defaultExpr
+                    )
+                );
             });
 
-            if (remainingParams.length > 0 || !effectiveSrcParamSpec ||
-                !isTypeSame(effectiveSrcParamSpec, effectiveDestParamSpec, { ignoreTypeFlags: true })) {
+            if (
+                remainingParams.length > 0 ||
+                !effectiveSrcParamSpec ||
+                !isTypeSame(effectiveSrcParamSpec, effectiveDestParamSpec, { ignoreTypeFlags: true })
+            ) {
                 const effectiveSrcPosCount = isContra ? destPositionalCount : srcPositionalCount;
                 const effectiveDestPosCount = isContra ? srcPositionalCount : destPositionalCount;
 
                 if (!effectiveSrcParamSpec || effectiveSrcPosCount >= effectiveDestPosCount) {
                     const remainingFunction = FunctionType.createInstance(
-                        '', '', '',
+                        '',
+                        '',
+                        '',
                         effectiveSrcType.shared.flags | FunctionTypeFlags.SynthesizedMethod,
                         effectiveSrcType.shared.docString
                     );
@@ -1696,17 +2162,39 @@ export function assignFunction(
                     remainingFunction.shared.typeVarScopeId = effectiveSrcType.shared.typeVarScopeId;
                     remainingFunction.priv.constructorTypeVarScopeId = effectiveSrcType.priv.constructorTypeVarScopeId;
                     remainingFunction.shared.methodClass = effectiveSrcType.shared.methodClass;
-                    remainingParams.forEach((param) => { FunctionType.addParam(remainingFunction, param); });
+                    remainingParams.forEach((param) => {
+                        FunctionType.addParam(remainingFunction, param);
+                    });
                     if (effectiveSrcParamSpec) {
                         FunctionType.addParamSpecVariadics(remainingFunction, convertToInstance(effectiveSrcParamSpec));
                     }
 
-                    if (!assignType(evaluator, registry, state, effectiveDestParamSpec, remainingFunction,
-                        undefined, constraints, flags)) {
-                        if (remainingParams.length > 0 || !effectiveSrcParamSpec ||
-                            !assignType(evaluator, registry, state,
-                                convertToInstance(effectiveDestParamSpec), convertToInstance(effectiveSrcParamSpec),
-                                undefined, constraints, flags)) {
+                    if (
+                        !assignType(
+                            evaluator,
+                            registry,
+                            state,
+                            effectiveDestParamSpec,
+                            remainingFunction,
+                            undefined,
+                            constraints,
+                            flags
+                        )
+                    ) {
+                        if (
+                            remainingParams.length > 0 ||
+                            !effectiveSrcParamSpec ||
+                            !assignType(
+                                evaluator,
+                                registry,
+                                state,
+                                convertToInstance(effectiveDestParamSpec),
+                                convertToInstance(effectiveSrcParamSpec),
+                                undefined,
+                                constraints,
+                                flags
+                            )
+                        ) {
                             canAssign = false;
                         }
                     }
@@ -1720,36 +2208,63 @@ export function assignFunction(
         const destReturnType = getEffectiveReturnType(evaluator, destType);
         if (!isAnyOrUnknown(destReturnType)) {
             const srcReturnType = evaluator.solveAndApplyConstraints(
-                getEffectiveReturnType(evaluator, srcType), constraints);
+                getEffectiveReturnType(evaluator, srcType),
+                constraints
+            );
             const returnDiag = diag?.createAddendum();
             let isReturnTypeCompatible = false;
             let effectiveFlags = flags;
 
-            if (srcType.shared.declaredReturnType &&
-                containsLiteralType(srcType.shared.declaredReturnType, true)) {
+            if (srcType.shared.declaredReturnType && containsLiteralType(srcType.shared.declaredReturnType, true)) {
                 effectiveFlags |= AssignTypeFlags.RetainLiteralsForTypeVar;
             }
 
-            if (assignType(evaluator, registry, state, destReturnType, srcReturnType,
-                returnDiag?.createAddendum(), constraints, effectiveFlags, recursionCount)) {
+            if (
+                assignType(
+                    evaluator,
+                    registry,
+                    state,
+                    destReturnType,
+                    srcReturnType,
+                    returnDiag?.createAddendum(),
+                    constraints,
+                    effectiveFlags,
+                    recursionCount
+                )
+            ) {
                 isReturnTypeCompatible = true;
             } else {
-                if (isClassInstance(srcReturnType) &&
+                if (
+                    isClassInstance(srcReturnType) &&
                     ClassType.isBuiltIn(srcReturnType, ['TypeGuard', 'TypeIs']) &&
-                    registry.boolClass && isInstantiableClass(registry.boolClass)) {
-                    if (assignType(evaluator, registry, state, destReturnType,
-                        ClassType.cloneAsInstance(registry.boolClass),
-                        returnDiag?.createAddendum(), constraints, flags, recursionCount)) {
+                    registry.boolClass &&
+                    isInstantiableClass(registry.boolClass)
+                ) {
+                    if (
+                        assignType(
+                            evaluator,
+                            registry,
+                            state,
+                            destReturnType,
+                            ClassType.cloneAsInstance(registry.boolClass),
+                            returnDiag?.createAddendum(),
+                            constraints,
+                            flags,
+                            recursionCount
+                        )
+                    ) {
                         isReturnTypeCompatible = true;
                     }
                 }
             }
 
             if (!isReturnTypeCompatible) {
-                returnDiag?.addMessage(LocAddendum.functionReturnTypeMismatch().format({
-                    sourceType: evaluator.printType(srcReturnType),
-                    destType: evaluator.printType(destReturnType),
-                }));
+                returnDiag?.addMessage(
+                    LocAddendum.functionReturnTypeMismatch().format({
+                        sourceType: evaluator.printType(srcReturnType),
+                        destType: evaluator.printType(destReturnType),
+                    })
+                );
                 canAssign = false;
             }
         }
@@ -1802,15 +2317,26 @@ export function assignType(
     }
     recursionCount++;
 
-    if (isTypeVar(destType) && destType.shared.recursiveAlias &&
-        isTypeVar(srcType) && srcType.shared.recursiveAlias) {
+    if (isTypeVar(destType) && destType.shared.recursiveAlias && isTypeVar(srcType) && srcType.shared.recursiveAlias) {
         const destAliasInfo = destType.props?.typeAliasInfo;
         const srcAliasInfo = srcType.props?.typeAliasInfo;
 
-        if (destAliasInfo?.typeArgs && srcAliasInfo?.typeArgs &&
-            destType.shared.recursiveAlias.typeVarScopeId === srcType.shared.recursiveAlias.typeVarScopeId) {
-            return assignRecursiveTypeAliasToSelf(evaluator, registry, state,
-                destAliasInfo, srcAliasInfo, diag, constraints, flags, recursionCount);
+        if (
+            destAliasInfo?.typeArgs &&
+            srcAliasInfo?.typeArgs &&
+            destType.shared.recursiveAlias.typeVarScopeId === srcType.shared.recursiveAlias.typeVarScopeId
+        ) {
+            return assignRecursiveTypeAliasToSelf(
+                evaluator,
+                registry,
+                state,
+                destAliasInfo,
+                srcAliasInfo,
+                diag,
+                constraints,
+                flags,
+                recursionCount
+            );
         } else {
             if ((flags & AssignTypeFlags.SkipRecursiveTypeCheck) !== 0) {
                 return true;
@@ -1821,16 +2347,27 @@ export function assignType(
 
     if (TypeBase.isInstantiable(destType) && TypeBase.isInstantiable(srcType)) {
         if (TypeBase.getInstantiableDepth(destType) > 0 || TypeBase.getInstantiableDepth(srcType) > 0) {
-            return assignType(evaluator, registry, state, convertToInstance(destType), convertToInstance(srcType),
-                diag, constraints, flags, recursionCount);
+            return assignType(
+                evaluator,
+                registry,
+                state,
+                convertToInstance(destType),
+                convertToInstance(srcType),
+                diag,
+                constraints,
+                flags,
+                recursionCount
+            );
         }
     }
 
     const transformedDestType = transformPossibleRecursiveTypeAlias(destType);
     const transformedSrcType = transformPossibleRecursiveTypeAlias(srcType);
 
-    if ((transformedDestType !== destType && isUnion(transformedDestType)) ||
-        (transformedSrcType !== srcType && isUnion(transformedSrcType))) {
+    if (
+        (transformedDestType !== destType && isUnion(transformedDestType)) ||
+        (transformedSrcType !== srcType && isUnion(transformedSrcType))
+    ) {
         if (recursionCount > maxRecursiveTypeAliasRecursionCount) {
             if (isClassInstance(srcType) && ClassType.isBuiltIn(srcType, 'str') && isUnion(transformedDestType)) {
                 return transformedDestType.priv.subtypes.some(
@@ -1858,12 +2395,16 @@ export function assignType(
         }
 
         const destTypeVar = destType;
-        if (TypeBase.isInstantiable(destType) === TypeBase.isInstantiable(srcType) &&
+        if (
+            TypeBase.isInstantiable(destType) === TypeBase.isInstantiable(srcType) &&
             srcType.props?.condition &&
             srcType.props.condition.some((cond) => {
-                return !TypeVarType.hasConstraints(cond.typeVar) &&
-                    cond.typeVar.priv.nameWithScope === destTypeVar.priv.nameWithScope;
-            })) {
+                return (
+                    !TypeVarType.hasConstraints(cond.typeVar) &&
+                    cond.typeVar.priv.nameWithScope === destTypeVar.priv.nameWithScope
+                );
+            })
+        ) {
             return true;
         }
 
@@ -1874,18 +2415,28 @@ export function assignType(
             }
         }
 
-        if (isTypeVar(srcType) && TypeVarType.isSelf(srcType) && TypeVarType.hasBound(srcType) &&
-            TypeVarType.isSelf(destType) && TypeVarType.hasBound(destType) &&
+        if (
+            isTypeVar(srcType) &&
+            TypeVarType.isSelf(srcType) &&
+            TypeVarType.hasBound(srcType) &&
+            TypeVarType.isSelf(destType) &&
+            TypeVarType.hasBound(destType) &&
             TypeVarType.isBound(destType) === TypeVarType.isBound(srcType) &&
-            TypeBase.isInstance(srcType) === TypeBase.isInstance(destType)) {
+            TypeBase.isInstance(srcType) === TypeBase.isInstance(destType)
+        ) {
             if ((flags & AssignTypeFlags.Contravariant) === 0 && constraints) {
                 assignTypeVar(evaluator, destType, srcType, diag, constraints, flags, recursionCount);
             }
             return true;
         }
 
-        if (isTypeVarTuple(destType) && isClassInstance(srcType) && isTupleClass(srcType) &&
-            srcType.priv.tupleTypeArgs && srcType.priv.tupleTypeArgs.length === 1) {
+        if (
+            isTypeVarTuple(destType) &&
+            isClassInstance(srcType) &&
+            isTupleClass(srcType) &&
+            srcType.priv.tupleTypeArgs &&
+            srcType.priv.tupleTypeArgs.length === 1
+        ) {
             if (isTypeSame(destType, srcType.priv.tupleTypeArgs[0].type, {}, recursionCount)) {
                 return true;
             }
@@ -1905,10 +2456,17 @@ export function assignType(
     if (isTypeVar(srcType)) {
         if ((flags & AssignTypeFlags.Contravariant) !== 0) {
             if (TypeVarType.isBound(srcType)) {
-                return assignType(evaluator, registry, state,
+                return assignType(
+                    evaluator,
+                    registry,
+                    state,
                     evaluator.makeTopLevelTypeVarsConcrete(destType),
                     evaluator.makeTopLevelTypeVarsConcrete(srcType),
-                    diag, undefined, flags, recursionCount);
+                    diag,
+                    undefined,
+                    flags,
+                    recursionCount
+                );
             }
 
             if (assignTypeVar(evaluator, srcType, destType, diag, constraints, flags, recursionCount)) {
@@ -1918,7 +2476,17 @@ export function assignType(
             let isAssignable = false;
             if (isUnion(destType)) {
                 doForEachSubtype(destType, (destSubtype) => {
-                    if (assignTypeVar(evaluator, srcType as TypeVarType, destSubtype, diag, constraints, flags, recursionCount)) {
+                    if (
+                        assignTypeVar(
+                            evaluator,
+                            srcType as TypeVarType,
+                            destSubtype,
+                            diag,
+                            constraints,
+                            flags,
+                            recursionCount
+                        )
+                    ) {
                         isAssignable = true;
                     }
                 });
@@ -1930,17 +2498,29 @@ export function assignType(
             if (isAnyOrUnknown(destType)) {
                 return true;
             }
-            if (isParamSpec(srcType) && isFunction(destType) &&
-                FunctionType.isGradualCallableForm(destType) && destType.shared.parameters.length <= 2) {
+            if (
+                isParamSpec(srcType) &&
+                isFunction(destType) &&
+                FunctionType.isGradualCallableForm(destType) &&
+                destType.shared.parameters.length <= 2
+            ) {
                 return true;
             }
-            if (isUnpackedTypeVarTuple(srcType) && isClassInstance(destType) && isUnpackedClass(destType) &&
-                destType.priv.tupleTypeArgs && destType.priv.tupleTypeArgs.length === 1 &&
-                destType.priv.tupleTypeArgs[0].isUnbounded && isAnyOrUnknown(destType.priv.tupleTypeArgs[0].type)) {
+            if (
+                isUnpackedTypeVarTuple(srcType) &&
+                isClassInstance(destType) &&
+                isUnpackedClass(destType) &&
+                destType.priv.tupleTypeArgs &&
+                destType.priv.tupleTypeArgs.length === 1 &&
+                destType.priv.tupleTypeArgs[0].isUnbounded &&
+                isAnyOrUnknown(destType.priv.tupleTypeArgs[0].type)
+            ) {
                 return true;
             }
             if (!isUnion(destType)) {
-                diag?.addMessage(LocAddendum.typeAssignmentMismatch().format(evaluator.printSrcDestTypes(srcType, destType)));
+                diag?.addMessage(
+                    LocAddendum.typeAssignmentMismatch().format(evaluator.printSrcDestTypes(srcType, destType))
+                );
                 return false;
             }
         }
@@ -1965,7 +2545,9 @@ export function assignType(
             if (isNever(destType)) {
                 return true;
             }
-            diag?.addMessage(LocAddendum.typeAssignmentMismatch().format(evaluator.printSrcDestTypes(srcType, destType)));
+            diag?.addMessage(
+                LocAddendum.typeAssignmentMismatch().format(evaluator.printSrcDestTypes(srcType, destType))
+            );
             return false;
         }
         if (constraints) {
@@ -1976,10 +2558,32 @@ export function assignType(
 
     if (isUnion(destType)) {
         if (isUnion(srcType)) {
-            return assignFromUnionType(evaluator, registry, state, destType, srcType, diag, constraints, flags, recursionCount);
+            return assignFromUnionType(
+                evaluator,
+                registry,
+                state,
+                destType,
+                srcType,
+                diag,
+                constraints,
+                flags,
+                recursionCount
+            );
         }
         const clonedConstraints = constraints?.clone();
-        if (assignToUnionType(evaluator, registry, state, destType, srcType, undefined, clonedConstraints, flags, recursionCount)) {
+        if (
+            assignToUnionType(
+                evaluator,
+                registry,
+                state,
+                destType,
+                srcType,
+                undefined,
+                clonedConstraints,
+                flags,
+                recursionCount
+            )
+        ) {
             if (constraints && clonedConstraints) {
                 constraints.copyFromClone(clonedConstraints);
             }
@@ -1989,11 +2593,31 @@ export function assignType(
 
     const expandedSrcType = evaluator.makeTopLevelTypeVarsConcrete(srcType);
     if (isUnion(expandedSrcType)) {
-        return assignFromUnionType(evaluator, registry, state, destType, expandedSrcType, diag, constraints, flags, recursionCount);
+        return assignFromUnionType(
+            evaluator,
+            registry,
+            state,
+            destType,
+            expandedSrcType,
+            diag,
+            constraints,
+            flags,
+            recursionCount
+        );
     }
 
     if (isUnion(destType)) {
-        return assignToUnionType(evaluator, registry, state, destType, srcType, diag, constraints, flags, recursionCount);
+        return assignToUnionType(
+            evaluator,
+            registry,
+            state,
+            destType,
+            srcType,
+            diag,
+            constraints,
+            flags,
+            recursionCount
+        );
     }
 
     // Is the src a specialized "type" object?
@@ -2011,11 +2635,24 @@ export function assignType(
                 return true;
             }
         } else if (isClassInstance(typeTypeArg) || isTypeVar(typeTypeArg)) {
-            if (assignType(evaluator, registry, state, destType, convertToInstantiable(typeTypeArg),
-                diag?.createAddendum(), constraints, flags, recursionCount)) {
+            if (
+                assignType(
+                    evaluator,
+                    registry,
+                    state,
+                    destType,
+                    convertToInstantiable(typeTypeArg),
+                    diag?.createAddendum(),
+                    constraints,
+                    flags,
+                    recursionCount
+                )
+            ) {
                 return true;
             }
-            diag?.addMessage(LocAddendum.typeAssignmentMismatch().format(evaluator.printSrcDestTypes(srcType, destType)));
+            diag?.addMessage(
+                LocAddendum.typeAssignmentMismatch().format(evaluator.printSrcDestTypes(srcType, destType))
+            );
             return false;
         }
     }
@@ -2023,13 +2660,18 @@ export function assignType(
     if (isInstantiableClass(destType)) {
         if (isInstantiableClass(expandedSrcType)) {
             if (ClassType.isProtocolClass(destType)) {
-                if ((flags & AssignTypeFlags.AllowProtocolClassSource) === 0 &&
-                    ClassType.isProtocolClass(expandedSrcType) && isInstantiableClass(srcType) &&
-                    !srcType.priv.includeSubclasses) {
-                    diag?.addMessage(LocAddendum.protocolSourceIsNotConcrete().format({
-                        sourceType: evaluator.printType(convertToInstance(srcType)),
-                        destType: evaluator.printType(destType),
-                    }));
+                if (
+                    (flags & AssignTypeFlags.AllowProtocolClassSource) === 0 &&
+                    ClassType.isProtocolClass(expandedSrcType) &&
+                    isInstantiableClass(srcType) &&
+                    !srcType.priv.includeSubclasses
+                ) {
+                    diag?.addMessage(
+                        LocAddendum.protocolSourceIsNotConcrete().format({
+                            sourceType: evaluator.printType(convertToInstance(srcType)),
+                            destType: evaluator.printType(destType),
+                        })
+                    );
                     return false;
                 }
             }
@@ -2041,22 +2683,49 @@ export function assignType(
             if (isSpecialFormClass(expandedSrcType, flags)) {
                 const destSpecialForm = destType.props?.specialForm ?? destType;
                 if (isSpecialFormClass(destSpecialForm, flags)) {
-                    return assignType(evaluator, registry, state, destSpecialForm, expandedSrcType, diag, constraints, flags, recursionCount);
+                    return assignType(
+                        evaluator,
+                        registry,
+                        state,
+                        destSpecialForm,
+                        expandedSrcType,
+                        diag,
+                        constraints,
+                        flags,
+                        recursionCount
+                    );
                 }
-            } else if (assignClass(evaluator, registry, state, destType, expandedSrcType, diag, constraints, flags,
-                recursionCount, false)) {
+            } else if (
+                assignClass(
+                    evaluator,
+                    registry,
+                    state,
+                    destType,
+                    expandedSrcType,
+                    diag,
+                    constraints,
+                    flags,
+                    recursionCount,
+                    false
+                )
+            ) {
                 return true;
             }
 
-            diag?.addMessage(LocAddendum.typeAssignmentMismatch().format(evaluator.printSrcDestTypes(srcType, destType)));
+            diag?.addMessage(
+                LocAddendum.typeAssignmentMismatch().format(evaluator.printSrcDestTypes(srcType, destType))
+            );
             return false;
         }
     }
 
     if (isClassInstance(destType)) {
         if (ClassType.isBuiltIn(destType, 'type')) {
-            if (isInstantiableClass(srcType) && isSpecialFormClass(srcType, flags) &&
-                TypeBase.getInstantiableDepth(srcType) === 0) {
+            if (
+                isInstantiableClass(srcType) &&
+                isSpecialFormClass(srcType, flags) &&
+                TypeBase.getInstantiableDepth(srcType) === 0
+            ) {
                 return false;
             }
             if (isAnyOrUnknown(srcType) && (flags & AssignTypeFlags.OverloadOverlap) !== 0) {
@@ -2065,8 +2734,17 @@ export function assignType(
             const destTypeArgs = destType.priv.typeArgs;
             if (destTypeArgs && destTypeArgs.length >= 1) {
                 if (TypeBase.isInstance(destTypeArgs[0]) && TypeBase.isInstantiable(srcType)) {
-                    return assignType(evaluator, registry, state, destTypeArgs[0], convertToInstance(srcType),
-                        diag, constraints, flags, recursionCount);
+                    return assignType(
+                        evaluator,
+                        registry,
+                        state,
+                        destTypeArgs[0],
+                        convertToInstance(srcType),
+                        diag,
+                        constraints,
+                        flags,
+                        recursionCount
+                    );
                 }
             }
             if (TypeBase.isInstantiable(srcType)) {
@@ -2078,8 +2756,10 @@ export function assignType(
         let concreteSrcType = evaluator.makeTopLevelTypeVarsConcrete(srcType);
 
         if (ClassType.isBuiltIn(destType, 'TypeForm')) {
-            const destTypeArg = destType.priv.typeArgs && destType.priv.typeArgs.length > 0
-                ? destType.priv.typeArgs[0] : UnknownType.create();
+            const destTypeArg =
+                destType.priv.typeArgs && destType.priv.typeArgs.length > 0
+                    ? destType.priv.typeArgs[0]
+                    : UnknownType.create();
             let srcTypeArg: Type | undefined;
             if (isClassInstance(concreteSrcType) && ClassType.isBuiltIn(concreteSrcType, 'type')) {
                 srcTypeArg = concreteSrcType;
@@ -2087,23 +2767,44 @@ export function assignType(
                 srcTypeArg = convertToInstance(concreteSrcType);
             }
             if (srcTypeArg) {
-                return assignType(evaluator, registry, state, destTypeArg, srcTypeArg, diag, constraints, flags, recursionCount);
+                return assignType(
+                    evaluator,
+                    registry,
+                    state,
+                    destTypeArg,
+                    srcTypeArg,
+                    diag,
+                    constraints,
+                    flags,
+                    recursionCount
+                );
             }
         }
 
         if (isClass(concreteSrcType) && TypeBase.isInstance(concreteSrcType)) {
             if (!destType.priv.isUnpacked && concreteSrcType.priv.isUnpacked && concreteSrcType.priv.tupleTypeArgs) {
-                return assignType(evaluator, registry, state, destType,
-                    combineTupleTypeArgs(concreteSrcType.priv.tupleTypeArgs), diag, constraints, flags, recursionCount);
+                return assignType(
+                    evaluator,
+                    registry,
+                    state,
+                    destType,
+                    combineTupleTypeArgs(concreteSrcType.priv.tupleTypeArgs),
+                    diag,
+                    constraints,
+                    flags,
+                    recursionCount
+                );
             }
 
             if (destType.priv.literalValue !== undefined && ClassType.isSameGenericClass(destType, concreteSrcType)) {
                 const srcLiteral = concreteSrcType.priv.literalValue;
                 if (srcLiteral === undefined || !ClassType.isLiteralValueSame(concreteSrcType, destType)) {
-                    diag?.addMessage(LocAddendum.literalAssignmentMismatch().format({
-                        sourceType: evaluator.printType(srcType),
-                        destType: evaluator.printType(destType),
-                    }));
+                    diag?.addMessage(
+                        LocAddendum.literalAssignmentMismatch().format({
+                            sourceType: evaluator.printType(srcType),
+                            destType: evaluator.printType(destType),
+                        })
+                    );
                     return false;
                 }
             }
@@ -2114,48 +2815,119 @@ export function assignType(
                 } else if (ClassType.isBuiltIn(concreteSrcType, 'LiteralString')) {
                     return true;
                 }
-            } else if (ClassType.isBuiltIn(concreteSrcType, 'LiteralString') &&
-                registry.strClass && isInstantiableClass(registry.strClass) &&
-                (flags & AssignTypeFlags.Invariant) === 0) {
+            } else if (
+                ClassType.isBuiltIn(concreteSrcType, 'LiteralString') &&
+                registry.strClass &&
+                isInstantiableClass(registry.strClass) &&
+                (flags & AssignTypeFlags.Invariant) === 0
+            ) {
                 concreteSrcType = ClassType.cloneAsInstance(registry.strClass);
             }
 
-            if (!assignClass(evaluator, registry, state, ClassType.cloneAsInstantiable(destType),
-                ClassType.cloneAsInstantiable(concreteSrcType), diag, constraints, flags, recursionCount, true)) {
+            if (
+                !assignClass(
+                    evaluator,
+                    registry,
+                    state,
+                    ClassType.cloneAsInstantiable(destType),
+                    ClassType.cloneAsInstantiable(concreteSrcType),
+                    diag,
+                    constraints,
+                    flags,
+                    recursionCount,
+                    true
+                )
+            ) {
                 return false;
             }
             return true;
         } else if (isFunctionOrOverloaded(concreteSrcType)) {
             const destCallbackType = evaluator.getCallbackProtocolType(destType, recursionCount);
             if (destCallbackType) {
-                return assignType(evaluator, registry, state, destCallbackType, concreteSrcType, diag, constraints, flags, recursionCount);
+                return assignType(
+                    evaluator,
+                    registry,
+                    state,
+                    destCallbackType,
+                    concreteSrcType,
+                    diag,
+                    constraints,
+                    flags,
+                    recursionCount
+                );
             }
             const altClass = isMethodType(concreteSrcType) ? registry.methodClass : registry.functionClass;
             if (altClass) {
-                return assignType(evaluator, registry, state, destType, convertToInstance(altClass), diag, constraints, flags, recursionCount);
+                return assignType(
+                    evaluator,
+                    registry,
+                    state,
+                    destType,
+                    convertToInstance(altClass),
+                    diag,
+                    constraints,
+                    flags,
+                    recursionCount
+                );
             }
         } else if (isModule(concreteSrcType)) {
             if (ClassType.isBuiltIn(destType, 'ModuleType')) {
                 return true;
             }
             if (ClassType.isProtocolClass(destType)) {
-                return assignModuleToProtocol(evaluator, ClassType.cloneAsInstantiable(destType),
-                    concreteSrcType, diag, constraints, flags, recursionCount);
+                return assignModuleToProtocol(
+                    evaluator,
+                    ClassType.cloneAsInstantiable(destType),
+                    concreteSrcType,
+                    diag,
+                    constraints,
+                    flags,
+                    recursionCount
+                );
             }
         } else if (isInstantiableClass(concreteSrcType)) {
             const callbackType = evaluator.getCallbackProtocolType(destType, recursionCount);
             if (callbackType) {
-                return assignType(evaluator, registry, state, callbackType, concreteSrcType, diag, constraints, flags, recursionCount);
+                return assignType(
+                    evaluator,
+                    registry,
+                    state,
+                    callbackType,
+                    concreteSrcType,
+                    diag,
+                    constraints,
+                    flags,
+                    recursionCount
+                );
             }
             if (ClassType.isProtocolClass(destType)) {
-                return assignClassToProtocol(evaluator, ClassType.cloneAsInstantiable(destType),
-                    concreteSrcType, diag, constraints, flags, recursionCount);
+                return assignClassToProtocol(
+                    evaluator,
+                    ClassType.cloneAsInstantiable(destType),
+                    concreteSrcType,
+                    diag,
+                    constraints,
+                    flags,
+                    recursionCount
+                );
             }
             const metaclass = concreteSrcType.shared.effectiveMetaclass;
             if (metaclass) {
                 if (!isAnyOrUnknown(metaclass)) {
-                    if (assignClass(evaluator, registry, state, ClassType.cloneAsInstantiable(destType), metaclass,
-                        undefined, constraints, flags, recursionCount, true)) {
+                    if (
+                        assignClass(
+                            evaluator,
+                            registry,
+                            state,
+                            ClassType.cloneAsInstantiable(destType),
+                            metaclass,
+                            undefined,
+                            constraints,
+                            flags,
+                            recursionCount,
+                            true
+                        )
+                    ) {
                         return true;
                     }
                 }
@@ -2163,7 +2935,17 @@ export function assignType(
         } else if (isAnyOrUnknown(concreteSrcType) && !concreteSrcType.props?.specialForm) {
             return (flags & AssignTypeFlags.OverloadOverlap) === 0;
         } else if (isUnion(concreteSrcType)) {
-            return assignType(evaluator, registry, state, destType, concreteSrcType, diag, constraints, flags, recursionCount);
+            return assignType(
+                evaluator,
+                registry,
+                state,
+                destType,
+                concreteSrcType,
+                diag,
+                constraints,
+                flags,
+                recursionCount
+            );
         }
     }
 
@@ -2172,19 +2954,39 @@ export function assignType(
 
         if (isClassInstance(concreteSrcType)) {
             const boundMethod = evaluator.getBoundMagicMethod(
-                concreteSrcType, '__call__', undefined, undefined, undefined, recursionCount);
+                concreteSrcType,
+                '__call__',
+                undefined,
+                undefined,
+                undefined,
+                recursionCount
+            );
             if (boundMethod) {
                 concreteSrcType = boundMethod;
             }
         }
 
         if (isInstantiableClass(concreteSrcType) && concreteSrcType.priv.literalValue === undefined) {
-            const constructor = createFunctionFromConstructor(evaluator, concreteSrcType,
-                isTypeVar(srcType) ? convertToInstance(srcType) : undefined, recursionCount);
+            const constructor = createFunctionFromConstructor(
+                evaluator,
+                concreteSrcType,
+                isTypeVar(srcType) ? convertToInstance(srcType) : undefined,
+                recursionCount
+            );
             if (constructor) {
                 concreteSrcType = constructor;
                 if (isUnion(concreteSrcType)) {
-                    return assignType(evaluator, registry, state, destType, concreteSrcType, diag, constraints, flags, recursionCount);
+                    return assignType(
+                        evaluator,
+                        registry,
+                        state,
+                        destType,
+                        concreteSrcType,
+                        diag,
+                        constraints,
+                        flags,
+                        recursionCount
+                    );
                 }
             }
         }
@@ -2204,7 +3006,19 @@ export function assignType(
             overloads.forEach((overload) => {
                 const overloadScopeId = getTypeVarScopeId(overload) ?? '';
                 const constraintsClone = constraints?.cloneWithSignature(overloadScopeId);
-                if (assignType(evaluator, registry, state, destType, overload, undefined, constraintsClone, flags, recursionCount)) {
+                if (
+                    assignType(
+                        evaluator,
+                        registry,
+                        state,
+                        destType,
+                        overload,
+                        undefined,
+                        constraintsClone,
+                        flags,
+                        recursionCount
+                    )
+                ) {
                     filteredOverloads.push(overload);
                     if (constraintsClone) {
                         appendArray(typeVarSignatures, constraintsClone.getConstraintSets());
@@ -2225,8 +3039,19 @@ export function assignType(
         }
 
         if (isFunction(concreteSrcType)) {
-            if (assignFunction(evaluator, registry, state, destType, concreteSrcType,
-                diag?.createAddendum(), constraints ?? new ConstraintTracker(), flags, recursionCount)) {
+            if (
+                assignFunction(
+                    evaluator,
+                    registry,
+                    state,
+                    destType,
+                    concreteSrcType,
+                    diag?.createAddendum(),
+                    constraints ?? new ConstraintTracker(),
+                    flags,
+                    recursionCount
+                )
+            ) {
                 return true;
             }
         }
@@ -2239,19 +3064,39 @@ export function assignType(
         if (isOverloaded(srcType)) {
             const srcOverloads = OverloadedType.getOverloads(srcType);
             if (destOverloads.length === srcOverloads.length) {
-                if (destOverloads.every((destOverload, index) => {
-                    const srcOverload = srcOverloads[index];
-                    return assignType(evaluator, registry, state, destOverload, srcOverload,
-                        undefined, constraints, flags, recursionCount);
-                })) {
+                if (
+                    destOverloads.every((destOverload, index) => {
+                        const srcOverload = srcOverloads[index];
+                        return assignType(
+                            evaluator,
+                            registry,
+                            state,
+                            destOverload,
+                            srcOverload,
+                            undefined,
+                            constraints,
+                            flags,
+                            recursionCount
+                        );
+                    })
+                ) {
                     return true;
                 }
             }
         }
 
         const isAssignable = destOverloads.every((destOverload) => {
-            return assignType(evaluator, registry, state, destOverload, srcType,
-                overloadDiag?.createAddendum(), constraints, flags, recursionCount);
+            return assignType(
+                evaluator,
+                registry,
+                state,
+                destOverload,
+                srcType,
+                overloadDiag?.createAddendum(),
+                constraints,
+                flags,
+                recursionCount
+            );
         });
 
         if (!isAssignable) {
@@ -2274,8 +3119,15 @@ export function assignType(
 
     if (isNoneInstance(srcType) && isClassInstance(destType) && ClassType.isProtocolClass(destType)) {
         if (registry.noneTypeClass && isInstantiableClass(registry.noneTypeClass)) {
-            return assignClassToProtocol(evaluator, ClassType.cloneAsInstantiable(destType),
-                ClassType.cloneAsInstance(registry.noneTypeClass), diag, constraints, flags, recursionCount);
+            return assignClassToProtocol(
+                evaluator,
+                ClassType.cloneAsInstantiable(destType),
+                ClassType.cloneAsInstance(registry.noneTypeClass),
+                diag,
+                constraints,
+                flags,
+                recursionCount
+            );
         }
     }
 
@@ -2337,9 +3189,7 @@ export function convertToTypeFormType(
         }
 
         const destTypeFormType =
-            subtype.priv.typeArgs && subtype.priv.typeArgs.length > 0
-                ? subtype.priv.typeArgs[0]
-                : UnknownType.create();
+            subtype.priv.typeArgs && subtype.priv.typeArgs.length > 0 ? subtype.priv.typeArgs[0] : UnknownType.create();
 
         if (assignType(evaluator, registry, state, destTypeFormType, srcTypeFormType)) {
             resultType = ClassType.specialize(subtype, [srcTypeFormType]);
@@ -2383,10 +3233,7 @@ export function isTypeComparable(
     }
 
     if (isInstantiableClass(leftType) || (isClassInstance(leftType) && ClassType.isBuiltIn(leftType, 'type'))) {
-        if (
-            isInstantiableClass(rightType) ||
-            (isClassInstance(rightType) && ClassType.isBuiltIn(rightType, 'type'))
-        ) {
+        if (isInstantiableClass(rightType) || (isClassInstance(rightType) && ClassType.isBuiltIn(rightType, 'type'))) {
             const genericLeftType = ClassType.specialize(leftType, /* typeArgs */ undefined);
             const genericRightType = ClassType.specialize(rightType, /* typeArgs */ undefined);
 
@@ -2598,7 +3445,15 @@ export function validateOverrideMethod(
     if (isFunction(baseMethod)) {
         // Handle the easy case - a simple function overriding another simple function.
         if (isFunction(overrideMethod)) {
-            return validateOverrideMethodInternal(evaluator, registry, state, baseMethod, overrideMethod, diag, enforceParamNames);
+            return validateOverrideMethodInternal(
+                evaluator,
+                registry,
+                state,
+                baseMethod,
+                overrideMethod,
+                diag,
+                enforceParamNames
+            );
         }
 
         const overloadsAndImpl = [...OverloadedType.getOverloads(overrideMethod)];
@@ -2821,11 +3676,7 @@ function validateOverrideMethodInternal(
                 foundParamCountMismatch = true;
             } else {
                 const overrideArgsType = overrideParamDetails.params[overrideParamDetails.argsIndex].type;
-                for (
-                    let i = overrideParamDetails.positionParamCount;
-                    i < baseParamDetails.positionParamCount;
-                    i++
-                ) {
+                for (let i = overrideParamDetails.positionParamCount; i < baseParamDetails.positionParamCount; i++) {
                     if (
                         !assignType(
                             evaluator,
@@ -3174,7 +4025,10 @@ function validateOverrideMethodInternal(
 
     // Now check the return type.
     const baseReturnType = getEffectiveReturnType(evaluator, baseMethod);
-    const overrideReturnType = evaluator.solveAndApplyConstraints(getEffectiveReturnType(evaluator, overrideMethod), constraints);
+    const overrideReturnType = evaluator.solveAndApplyConstraints(
+        getEffectiveReturnType(evaluator, overrideMethod),
+        constraints
+    );
 
     if (
         !assignType(

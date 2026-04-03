@@ -24,12 +24,7 @@ import { assert, assertNever, fail } from '../common/debug';
 import { DiagnosticAddendum } from '../common/diagnostic';
 import { DiagnosticRule } from '../common/diagnosticRules';
 import { convertOffsetsToRange } from '../common/positionUtils';
-import {
-    PythonVersion,
-    pythonVersion3_6,
-    pythonVersion3_7,
-    pythonVersion3_9,
-} from '../common/pythonVersion';
+import { PythonVersion, pythonVersion3_6, pythonVersion3_7, pythonVersion3_9 } from '../common/pythonVersion';
 import { TextRange } from '../common/textRange';
 import { LocAddendum, LocMessage } from '../localization/localize';
 import {
@@ -2800,11 +2795,7 @@ export function createTypeEvaluator(
         return getAfterNodeReachability(node) === Reachability.Reachable;
     }
 
-    function getNodeReachability(
-        node: ParseNode,
-        sourceNode?: ParseNode,
-        ignoreNoReturn?: boolean
-    ): Reachability {
+    function getNodeReachability(node: ParseNode, sourceNode?: ParseNode, ignoreNoReturn?: boolean): Reachability {
         if (checkCodeFlowTooComplex(node)) {
             return Reachability.Reachable;
         }
@@ -4812,7 +4803,14 @@ export function createTypeEvaluator(
             }
 
             if (!type.priv.typeArgs) {
-                type = specialForms.createSpecializedClassType(evaluatorInterface, type, /* typeArgs */ undefined, flags, node, registry)?.type;
+                type = specialForms.createSpecializedClassType(
+                    evaluatorInterface,
+                    type,
+                    /* typeArgs */ undefined,
+                    flags,
+                    node,
+                    registry
+                )?.type;
             }
         }
 
@@ -6588,7 +6586,11 @@ export function createTypeEvaluator(
 
                 // If the type args consist of a lone TypeVarTuple, don't wrap it in a tuple.
                 if (variadicTypeResults.length === 1 && isTypeVarTuple(variadicTypeResults[0].type)) {
-                    specialForms.validateTypeVarTupleIsUnpacked(evaluatorInterface, variadicTypeResults[0].type, variadicTypeResults[0].node);
+                    specialForms.validateTypeVarTupleIsUnpacked(
+                        evaluatorInterface,
+                        variadicTypeResults[0].type,
+                        variadicTypeResults[0].node
+                    );
                 } else {
                     variadicTypeResults.forEach((arg, index) => {
                         validateTypeArg(arg, {
@@ -6631,7 +6633,6 @@ export function createTypeEvaluator(
 
         return typeArgs;
     }
-
 
     // If the type is a generic type alias that is not specialized, provides
     // default type arguments for the type alias. It optionally logs diagnostics
@@ -6709,7 +6710,12 @@ export function createTypeEvaluator(
         flags: EvalFlags
     ): TypeResult {
         // Handle the case where we're specializing a generic type alias.
-        const typeAliasResult = specialForms.createSpecializedTypeAlias(evaluatorInterface, node, baseTypeResult.type, flags);
+        const typeAliasResult = specialForms.createSpecializedTypeAlias(
+            evaluatorInterface,
+            node,
+            baseTypeResult.type,
+            flags
+        );
         if (typeAliasResult) {
             return typeAliasResult;
         }
@@ -6733,7 +6739,12 @@ export function createTypeEvaluator(
                     convertToInstantiable(baseTypeResult.type.props.typeForm),
                     { ...typeAliasInfo, typeArgs: undefined }
                 );
-                const typeFormType = specialForms.createSpecializedTypeAlias(evaluatorInterface, node, origTypeAlias, flags);
+                const typeFormType = specialForms.createSpecializedTypeAlias(
+                    evaluatorInterface,
+                    node,
+                    origTypeAlias,
+                    flags
+                );
                 if (typeFormType) {
                     return {
                         type: TypeBase.cloneWithTypeForm(baseTypeResult.type, convertToInstance(typeFormType.type)),
@@ -6839,7 +6850,13 @@ export function createTypeEvaluator(
 
                     if (ClassType.isSpecialBuiltIn(concreteSubtype, 'Literal')) {
                         // Special-case Literal types.
-                        return specialForms.createLiteralType(evaluatorInterface, concreteSubtype, node, flags, registry);
+                        return specialForms.createLiteralType(
+                            evaluatorInterface,
+                            concreteSubtype,
+                            node,
+                            flags,
+                            registry
+                        );
                     }
 
                     if (ClassType.isBuiltIn(concreteSubtype, 'InitVar')) {
@@ -6926,7 +6943,14 @@ export function createTypeEvaluator(
                         return concreteSubtype;
                     }
 
-                    const result = specialForms.createSpecializedClassType(evaluatorInterface, concreteSubtype, typeArgs, flags, node, registry);
+                    const result = specialForms.createSpecializedClassType(
+                        evaluatorInterface,
+                        concreteSubtype,
+                        typeArgs,
+                        flags,
+                        node,
+                        registry
+                    );
                     if (result.isRequired) {
                         isRequired = true;
                     } else if (result.isNotRequired) {
@@ -7507,7 +7531,6 @@ export function createTypeEvaluator(
 
         return typeArgs;
     }
-
 
     function getTypeArg(node: ExpressionNode, flags: EvalFlags, supportsDictExpression: boolean): TypeResultWithNode {
         let typeResult: TypeResultWithNode;
@@ -9438,8 +9461,12 @@ export function createTypeEvaluator(
                     // built from the specified base types.
                     return {
                         returnType:
-                            specialForms.createClassFromMetaclass(evaluatorInterface, errorNode, argList, expandedCallType) ||
-                            AnyType.create(),
+                            specialForms.createClassFromMetaclass(
+                                evaluatorInterface,
+                                errorNode,
+                                argList,
+                                expandedCallType
+                            ) || AnyType.create(),
                     };
                 }
 
@@ -9450,19 +9477,34 @@ export function createTypeEvaluator(
 
             if (className === 'TypeVar') {
                 return {
-                    returnType: specialForms.createTypeVarType(evaluatorInterface, errorNode, expandedCallType, argList),
+                    returnType: specialForms.createTypeVarType(
+                        evaluatorInterface,
+                        errorNode,
+                        expandedCallType,
+                        argList
+                    ),
                 };
             }
 
             if (className === 'TypeVarTuple') {
                 return {
-                    returnType: specialForms.createTypeVarTupleType(evaluatorInterface, errorNode, expandedCallType, argList),
+                    returnType: specialForms.createTypeVarTupleType(
+                        evaluatorInterface,
+                        errorNode,
+                        expandedCallType,
+                        argList
+                    ),
                 };
             }
 
             if (className === 'ParamSpec') {
                 return {
-                    returnType: specialForms.createParamSpecType(evaluatorInterface, errorNode, expandedCallType, argList),
+                    returnType: specialForms.createParamSpecType(
+                        evaluatorInterface,
+                        errorNode,
+                        expandedCallType,
+                        argList
+                    ),
                 };
             }
 
@@ -11928,9 +11970,6 @@ export function createTypeEvaluator(
         return { isCompatible, argType, isTypeIncomplete, skippedBareTypeVarExpectedType, condition };
     }
 
-
-
-
     function getTypeOfConstant(node: ConstantNode, flags: EvalFlags): TypeResult {
         let type: Type | undefined;
 
@@ -13677,9 +13716,6 @@ export function createTypeEvaluator(
         return UnknownType.create();
     }
 
-
-
-
     function transformTypeForTypeAlias(
         type: Type,
         errorNode: ExpressionNode,
@@ -13883,7 +13919,11 @@ export function createTypeEvaluator(
             }
 
             let specialType: Type = specialForms.createSpecialBuiltInClass(
-                evaluatorInterface, node, assignedName, aliasMapEntry, registry
+                evaluatorInterface,
+                node,
+                assignedName,
+                aliasMapEntry,
+                registry
             );
 
             // Handle 'LiteralString' specially because we want it to act as
@@ -13952,7 +13992,13 @@ export function createTypeEvaluator(
         if (aliasMapEntry) {
             // Evaluate the expression so symbols are marked as accessed.
             getTypeOfExpression(node.d.rightExpr);
-            return specialForms.createSpecialBuiltInClass(evaluatorInterface, node, assignedName, aliasMapEntry, registry);
+            return specialForms.createSpecialBuiltInClass(
+                evaluatorInterface,
+                node,
+                assignedName,
+                aliasMapEntry,
+                registry
+            );
         }
 
         return undefined;
@@ -15626,7 +15672,9 @@ export function createTypeEvaluator(
         // If it's an async function, wrap the return type in an Awaitable or Generator.
         // Set the "partially evaluated" flag around this logic to detect recursion.
         functionType.shared.flags |= FunctionTypeFlags.PartiallyEvaluated;
-        const preDecoratedType = node.d.isAsync ? specialForms.createAsyncFunction(evaluatorInterface, node, functionType) : functionType;
+        const preDecoratedType = node.d.isAsync
+            ? specialForms.createAsyncFunction(evaluatorInterface, node, functionType)
+            : functionType;
 
         // Apply all of the decorators in reverse order.
         decoratedType = preDecoratedType;
@@ -16344,9 +16392,6 @@ export function createTypeEvaluator(
             }
         }
     }
-
-
-
 
     function inferFunctionReturnType(
         node: FunctionNode,
@@ -17518,8 +17563,6 @@ export function createTypeEvaluator(
         return analyzer.getTypeFromCodeFlow(flowNode!, reference, options);
     }
 
-
-
     function getTypeOfArg(arg: Arg, inferenceContext: InferenceContext | undefined): TypeResult {
         if (arg.typeResult) {
             const type = arg.typeResult.type;
@@ -17697,8 +17740,6 @@ export function createTypeEvaluator(
         return state.isSpeculativeModeInUse(node);
     }
 
-
-
     function getDeclInfoForStringNode(node: StringNode): SymbolDeclInfo | undefined {
         return symbolResolution.getDeclInfoForStringNode(evaluatorInterface, node);
     }
@@ -17802,7 +17843,11 @@ export function createTypeEvaluator(
 
         if (node.d.typeParamKind === TypeParamKind.ParamSpec) {
             const defaultType = node.d.defaultExpr
-                ? specialForms.getParamSpecDefaultType(evaluatorInterface, node.d.defaultExpr, /* isPep695Syntax */ true)
+                ? specialForms.getParamSpecDefaultType(
+                      evaluatorInterface,
+                      node.d.defaultExpr,
+                      /* isPep695Syntax */ true
+                  )
                 : undefined;
 
             if (defaultType) {
@@ -17813,7 +17858,11 @@ export function createTypeEvaluator(
             }
         } else if (node.d.typeParamKind === TypeParamKind.TypeVarTuple) {
             const defaultType = node.d.defaultExpr
-                ? specialForms.getTypeVarTupleDefaultType(evaluatorInterface, node.d.defaultExpr, /* isPep695Syntax */ true)
+                ? specialForms.getTypeVarTupleDefaultType(
+                      evaluatorInterface,
+                      node.d.defaultExpr,
+                      /* isPep695Syntax */ true
+                  )
                 : undefined;
 
             if (defaultType) {
@@ -18992,7 +19041,16 @@ export function createTypeEvaluator(
         ignoreBaseClassVariance = true,
         recursionCount = 0
     ): boolean {
-        return typeAssignment.assignClassToSelf(evaluatorInterface, registry, state, destType, srcType, assumedVariance, ignoreBaseClassVariance, recursionCount);
+        return typeAssignment.assignClassToSelf(
+            evaluatorInterface,
+            registry,
+            state,
+            destType,
+            srcType,
+            assumedVariance,
+            ignoreBaseClassVariance,
+            recursionCount
+        );
     }
 
     function getGetterTypeFromProperty(propertyClass: ClassType): Type | undefined {
@@ -19015,7 +19073,17 @@ export function createTypeEvaluator(
         flags: AssignTypeFlags,
         recursionCount: number
     ): boolean {
-        return typeAssignment.assignTypeArgs(evaluatorInterface, registry, state, destType, srcType, diag, constraints, flags, recursionCount);
+        return typeAssignment.assignTypeArgs(
+            evaluatorInterface,
+            registry,
+            state,
+            destType,
+            srcType,
+            diag,
+            constraints,
+            flags,
+            recursionCount
+        );
     }
 
     function assignType(
@@ -19026,7 +19094,17 @@ export function createTypeEvaluator(
         flags = AssignTypeFlags.Default,
         recursionCount = 0
     ): boolean {
-        return typeAssignment.assignType(evaluatorInterface, registry, state, destType, srcType, diag, constraints, flags, recursionCount);
+        return typeAssignment.assignType(
+            evaluatorInterface,
+            registry,
+            state,
+            destType,
+            srcType,
+            diag,
+            constraints,
+            flags,
+            recursionCount
+        );
     }
 
     function convertToTypeFormType(expectedType: Type, srcType: Type): Type {
@@ -19039,11 +19117,26 @@ export function createTypeEvaluator(
 
     // Determines whether a type is "subsumed by" (i.e. is a proper subtype of) another type.
     function isTypeSubsumedByOtherType(type: Type, otherType: Type, allowAnyToSubsume: boolean, recursionCount = 0) {
-        return typeAssignment.isTypeSubsumedByOtherType(evaluatorInterface, registry, state, type, otherType, allowAnyToSubsume, recursionCount);
+        return typeAssignment.isTypeSubsumedByOtherType(
+            evaluatorInterface,
+            registry,
+            state,
+            type,
+            otherType,
+            allowAnyToSubsume,
+            recursionCount
+        );
     }
 
     function isTypeComparable(leftType: Type, rightType: Type, assumeIsOperator = false) {
-        return typeAssignment.isTypeComparable(evaluatorInterface, registry, state, leftType, rightType, assumeIsOperator);
+        return typeAssignment.isTypeComparable(
+            evaluatorInterface,
+            registry,
+            state,
+            leftType,
+            rightType,
+            assumeIsOperator
+        );
     }
 
     // If the class is a protocol and it has a `__call__` method but no other methods
@@ -19109,7 +19202,13 @@ export function createTypeEvaluator(
     }
 
     function narrowTypeBasedOnAssignment(declaredType: Type, assignedTypeResult: TypeResult): TypeResult {
-        return typeAssignment.narrowTypeBasedOnAssignment(evaluatorInterface, registry, state, declaredType, assignedTypeResult);
+        return typeAssignment.narrowTypeBasedOnAssignment(
+            evaluatorInterface,
+            registry,
+            state,
+            declaredType,
+            assignedTypeResult
+        );
     }
 
     function validateOverrideMethod(
@@ -19119,9 +19218,17 @@ export function createTypeEvaluator(
         diag: DiagnosticAddendum,
         enforceParamNames = true
     ): boolean {
-        return typeAssignment.validateOverrideMethod(evaluatorInterface, registry, state, baseMethod, overrideMethod, baseClass, diag, enforceParamNames);
+        return typeAssignment.validateOverrideMethod(
+            evaluatorInterface,
+            registry,
+            state,
+            baseMethod,
+            overrideMethod,
+            baseClass,
+            diag,
+            enforceParamNames
+        );
     }
-
 
     function getAbstractSymbols(classType: ClassType): AbstractSymbol[] {
         return symbolResolution.getAbstractSymbols(evaluatorInterface, classType);

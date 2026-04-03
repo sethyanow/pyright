@@ -123,6 +123,16 @@ export class TypeEvaluatorState {
         return this._evaluatorOptions;
     }
 
+    get importLookup(): ImportLookup {
+        assert(this._importLookup !== undefined, 'importLookup not yet initialized');
+        return this._importLookup!;
+    }
+
+    get codeFlowEngine(): CodeFlowEngine {
+        assert(this._codeFlowEngine !== undefined, 'codeFlowEngine not yet initialized');
+        return this._codeFlowEngine!;
+    }
+
     setIsNodeReachable(fn: (node: ParseNode) => boolean): void {
         this._isNodeReachable = fn;
     }
@@ -131,18 +141,8 @@ export class TypeEvaluatorState {
         this._importLookup = importLookup;
     }
 
-    get importLookup(): ImportLookup {
-        assert(this._importLookup !== undefined, 'importLookup not yet initialized');
-        return this._importLookup!;
-    }
-
     setCodeFlowEngine(engine: CodeFlowEngine): void {
         this._codeFlowEngine = engine;
-    }
-
-    get codeFlowEngine(): CodeFlowEngine {
-        assert(this._codeFlowEngine !== undefined, 'codeFlowEngine not yet initialized');
-        return this._codeFlowEngine!;
     }
 
     // --- Cache management (7 methods) ---
