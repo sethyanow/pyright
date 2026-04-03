@@ -1914,6 +1914,31 @@ export function createTypeEvaluator(
         selfType?: ClassType | TypeVarType,
         recursionCount = 0
     ): TypeResult | undefined {
+        return memberAccessModule.getTypeOfBoundMember(
+            evaluatorInterface,
+            state,
+            registry,
+            errorNode,
+            objectType,
+            memberName,
+            usage,
+            diag,
+            flags,
+            selfType,
+            recursionCount
+        );
+    }
+
+    function _getTypeOfBoundMember_dead(
+        errorNode: ExpressionNode | undefined,
+        objectType: ClassType,
+        memberName: string,
+        usage: EvaluatorUsage = { method: 'get' },
+        diag: DiagnosticAddendum | undefined = undefined,
+        flags = MemberAccessFlags.Default,
+        selfType?: ClassType | TypeVarType,
+        recursionCount = 0
+    ): TypeResult | undefined {
         if (ClassType.isPartiallyEvaluated(objectType)) {
             if (errorNode) {
                 addDiagnostic(
@@ -4239,18 +4264,7 @@ export function createTypeEvaluator(
 
     // Reports diagnostics if type isn't valid within a type expression.
     function validateSymbolIsTypeExpression(node: ExpressionNode, type: Type, includesVarDecl: boolean): Type {
-        if (memberAccessModule.isSymbolValidTypeExpression(type, includesVarDecl)) {
-            return type;
-        }
-
-        // Disable for assignments in the typings.pyi file, since it defines special forms.
-        const fileInfo = AnalyzerNodeInfo.getFileInfo(node);
-        if (fileInfo.isTypingStubFile) {
-            return type;
-        }
-
-        addDiagnostic(DiagnosticRule.reportInvalidTypeForm, LocMessage.typeAnnotationVariable(), node);
-        return UnknownType.create();
+        return memberAccessModule.validateSymbolIsTypeExpression(evaluatorInterface, node, type, includesVarDecl);
     }
 
     // If the value is a special form (like a TypeVar or `Any`) and is being
@@ -5396,6 +5410,31 @@ export function createTypeEvaluator(
         diag: DiagnosticAddendum | undefined,
         flags: MemberAccessFlags,
         selfType?: ClassType | TypeVarType,
+        recursionCount?: number
+    ): ClassMemberLookup | undefined {
+        return memberAccessModule.getTypeOfClassMemberName(
+            evaluatorInterface,
+            state,
+            registry,
+            errorNode,
+            classType,
+            memberName,
+            usage,
+            diag,
+            flags,
+            selfType,
+            recursionCount
+        );
+    }
+
+    function _getTypeOfClassMemberName_dead(
+        errorNode: ExpressionNode | undefined,
+        classType: ClassType,
+        memberName: string,
+        usage: EvaluatorUsage,
+        diag: DiagnosticAddendum | undefined,
+        flags: MemberAccessFlags,
+        selfType?: ClassType | TypeVarType,
         recursionCount = 0
     ): ClassMemberLookup | undefined {
         const isAccessedThroughObject = TypeBase.isInstance(classType);
@@ -5736,6 +5775,35 @@ export function createTypeEvaluator(
         usage: EvaluatorUsage,
         diag: DiagnosticAddendum | undefined
     ): MemberAccessTypeResult {
+        return memberAccessModule.applyDescriptorAccessMethod(
+            evaluatorInterface,
+            state,
+            registry,
+            memberType,
+            concreteMemberType,
+            memberInfo,
+            classType,
+            selfType,
+            flags,
+            errorNode,
+            memberName,
+            usage,
+            diag
+        );
+    }
+
+    function _applyDescriptorAccessMethod_dead(
+        memberType: Type,
+        concreteMemberType: ClassType,
+        memberInfo: ClassMember | undefined,
+        classType: ClassType,
+        selfType: ClassType | TypeVarType | undefined,
+        flags: MemberAccessFlags,
+        errorNode: ExpressionNode,
+        memberName: string,
+        usage: EvaluatorUsage,
+        diag: DiagnosticAddendum | undefined
+    ): MemberAccessTypeResult {
         const isAccessedThroughObject = TypeBase.isInstance(classType);
 
         let accessMethodName: string;
@@ -5986,41 +6054,19 @@ export function createTypeEvaluator(
         diag: DiagnosticAddendum | undefined,
         recursionCount = 0
     ): TypeResult {
-        // Check for an attempt to overwrite a final method.
-        if (usage.method === 'set') {
-            const impl = isFunction(concreteType) ? concreteType : OverloadedType.getImplementation(concreteType);
-
-            if (impl && isFunction(impl) && FunctionType.isFinal(impl) && memberInfo && isClass(memberInfo.classType)) {
-                diag?.addMessage(
-                    LocMessage.finalMethodOverride().format({
-                        name: memberName,
-                        className: memberInfo.classType.shared.name,
-                    })
-                );
-
-                return { type: UnknownType.create(), typeErrors: true };
-            }
-        }
-
-        // If this function is an instance member (e.g. a lambda that was
-        // assigned to an instance variable), don't perform any binding.
-        if (TypeBase.isInstance(classType)) {
-            if (!memberInfo || memberInfo.isInstanceMember) {
-                return { type: type };
-            }
-        }
-
-        const boundType = bindFunctionToClassOrObject(
-            classType,
+        return memberAccessModule.bindMethodForMemberAccess(
+            evaluatorInterface,
+            type,
             concreteType,
-            memberInfo && isInstantiableClass(memberInfo.classType) ? memberInfo.classType : undefined,
-            (flags & MemberAccessFlags.TreatConstructorAsClassMethod) !== 0,
-            selfType && isClass(selfType) ? ClassType.cloneIncludeSubclasses(selfType) : selfType,
+            memberInfo,
+            classType,
+            selfType,
+            flags,
+            memberName,
+            usage,
             diag,
             recursionCount
         );
-
-        return { type: boundType ?? UnknownType.create(), typeErrors: !boundType };
     }
 
     function isAsymmetricDescriptorClass(classType: ClassType): boolean {
@@ -6031,8 +6077,6 @@ export function createTypeEvaluator(
         return memberAccessModule.isClassWithAsymmetricAttributeAccessor(evaluatorInterface, classType);
     }
 
-    // Applies the __getattr__, __setattr__ or __delattr__ method if present.
-    // If it's not applicable, returns undefined.
     function applyAttributeAccessOverride(
         errorNode: ExpressionNode,
         classType: ClassType,
@@ -6040,87 +6084,16 @@ export function createTypeEvaluator(
         memberName: string,
         selfType?: ClassType | TypeVarType
     ): MemberAccessTypeResult | undefined {
-        const getAttributeAccessMember = (name: string) => {
-            return getTypeOfBoundMember(
-                errorNode,
-                classType,
-                name,
-                /* usage */ undefined,
-                /* diag */ undefined,
-                MemberAccessFlags.SkipInstanceMembers |
-                    MemberAccessFlags.SkipObjectBaseClass |
-                    MemberAccessFlags.SkipTypeBaseClass |
-                    MemberAccessFlags.SkipAttributeAccessOverride,
-                selfType
-            )?.type;
-        };
-
-        let accessMemberType: Type | undefined;
-        if (usage.method === 'get') {
-            accessMemberType = getAttributeAccessMember('__getattribute__') ?? getAttributeAccessMember('__getattr__');
-        } else if (usage.method === 'set') {
-            accessMemberType = getAttributeAccessMember('__setattr__');
-        } else {
-            assert(usage.method === 'del');
-            accessMemberType = getAttributeAccessMember('__delattr__');
-        }
-
-        if (!accessMemberType) {
-            return undefined;
-        }
-
-        const argList: Arg[] = [];
-
-        // Provide "name" argument.
-        argList.push({
-            argCategory: ArgCategory.Simple,
-            typeResult: {
-                type:
-                    registry.strClass && isInstantiableClass(registry.strClass)
-                        ? ClassType.cloneWithLiteral(ClassType.cloneAsInstance(registry.strClass), memberName)
-                        : AnyType.create(),
-            },
-        });
-
-        if (usage.method === 'set') {
-            // Provide "value" argument.
-            argList.push({
-                argCategory: ArgCategory.Simple,
-                typeResult: {
-                    type: usage.setType?.type ?? UnknownType.create(),
-                    isIncomplete: !!usage.setType?.isIncomplete,
-                },
-            });
-        }
-
-        if (!isFunctionOrOverloaded(accessMemberType)) {
-            if (isAnyOrUnknown(accessMemberType)) {
-                return { type: accessMemberType };
-            }
-
-            // TODO - emit an error for this condition.
-            return undefined;
-        }
-
-        const callResult = validateCallArgs(
+        return memberAccessModule.applyAttributeAccessOverride(
+            evaluatorInterface,
+            state,
+            registry,
             errorNode,
-            argList,
-            { type: accessMemberType },
-            /* constraints */ undefined,
-            /* skipUnknownArgCheck */ true,
-            /* inferenceContext */ undefined
+            classType,
+            usage,
+            memberName,
+            selfType
         );
-
-        let isAsymmetricAccessor = false;
-        if (usage.method === 'set') {
-            isAsymmetricAccessor = isClassWithAsymmetricAttributeAccessor(classType);
-        }
-
-        return {
-            type: callResult.returnType ?? UnknownType.create(),
-            typeErrors: callResult.argumentErrors,
-            isAsymmetricAccessor,
-        };
     }
 
     function getTypeOfIndex(node: IndexNode, flags = EvalFlags.None): TypeResult {
@@ -17549,6 +17522,15 @@ export function createTypeEvaluator(
     }
 
     function getTypeOfMemberInternal(
+        errorNode: ExpressionNode | undefined,
+        member: ClassMember,
+        selfClass: ClassType | TypeVarType | undefined,
+        flags: MemberAccessFlags
+    ): TypeResult | undefined {
+        return memberAccessModule.getTypeOfMemberInternal(evaluatorInterface, errorNode, member, selfClass, flags);
+    }
+
+    function _getTypeOfMemberInternal_dead(
         errorNode: ExpressionNode | undefined,
         member: ClassMember,
         selfClass: ClassType | TypeVarType | undefined,
