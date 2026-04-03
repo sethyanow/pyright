@@ -7,17 +7,22 @@
  * extracted from typeEvaluator.ts.
  */
 
-import { ArgCategory, ArgumentNode, ExpressionNode, ParseNode, ParseNodeType } from '../parser/parseNodes';
+import { ArgCategory, ArgumentNode, ExpressionNode, ParamCategory, ParseNode, ParseNodeType } from '../parser/parseNodes';
 import * as ParseTreeUtils from './parseTreeUtils';
 import { assert } from '../common/debug';
 import { DiagnosticRule } from '../common/diagnosticRules';
-import { LocMessage } from '../localization/localize';
+import { DiagnosticAddendum } from '../common/diagnostic';
+import { LocAddendum, LocMessage } from '../localization/localize';
+import * as AnalyzerNodeInfo from './analyzerNodeInfo';
 import { ConstraintTracker } from './constraintTracker';
 import * as specialForms from './specialForms';
+import { TypeEvaluatorState } from './typeEvaluatorState';
 import {
     Arg,
     ArgResult,
     ArgWithExpression,
+    AssignTypeFlags,
+    EvalFlags,
     EvaluatorUsage,
     ExpectedTypeOptions,
     TypeEvaluator,
@@ -29,16 +34,21 @@ import {
 import {
     FunctionParam,
     FunctionType,
+    isAny,
     isAnyOrUnknown,
     isClassInstance,
     isFunction,
     isModule,
     isParamSpec,
+    isTypeVar,
     isTypeVarTuple,
+    isUnknown,
     isUnpackedClass,
     ParamSpecType,
+    removeUnbound,
     TupleTypeArg,
     Type,
+    TypeCondition,
     TypeVarScopeId,
     TypeVarScopeType,
     TypeVarType,
@@ -57,7 +67,10 @@ import {
     getTypeVarArgsRecursive,
     InferenceContext,
     isEllipsisType,
+    isPartlyUnknown,
     isTupleClass,
+    makeInferenceContext,
+    requiresSpecialization,
 } from './typeUtils';
 import { appendArray } from '../common/collectionUtils';
 
@@ -657,4 +670,281 @@ export function expandArgList(evaluator: TypeEvaluator, registry: TypeRegistry, 
     }
 
     return expandedArgList;
+}
+
+// Redefined locally to avoid circular import from typeEvaluator.ts
+export interface ValidateArgTypeOptions {
+    skipUnknownArgCheck?: boolean;
+    isArgFirstPass?: boolean;
+    conditionFilter?: TypeCondition[];
+    skipReportError?: boolean;
+}
+
+export function validateArgType(
+    evaluator: TypeEvaluator,
+    state: TypeEvaluatorState,
+    argParam: ValidateArgTypeParams,
+    constraints: ConstraintTracker,
+    typeResult: TypeResult<FunctionType> | undefined,
+    options: ValidateArgTypeOptions
+): ArgResult {
+    let argType: Type | undefined;
+    let expectedTypeDiag: DiagnosticAddendum | undefined;
+    let isTypeIncomplete = !!typeResult?.isIncomplete;
+    let isCompatible = true;
+    const functionName = typeResult?.type.shared.name;
+    let skippedBareTypeVarExpectedType = false;
+
+    if (argParam.argument.valueExpression) {
+        let expectedType: Type | undefined;
+
+        let isExpectedTypeBareTypeVar = true;
+        doForEachSubtype(argParam.paramType, (subtype) => {
+            if (!isTypeVar(subtype) || subtype.priv.scopeId !== typeResult?.type.shared.typeVarScopeId) {
+                isExpectedTypeBareTypeVar = false;
+            }
+        });
+
+        if (!options.isArgFirstPass || !isExpectedTypeBareTypeVar) {
+            expectedType = argParam.paramType;
+
+            const skipApplySolvedTypeVars =
+                isFunction(argParam.paramType) &&
+                FunctionType.getParamSpecFromArgsKwargs(argParam.paramType) &&
+                constraints.getConstraintSets().length > 1;
+
+            if (!skipApplySolvedTypeVars) {
+                expectedType = evaluator.solveAndApplyConstraints(expectedType, constraints, /* applyOptions */ undefined, {
+                    useLowerBoundOnly: !!options.isArgFirstPass,
+                });
+            }
+        } else {
+            skippedBareTypeVarExpectedType = true;
+        }
+
+        if (expectedType && isUnknown(expectedType)) {
+            expectedType = undefined;
+        }
+
+        if (argParam.argType) {
+            argType = argParam.argType;
+        } else {
+            const flags = argParam.isinstanceParam
+                ? EvalFlags.IsInstanceArgDefaults
+                : EvalFlags.NoFinal | EvalFlags.NoSpecialize;
+            const exprTypeResult = evaluator.getTypeOfExpression(
+                argParam.argument.valueExpression,
+                flags,
+                makeInferenceContext(expectedType, !!typeResult?.isIncomplete)
+            );
+
+            argType = exprTypeResult.type;
+
+            if (argParam.argument.argCategory === ArgCategory.UnpackedList && argParam.argument.enforceIterable) {
+                const iteratorType = evaluator.getTypeOfIterator(
+                    exprTypeResult,
+                    /* isAsync */ false,
+                    argParam.argument.valueExpression
+                );
+                argType = iteratorType?.type ?? UnknownType.create();
+            }
+
+            if (exprTypeResult.isIncomplete) {
+                isTypeIncomplete = true;
+            }
+
+            if (expectedType && requiresSpecialization(expectedType)) {
+                const clonedConstraints = constraints.clone();
+                if (
+                    evaluator.assignType(
+                        expectedType,
+                        argType,
+                        /* diag */ undefined,
+                        clonedConstraints,
+                        options?.isArgFirstPass ? AssignTypeFlags.ArgAssignmentFirstPass : AssignTypeFlags.Default
+                    )
+                ) {
+                    constraints.copyFromClone(clonedConstraints);
+                } else {
+                    isCompatible = false;
+                }
+            }
+
+            expectedTypeDiag = exprTypeResult.expectedTypeDiagAddendum;
+        }
+
+        if (argParam.argument && argParam.argument.name && !state.isSpeculativeModeInUse(argParam.errorNode)) {
+            state.writeTypeCache(
+                argParam.argument.name,
+                { type: expectedType ?? argType, isIncomplete: isTypeIncomplete },
+                EvalFlags.None
+            );
+        }
+    } else {
+        if (argParam.argType) {
+            argType = argParam.argType;
+        } else {
+            const argTypeResult = getTypeOfArg(
+                evaluator,
+                argParam.argument,
+                makeInferenceContext(argParam.paramType, isTypeIncomplete)
+            );
+            argType = argTypeResult.type;
+            if (argTypeResult.isIncomplete) {
+                isTypeIncomplete = true;
+            }
+        }
+
+        if (argParam.isDefaultArg) {
+            argType = evaluator.solveAndApplyConstraints(argType, constraints);
+        }
+    }
+
+    if (argParam.paramCategory === ParamCategory.KwargsDict && isTypeVar(argParam.paramType)) {
+        argType = evaluator.stripLiteralValue(argType);
+    }
+
+    if (options.conditionFilter) {
+        argType = evaluator.mapSubtypesExpandTypeVars(
+            argType,
+            { conditionFilter: options.conditionFilter },
+            (expandedSubtype) => {
+                return expandedSubtype;
+            }
+        );
+    }
+
+    const condition = argType.props?.condition;
+
+    let diag = options?.skipReportError ? undefined : new DiagnosticAddendum();
+
+    if (isParamSpec(argParam.paramType)) {
+        if (argParam.paramType.priv.paramSpecAccess !== undefined) {
+            return { isCompatible, argType, isTypeIncomplete, condition };
+        }
+
+        if (isParamSpec(argType) && argType.priv.paramSpecAccess !== undefined) {
+            return { isCompatible, argType, isTypeIncomplete, condition };
+        }
+    }
+
+    let assignTypeFlags = AssignTypeFlags.Default;
+
+    if (argParam.isinstanceParam) {
+        assignTypeFlags |= AssignTypeFlags.AllowIsinstanceSpecialForms;
+    }
+
+    if (options?.isArgFirstPass) {
+        assignTypeFlags |= AssignTypeFlags.ArgAssignmentFirstPass;
+    }
+
+    if (!evaluator.assignType(argParam.paramType, argType, diag?.createAddendum(), constraints, assignTypeFlags)) {
+        if (!options?.skipReportError) {
+            const fileInfo = AnalyzerNodeInfo.getFileInfo(argParam.errorNode);
+            if (
+                fileInfo.diagnosticRuleSet.reportArgumentType !== 'none' &&
+                !state.canSkipDiagnosticForNode(argParam.errorNode) &&
+                !isTypeIncomplete
+            ) {
+                const argTypeText = evaluator.printType(argType);
+                const paramTypeText = evaluator.printType(argParam.paramType);
+
+                let message: string;
+                if (argParam.paramName && !argParam.isParamNameSynthesized) {
+                    if (functionName) {
+                        message = LocMessage.argAssignmentParamFunction().format({
+                            argType: argTypeText,
+                            paramType: paramTypeText,
+                            functionName,
+                            paramName: argParam.paramName,
+                        });
+                    } else {
+                        message = LocMessage.argAssignmentParam().format({
+                            argType: argTypeText,
+                            paramType: paramTypeText,
+                            paramName: argParam.paramName,
+                        });
+                    }
+                } else {
+                    if (functionName) {
+                        message = LocMessage.argAssignmentFunction().format({
+                            argType: argTypeText,
+                            paramType: paramTypeText,
+                            functionName,
+                        });
+                    } else {
+                        message = LocMessage.argAssignment().format({
+                            argType: argTypeText,
+                            paramType: paramTypeText,
+                        });
+                    }
+                }
+
+                if (expectedTypeDiag) {
+                    diag = expectedTypeDiag;
+                }
+
+                evaluator.addDiagnostic(
+                    DiagnosticRule.reportArgumentType,
+                    message + diag?.getString(),
+                    argParam.errorNode,
+                    diag?.getEffectiveTextRange() ?? argParam.errorNode
+                );
+            }
+        }
+
+        return { isCompatible: false, argType, isTypeIncomplete, skippedBareTypeVarExpectedType, condition };
+    }
+
+    if (!options.skipUnknownArgCheck) {
+        const simplifiedType = evaluator.makeTopLevelTypeVarsConcrete(removeUnbound(argType));
+        const fileInfo = AnalyzerNodeInfo.getFileInfo(argParam.errorNode);
+
+        function getDiagAddendum() {
+            const diagAddendum = new DiagnosticAddendum();
+            if (argParam.paramName) {
+                diagAddendum.addMessage(
+                    (functionName
+                        ? LocAddendum.argParamFunction().format({
+                              paramName: argParam.paramName,
+                              functionName,
+                          })
+                        : LocAddendum.argParam().format({ paramName: argParam.paramName })) +
+                        diagAddendum.getString()
+                );
+            }
+            return diagAddendum;
+        }
+
+        if (
+            fileInfo.diagnosticRuleSet.reportUnknownArgumentType !== 'none' &&
+            !isAny(argParam.paramType) &&
+            !isTypeIncomplete
+        ) {
+            if (isUnknown(simplifiedType)) {
+                const diagAddendum = getDiagAddendum();
+                evaluator.addDiagnostic(
+                    DiagnosticRule.reportUnknownArgumentType,
+                    LocMessage.argTypeUnknown() + diagAddendum.getString(),
+                    argParam.errorNode
+                );
+            } else if (isPartlyUnknown(simplifiedType)) {
+                if (!isPartlyUnknown(argParam.paramType)) {
+                    const diagAddendum = getDiagAddendum();
+                    diagAddendum.addMessage(
+                        LocAddendum.argumentType().format({
+                            type: evaluator.printType(simplifiedType, { expandTypeAlias: true }),
+                        })
+                    );
+                    evaluator.addDiagnostic(
+                        DiagnosticRule.reportUnknownArgumentType,
+                        LocMessage.argTypePartiallyUnknown() + diagAddendum.getString(),
+                        argParam.errorNode
+                    );
+                }
+            }
+        }
+    }
+
+    return { isCompatible, argType, isTypeIncomplete, skippedBareTypeVarExpectedType, condition };
 }
