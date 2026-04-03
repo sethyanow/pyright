@@ -271,7 +271,6 @@ import {
     InferenceContext,
     invertVariance,
     isEffectivelyInstantiable,
-    isIncompleteUnknown,
     isInstantiableMetaclass,
     isLiteralType,
     isMaybeDescriptorInstance,
@@ -307,30 +306,6 @@ import {
     transformPossibleRecursiveTypeAlias,
 } from './typeUtils';
 
-interface MatchArgsToParamsResult {
-    overload: FunctionType;
-    overloadIndex: number;
-
-    argumentErrors: boolean;
-    isTypeIncomplete: boolean;
-    argParams: ValidateArgTypeParams[];
-    activeParam?: FunctionParam | undefined;
-    paramSpecTarget?: ParamSpecType | undefined;
-    paramSpecArgList?: Arg[] | undefined;
-
-    // Was there an unpacked argument of unknown length?
-    unpackedArgOfUnknownLength?: boolean;
-
-    // Did that unpacked argument map to a variadic parameter?
-    unpackedArgMapsToVariadic?: boolean;
-
-    // A score that indicates how well the overload matches with
-    // supplied arguments. Used to pick the "best" for purposes
-    // of error reporting when no matches are found. The higher
-    // the score, the worse the match.
-    argumentMatchScore: number;
-}
-
 export interface MemberAccessTypeResult {
     type: Type;
     isDescriptorApplied?: boolean;
@@ -352,14 +327,6 @@ interface AliasMapEntry {
     isSpecialForm?: boolean;
     isIllegalInIsinstance?: boolean;
     typeParamVariance?: Variance;
-}
-
-interface MatchedOverloadInfo {
-    overload: FunctionType;
-    matchResults: MatchArgsToParamsResult;
-    constraints: ConstraintTracker;
-    argResults: ArgResult[];
-    returnType: Type;
 }
 
 interface ValidateArgTypeOptions {
@@ -6689,18 +6656,6 @@ export function createTypeEvaluator(
     // types in the expandedArgTypes list. If an argument type is undefined,
 
     // Determines whether one or more overloads can be eliminated because they
-    // rely on an unpacked argument of unknown length when there is at least
-    // one overload that doesn't because it maps to an *args parameter.
-    function filterOverloadMatchesForUnpackedArgs(matches: MatchedOverloadInfo[]): MatchedOverloadInfo[] {
-        return callValidation.filterOverloadMatchesForUnpackedArgs(matches);
-    }
-
-    // Determines whether multiple incompatible overloads match
-    // due to an Any or Unknown argument type.
-    function filterOverloadMatchesForAnyArgs(matches: MatchedOverloadInfo[]): MatchedOverloadInfo[] {
-        return callValidation.filterOverloadMatchesForAnyArgs(matches);
-    }
-
     function getBestOverloadForArgs(
         errorNode: ExpressionNode,
         typeResult: TypeResult<OverloadedType>,
@@ -7526,20 +7481,6 @@ export function createTypeEvaluator(
         }
 
         return convertToInstance(castToType);
-    }
-
-
-    // After having matched arguments with parameters, this function evaluates the
-    // types of each argument expression and validates that the resulting type is
-    // compatible with the declared type of the corresponding parameter.
-    function validateArgTypesWithContext(
-        errorNode: ExpressionNode,
-        matchResults: MatchArgsToParamsResult,
-        constraints: ConstraintTracker,
-        skipUnknownArgCheck = false,
-        inferenceContext: InferenceContext | undefined
-    ): CallResult {
-        return callValidation.validateArgTypesWithContext(evaluatorInterface, state, registry, errorNode, matchResults, constraints, skipUnknownArgCheck, inferenceContext);
     }
 
     function validateArgs(
