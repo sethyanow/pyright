@@ -129,7 +129,6 @@ import {
     addOverloadsToFunctionType,
     applyClassDecorator,
     applyFunctionDecorator,
-    FunctionDecoratorInfo,
     getDeprecatedMessageFromCall,
     getFunctionInfoFromDecorators,
 } from './decorators';
@@ -168,7 +167,7 @@ import { createSentinelType } from './sentinel';
 import { evaluateStaticBoolExpression } from './staticExpressions';
 import { indeterminateSymbolId, Symbol, SymbolFlags } from './symbol';
 import { isConstantName, isPrivateName, isPrivateOrProtectedName } from './symbolNameUtils';
-import { getLastTypedDeclarationForSymbol, isEffectivelyClassVar } from './symbolUtils';
+import { isEffectivelyClassVar } from './symbolUtils';
 import { expandTuple, getSlicedTupleType, getTypeOfTuple, makeTupleObject } from './tuples';
 import { SpeculativeModeOptions } from './typeCacheUtils';
 import {

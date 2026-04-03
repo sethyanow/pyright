@@ -6,40 +6,45 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ```bash
 # Install all packages (from repo root)
-bun install
+npm install
 
 # Build the core library
-cd packages/pyright-internal && bun run build
+cd packages/pyright-internal && npm run build
+
+# Type-check all packages (runs per-package tsc with correct tsconfigs)
+npm run typecheck
 
 # Run all tests (builds test server first)
-cd packages/pyright-internal && bun run test
+cd packages/pyright-internal && npm run test
 
 # Run all tests without rebuilding the test server (faster iteration)
-cd packages/pyright-internal && bun run test:norebuild
+cd packages/pyright-internal && npm run test:norebuild
 
 # Run a single test file
-cd packages/pyright-internal && bunx jest typeEvaluator1.test --forceExit
+cd packages/pyright-internal && npx jest typeEvaluator1.test --forceExit
 
 # Run a single test by name
-cd packages/pyright-internal && bunx jest -t "Generic1" --forceExit
+cd packages/pyright-internal && npx jest -t "Generic1" --forceExit
 
 # Build the CLI (webpack bundle)
-bun run build:cli:dev
+npm run build:cli:dev
 
 # Build the VS Code extension (webpack bundle)
-bun run build:extension:dev
+npm run build:extension:dev
 ```
 
 Jest requires `--forceExit` due to the test server. Tests need `--max-old-space-size=8192 --expose-gc` for large analysis runs (already configured in package.json scripts). Tests run from `packages/pyright-internal/`.
 
+Use `npm run typecheck` for type-checking, not raw `npx tsc --noEmit` from root — the root tsconfig doesn't include per-package type roots and will report false errors in test files and cross-package imports.
+
 ### Linting
 
 ```bash
-bun run check              # syncpack + eslint + prettier
-bun run check:eslint
-bun run check:prettier
-bun run fix:eslint
-bun run fix:prettier
+npm run check              # syncpack + eslint + prettier
+npm run check:eslint
+npm run check:prettier
+npm run fix:eslint
+npm run fix:prettier
 ```
 
 ## Architecture
