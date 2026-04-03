@@ -5885,14 +5885,7 @@ export function createTypeEvaluator(
     }
 
     function getIndexAccessMagicMethodName(usage: EvaluatorUsage): string {
-        if (usage.method === 'get') {
-            return '__getitem__';
-        } else if (usage.method === 'set') {
-            return '__setitem__';
-        } else {
-            assert(usage.method === 'del');
-            return '__delitem__';
-        }
+        return callValidation.getIndexAccessMagicMethodName(usage);
     }
 
     function getTypeOfIndexedObjectOrClass(
@@ -7110,22 +7103,7 @@ export function createTypeEvaluator(
     // __init_subclass__ validation). Here we need to find some other parent
     // node of the error node that encompasses all of the arguments.
     function getSpeculativeNodeForCall(errorNode: ExpressionNode): ParseNode {
-        // If the error node is within an arg, expand to include the parent of the arg list.
-        const argParent = ParseTreeUtils.getParentNodeOfType(errorNode, ParseNodeType.Argument);
-        if (argParent?.parent) {
-            return argParent.parent;
-        }
-
-        // If the error node is the name in a class declaration, expand to include the class node.
-        if (
-            errorNode.nodeType === ParseNodeType.Name &&
-            errorNode.parent?.nodeType === ParseNodeType.Class &&
-            errorNode.parent.d.name === errorNode
-        ) {
-            return errorNode.parent;
-        }
-
-        return errorNode;
+        return callValidation.getSpeculativeNodeForCall(errorNode);
     }
 
     // Attempts to find an overloaded function for each set of argument
@@ -7338,67 +7316,13 @@ export function createTypeEvaluator(
     // rely on an unpacked argument of unknown length when there is at least
     // one overload that doesn't because it maps to an *args parameter.
     function filterOverloadMatchesForUnpackedArgs(matches: MatchedOverloadInfo[]): MatchedOverloadInfo[] {
-        if (matches.length < 2) {
-            return matches;
-        }
-
-        // Is there at least one overload that relies on unpacked args for a match?
-        const unpackedArgsOverloads = matches.filter((match) => match.matchResults.unpackedArgMapsToVariadic);
-        if (unpackedArgsOverloads.length === matches.length || unpackedArgsOverloads.length === 0) {
-            return matches;
-        }
-
-        return unpackedArgsOverloads;
+        return callValidation.filterOverloadMatchesForUnpackedArgs(matches);
     }
 
     // Determines whether multiple incompatible overloads match
     // due to an Any or Unknown argument type.
     function filterOverloadMatchesForAnyArgs(matches: MatchedOverloadInfo[]): MatchedOverloadInfo[] {
-        if (matches.length < 2) {
-            return matches;
-        }
-
-        // If all of the return types match, select the first one.
-        if (
-            areTypesSame(
-                matches.map((match) => match.returnType),
-                { treatAnySameAsUnknown: true }
-            )
-        ) {
-            return [matches[0]];
-        }
-
-        const firstArgResults = matches[0].argResults;
-        if (!firstArgResults) {
-            return matches;
-        }
-
-        let foundAmbiguousAnyArg = false;
-        for (let i = 0; i < firstArgResults.length; i++) {
-            // If the arg is Any or Unknown, see if the corresponding
-            // parameter types differ in any way.
-            if (isAnyOrUnknown(firstArgResults[i].argType)) {
-                const paramTypes = matches.map((match) =>
-                    i < match.matchResults.argParams.length
-                        ? match.matchResults.argParams[i].paramType
-                        : UnknownType.create()
-                );
-                if (!areTypesSame(paramTypes, { treatAnySameAsUnknown: true })) {
-                    foundAmbiguousAnyArg = true;
-                }
-            }
-        }
-
-        // If the first overload has a different number of effective arguments
-        // than latter overloads, don't filter any of them. This typically means
-        // that one of the arguments is an unpacked iterator, and it maps to
-        // an indeterminate number of parameters, which means that the overload
-        // selection is ambiguous.
-        if (foundAmbiguousAnyArg || matches.some((match) => match.argResults.length !== firstArgResults.length)) {
-            return matches;
-        }
-
-        return [matches[0]];
+        return callValidation.filterOverloadMatchesForAnyArgs(matches);
     }
 
     function getBestOverloadForArgs(
