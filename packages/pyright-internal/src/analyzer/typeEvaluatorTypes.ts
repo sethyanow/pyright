@@ -29,6 +29,7 @@ import {
     ParameterNode,
     ParseNode,
     StringNode,
+    TypeAliasNode,
     TypeParameterNode,
 } from '../parser/parseNodes';
 import { AnalyzerFileInfo } from './analyzerFileInfo';
@@ -885,6 +886,14 @@ export interface TypeEvaluator {
     isFinalVariable: (symbol: Symbol) => boolean;
     isFinalVariableDeclaration: (decl: Declaration) => boolean;
     isExplicitTypeAliasDeclaration: (decl: Declaration) => boolean;
+
+    getTypeOfTypeAlias: (node: TypeAliasNode) => Type;
+    getTypeOfParamAnnotation: (paramTypeNode: ExpressionNode, paramCategory: ParamCategory) => Type;
+    transformVariadicParamType: (node: ParseNode, paramCategory: ParamCategory, type: Type) => Type;
+    adjustParamAnnotatedType: (param: ParameterNode, type: Type) => Type;
+    getTypeOfTypeParam: (node: TypeParameterNode) => TypeVarType;
+    isClassVarAllowedForAssignmentTarget: (targetNode: ExpressionNode) => boolean;
+    isFinalAllowedForAssignmentTarget: (targetNode: ExpressionNode) => boolean;
 
     addInformation: (message: string, node: ParseNode, range?: TextRange) => Diagnostic | undefined;
     addUnreachableCode: (node: ParseNode, reachability: Reachability, textRange: TextRange) => void;

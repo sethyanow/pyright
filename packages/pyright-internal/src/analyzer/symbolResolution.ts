@@ -13,14 +13,19 @@ import { DiagnosticAddendum } from '../common/diagnostic';
 import { DiagnosticRule } from '../common/diagnosticRules';
 import { LocAddendum, LocMessage } from '../localization/localize';
 import {
+    ClassNode,
+    ExpressionNode,
     FunctionNode,
     ImportAsNode,
     ImportFromAsNode,
     ImportFromNode,
     NameNode,
+    ParameterNode,
     ParseNode,
     ParseNodeType,
     StringNode,
+    TypeAliasNode,
+    TypeParameterNode,
 } from '../parser/parseNodes';
 import { isAnnotationEvaluationPostponed } from './analyzerFileInfo';
 import * as AnalyzerNodeInfo from './analyzerNodeInfo';
@@ -43,7 +48,9 @@ import {
     TypeEvaluator,
 } from './typeEvaluatorTypes';
 import {
+    AnyType,
     ClassType,
+    combineTypes,
     FunctionType,
     FunctionTypeFlags,
     isClassInstance,
@@ -52,19 +59,22 @@ import {
     isModule,
     isOverloaded,
     ModuleType,
-    AnyType,
     OverloadedType,
     Type,
     UnboundType,
     UnknownType,
 } from './types';
 import {
+    convertToInstance,
     derivesFromStdlibClass,
     doForEachSubtype,
     getDeclaredGeneratorReturnType,
     lookUpClassMember,
     lookUpObjectMember,
+    makeTypeVarsBound,
+    makeTypeVarsFree,
     MemberAccessFlags,
+    specializeWithUnknownTypeArgs,
 } from './typeUtils';
 
 import type { Symbol } from './symbol';
@@ -865,4 +875,187 @@ export function lookUpSymbolRecursive(
     }
 
     return symbolWithScope;
+}
+
+export function getTypeForDeclaration(evaluator: TypeEvaluator, declaration: Declaration): DeclaredSymbolTypeInfo {
+    switch (declaration.type) {
+        case DeclarationType.Intrinsic: {
+            if (declaration.intrinsicType === 'Any') {
+                return { type: AnyType.create() };
+            }
+
+            if (declaration.intrinsicType === '__class__') {
+                const classNode = ParseTreeUtils.getEnclosingClass(declaration.node) as ClassNode;
+                const classTypeInfo = evaluator.getTypeOfClass(classNode);
+                return {
+                    type: classTypeInfo
+                        ? specializeWithUnknownTypeArgs(classTypeInfo.classType, evaluator.getTupleClassType())
+                        : UnknownType.create(),
+                };
+            }
+
+            const strType = evaluator.getBuiltInObject(declaration.node, 'str');
+            const intType = evaluator.getBuiltInObject(declaration.node, 'int');
+            if (isClassInstance(intType) && isClassInstance(strType)) {
+                if (declaration.intrinsicType === 'str') {
+                    return { type: strType };
+                }
+
+                if (declaration.intrinsicType === 'str | None') {
+                    return { type: combineTypes([strType, evaluator.getNoneType()]) };
+                }
+
+                if (declaration.intrinsicType === 'int') {
+                    return { type: intType };
+                }
+
+                if (declaration.intrinsicType === 'MutableSequence[str]') {
+                    const sequenceType = evaluator.getBuiltInType(declaration.node, 'MutableSequence');
+                    if (isInstantiableClass(sequenceType)) {
+                        return {
+                            type: ClassType.cloneAsInstance(ClassType.specialize(sequenceType, [strType])),
+                        };
+                    }
+                }
+
+                if (declaration.intrinsicType === 'dict[str, Any]') {
+                    const dictType = evaluator.getBuiltInType(declaration.node, 'dict');
+                    if (isInstantiableClass(dictType)) {
+                        return {
+                            type: ClassType.cloneAsInstance(
+                                ClassType.specialize(dictType, [strType, AnyType.create()])
+                            ),
+                        };
+                    }
+                }
+            }
+
+            return { type: UnknownType.create() };
+        }
+
+        case DeclarationType.Class: {
+            const classTypeInfo = evaluator.getTypeOfClass(declaration.node);
+            return { type: classTypeInfo?.decoratedType };
+        }
+
+        case DeclarationType.SpecialBuiltInClass: {
+            return { type: evaluator.getTypeOfAnnotation(declaration.node.d.annotation) };
+        }
+
+        case DeclarationType.Function: {
+            const functionTypeInfo = evaluator.getTypeOfFunction(declaration.node);
+            return { type: functionTypeInfo?.decoratedType };
+        }
+
+        case DeclarationType.TypeAlias: {
+            return { type: evaluator.getTypeOfTypeAlias(declaration.node) };
+        }
+
+        case DeclarationType.Param: {
+            let typeAnnotationNode = declaration.node.d.annotation ?? declaration.node.d.annotationComment;
+
+            // If there wasn't an annotation, see if the parent function
+            // has a function-level annotation comment that provides
+            // this parameter's annotation type.
+            if (!typeAnnotationNode) {
+                if (declaration.node.parent?.nodeType === ParseNodeType.Function) {
+                    const functionNode = declaration.node.parent;
+                    if (
+                        functionNode.d.funcAnnotationComment &&
+                        !functionNode.d.funcAnnotationComment.d.isEllipsis
+                    ) {
+                        const paramIndex = functionNode.d.params.findIndex((param) => param === declaration.node);
+                        typeAnnotationNode = ParseTreeUtils.getTypeAnnotationForParam(functionNode, paramIndex);
+                    }
+                }
+            }
+
+            if (typeAnnotationNode) {
+                let declaredType = evaluator.getTypeOfParamAnnotation(typeAnnotationNode, declaration.node.d.category);
+
+                const liveTypeVarScopes = ParseTreeUtils.getTypeVarScopesForNode(declaration.node);
+                declaredType = makeTypeVarsBound(declaredType, liveTypeVarScopes);
+
+                return {
+                    type: evaluator.transformVariadicParamType(
+                        declaration.node,
+                        declaration.node.d.category,
+                        evaluator.adjustParamAnnotatedType(declaration.node, declaredType)
+                    ),
+                };
+            }
+
+            return { type: undefined };
+        }
+
+        case DeclarationType.TypeParam: {
+            return { type: evaluator.getTypeOfTypeParam(declaration.node) };
+        }
+
+        case DeclarationType.Variable: {
+            const typeAnnotationNode = declaration.typeAnnotationNode;
+
+            if (typeAnnotationNode) {
+                let declaredType: Type | undefined;
+
+                if (declaration.isRuntimeTypeExpression) {
+                    declaredType = convertToInstance(
+                        evaluator.getTypeOfExpressionExpectingType(typeAnnotationNode, {
+                            allowFinal: true,
+                            allowRequired: true,
+                            allowReadOnly: true,
+                            runtimeTypeExpression: true,
+                        }).type
+                    );
+                } else {
+                    const declNode =
+                        declaration.isDefinedByMemberAccess &&
+                        declaration.node.parent?.nodeType === ParseNodeType.MemberAccess
+                            ? declaration.node.parent
+                            : declaration.node;
+                    const allowClassVar = evaluator.isClassVarAllowedForAssignmentTarget(declNode);
+                    const allowFinal = evaluator.isFinalAllowedForAssignmentTarget(declNode);
+                    const allowRequired =
+                        ParseTreeUtils.isRequiredAllowedForAssignmentTarget(declNode) ||
+                        !!declaration.isInInlinedTypedDict;
+
+                    declaredType = evaluator.getTypeOfAnnotation(typeAnnotationNode, {
+                        varTypeAnnotation: true,
+                        allowClassVar,
+                        allowFinal,
+                        allowRequired,
+                        allowReadOnly: allowRequired,
+                        enforceClassTypeVarScope: declaration.isDefinedByMemberAccess,
+                    });
+                }
+
+                if (declaredType) {
+                    // If this is a declaration for a member variable within a method,
+                    // we need to convert any bound TypeVars associated with the
+                    // class to their free counterparts.
+                    if (declaration.isDefinedByMemberAccess) {
+                        const enclosingClass = ParseTreeUtils.getEnclosingClass(declaration.node);
+
+                        if (enclosingClass) {
+                            declaredType = makeTypeVarsFree(declaredType, [
+                                ParseTreeUtils.getScopeIdForNode(enclosingClass),
+                            ]);
+                        }
+                    }
+
+                    if (isClassInstance(declaredType) && ClassType.isBuiltIn(declaredType, 'TypeAlias')) {
+                        return { type: undefined, isTypeAlias: true };
+                    }
+
+                    return { type: declaredType };
+                }
+            }
+
+            return { type: undefined };
+        }
+
+        case DeclarationType.Alias: {
+            return { type: undefined };
+        }
+    }
 }
