@@ -94,3 +94,18 @@ export function getTypeOfMember(evaluator: TypeEvaluator, member: ClassMember): 
     }
     return UnknownType.create();
 }
+
+export function getGetterTypeFromProperty(evaluator: TypeEvaluator, propertyClass: ClassType): Type | undefined {
+    if (!ClassType.isPropertyClass(propertyClass)) {
+        return undefined;
+    }
+
+    if (propertyClass.priv.fgetInfo) {
+        return (
+            FunctionType.getEffectiveReturnType(propertyClass.priv.fgetInfo.methodType) ??
+            evaluator.getInferredReturnType(propertyClass.priv.fgetInfo.methodType)
+        );
+    }
+
+    return undefined;
+}

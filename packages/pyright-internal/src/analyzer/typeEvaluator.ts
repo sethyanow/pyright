@@ -17972,15 +17972,7 @@ export function createTypeEvaluator(
     }
 
     function getGetterTypeFromProperty(propertyClass: ClassType): Type | undefined {
-        if (!ClassType.isPropertyClass(propertyClass)) {
-            return undefined;
-        }
-
-        if (propertyClass.priv.fgetInfo) {
-            return getEffectiveReturnType(propertyClass.priv.fgetInfo.methodType);
-        }
-
-        return undefined;
+        return memberAccessModule.getGetterTypeFromProperty(evaluatorInterface, propertyClass);
     }
 
     function assignTypeArgs(
