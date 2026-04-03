@@ -135,3 +135,23 @@ isSpecialFormClass: (classType: ClassType, flags: AssignTypeFlags) =>
 ```
 
 Use `incomingCalls` to determine which pattern — many callers = local delegate, few callers = interface lambda only.
+
+## Circular Import Avoidance
+
+When a type or interface is defined in typeEvaluator.ts and needed by the extracted module, **redefine it locally** rather than importing from typeEvaluator.ts. Importing from typeEvaluator.ts creates a circular dependency (extracted module → typeEvaluator.ts → extracted module).
+
+Example: `MemberAccessTypeResult` was defined as an exported interface in typeEvaluator.ts. memberAccess.ts needed it but couldn't import from typeEvaluator.ts, so it was redefined locally in memberAccess.ts.
+
+## One-Liner Wrapper Dissolution
+
+Some closure functions are one-liners wrapping already-extracted functions or external utilities. In extracted code, call the underlying function directly:
+
+| Closure wrapper | Call directly |
+|---|---|
+| `narrowTypeBasedOnAssignment(decl, assigned)` | `typeAssignment.narrowTypeBasedOnAssignment(evaluator, registry, state, decl, assigned)` |
+| `printObjectTypeForClass(type)` | `TypePrinter.printObjectTypeForClass(type, state.evaluatorOptions.printTypeFlags, returnTypeCallback)` |
+| `getEffectiveReturnType(type)` | `FunctionType.getEffectiveReturnType(type) ?? evaluator.getInferredReturnType(type)` |
+
+## Inventory Is a Starting Point
+
+Skeleton inventories are starting points, not fixed scope. Functions not in the inventory may need to come along if they're the sole connector between batch members (e.g., getTypeOfClassMemberName wasn't in pyr-p1w's inventory but was the only caller of applyDescriptorAccessMethod and the only thing called by getTypeOfBoundMember). Use `incomingCalls` to discover these.
