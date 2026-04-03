@@ -1,12 +1,15 @@
 ---
 id: pyr-8b1
 title: Extract Call Validation and Overload Resolution functions
-status: open
+status: active
 type: task
 priority: 2
+owner: Seth
 depends_on: [pyr-p1w]
 parent: pyr-a56
 ---
+
+
 
 ## Context
 
@@ -118,3 +121,7 @@ cd /Volumes/code/pyright && bun run check
 - **Don't extract the expression-level call evaluation.** Functions like `getTypeOfCall` (if it exists as a single entry point from expression evaluation) may be the orchestration dispatch, not call validation per se. The line between "validate these args" and "evaluate this call expression" is where the extraction boundary sits. REASON: expression evaluation orchestration stays in the closure.
 - **Don't create dependencies between `callValidation.ts` and `specialForms.ts`.** If both need `validateTypeArg`, it lives in one place and the other imports it. Prefer putting it in `callValidation.ts` since validation is its primary concern. REASON: unidirectional dependency graph.
 - **Don't chase the 5K target by force-extracting functions that belong in the orchestration layer.** If the file ends up at 6K or 7K, that's still a success — down from 29K. Document what remains and why. REASON: clean boundaries beat line-count targets.
+
+## Log
+
+- [2026-04-03T16:41:52Z] [Seth] Phase 1 partial map complete. Baseline: 2344/2344 pass. Hidden deps discovered via incomingCalls (all callers in batch): validateCallArgsForSubtype, matchArgsToParams, evaluateUsingBestMatchingOverload, validateOverloadsWithExpandedTypes, validateArgTypes, validateArgType, validateArgs, validateArgTypesForParamSpecSignature, validateArgTypesWithContext, validateArgTypesWithExpectedType. Starting leaf extraction: convertNodeToArg, getIndexAccessMagicMethodName, getSpeculativeNodeForCall, filterOverloadMatchesForAnyArgs, filterOverloadMatchesForUnpackedArgs, expandArgType, getTypeOfArgExpectingType, evaluateCastCall, applyConditionFilterToType. Will refine order as extraction proceeds.

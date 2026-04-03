@@ -299,7 +299,11 @@ export function getTypeOfArg(
 // used in cases where the argument is expected to be a type
 // and therefore follows the normal rules of types (e.g. they
 // can be forward-declared in stubs, etc.).
-export function getTypeOfArgExpectingType(evaluator: TypeEvaluator, arg: Arg, options?: ExpectedTypeOptions): TypeResult {
+export function getTypeOfArgExpectingType(
+    evaluator: TypeEvaluator,
+    arg: Arg,
+    options?: ExpectedTypeOptions
+): TypeResult {
     if (arg.typeResult) {
         return { type: arg.typeResult.type, isIncomplete: arg.typeResult.isIncomplete };
     }
