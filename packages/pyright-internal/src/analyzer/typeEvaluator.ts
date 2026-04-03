@@ -8029,51 +8029,7 @@ export function createTypeEvaluator(
         skipUnknownArgCheck = false,
         inferenceContext: InferenceContext | undefined
     ): CallResult {
-        const matchResults = matchArgsToParams(errorNode, argList, typeResult, 0);
-
-        if (matchResults.argumentErrors) {
-            matchResults.argParams.forEach((argParam) => {
-                if (argParam.argument.valueExpression && !isSpeculativeModeInUse(argParam.argument.valueExpression)) {
-                    getTypeOfExpression(
-                        argParam.argument.valueExpression,
-                        /* flags */ undefined,
-                        makeInferenceContext(argParam.paramType)
-                    );
-                }
-            });
-
-            argList.forEach((arg) => {
-                if (arg.valueExpression && !isSpeculativeModeInUse(arg.valueExpression)) {
-                    const wasEvaluated = matchResults.argParams.some((argParam) => argParam.argument === arg);
-                    if (!wasEvaluated) {
-                        getTypeOfExpression(arg.valueExpression);
-                    }
-                }
-            });
-
-            const possibleType = FunctionType.getEffectiveReturnType(typeResult.type);
-            return {
-                returnType:
-                    possibleType && !isAnyOrUnknown(possibleType)
-                        ? UnknownType.createPossibleType(possibleType, /* isIncomplete */ false)
-                        : undefined,
-                argumentErrors: true,
-                activeParam: matchResults.activeParam,
-                overloadsUsedForCall: [],
-            };
-        }
-
-        return validateArgTypesWithContext(
-            errorNode,
-            matchResults,
-            constraints ?? new ConstraintTracker(),
-            skipUnknownArgCheck,
-            makeInferenceContext(
-                inferenceContext?.expectedType,
-                inferenceContext?.isTypeIncomplete,
-                inferenceContext?.returnTypeOverride
-            )
-        );
+        return callValidation.validateArgs(evaluatorInterface, state, registry, errorNode, argList, typeResult, constraints, skipUnknownArgCheck, inferenceContext);
     }
 
     function validateArgType(

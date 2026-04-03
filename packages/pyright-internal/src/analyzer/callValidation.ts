@@ -2836,3 +2836,64 @@ export function validateArgTypesWithContext(
         returnType
     );
 }
+
+export function validateArgs(
+    evaluator: TypeEvaluator,
+    state: TypeEvaluatorState,
+    registry: TypeRegistry,
+    errorNode: ExpressionNode,
+    argList: Arg[],
+    typeResult: TypeResult<FunctionType>,
+    constraints: ConstraintTracker | undefined,
+    skipUnknownArgCheck = false,
+    inferenceContext: InferenceContext | undefined
+): CallResult {
+    const matchResults = matchArgsToParams(evaluator, state, registry, errorNode, argList, typeResult, 0);
+
+    if (matchResults.argumentErrors) {
+        matchResults.argParams.forEach((argParam) => {
+            if (argParam.argument.valueExpression && !state.isSpeculativeModeInUse(argParam.argument.valueExpression)) {
+                evaluator.getTypeOfExpression(
+                    argParam.argument.valueExpression,
+                    /* flags */ undefined,
+                    makeInferenceContext(argParam.paramType)
+                );
+            }
+        });
+
+        argList.forEach((arg) => {
+            if (arg.valueExpression && !state.isSpeculativeModeInUse(arg.valueExpression)) {
+                const wasEvaluated = matchResults.argParams.some((argParam) => argParam.argument === arg);
+                if (!wasEvaluated) {
+                    evaluator.getTypeOfExpression(arg.valueExpression);
+                }
+            }
+        });
+
+        const possibleType = FunctionType.getEffectiveReturnType(typeResult.type);
+        return {
+            returnType:
+                possibleType && !isAnyOrUnknown(possibleType)
+                    ? UnknownType.createPossibleType(possibleType, /* isIncomplete */ false)
+                    : undefined,
+            argumentErrors: true,
+            activeParam: matchResults.activeParam,
+            overloadsUsedForCall: [],
+        };
+    }
+
+    return validateArgTypesWithContext(
+        evaluator,
+        state,
+        registry,
+        errorNode,
+        matchResults,
+        constraints ?? new ConstraintTracker(),
+        skipUnknownArgCheck,
+        makeInferenceContext(
+            inferenceContext?.expectedType,
+            inferenceContext?.isTypeIncomplete,
+            inferenceContext?.returnTypeOverride
+        )
+    );
+}
