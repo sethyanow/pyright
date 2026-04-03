@@ -571,6 +571,10 @@ export interface CallSiteEvaluationInfo {
     args: ValidateArgTypeParams[];
 }
 
+export interface EffectiveReturnTypeOptions {
+    callSiteInfo?: CallSiteEvaluationInfo;
+}
+
 export interface SymbolDeclInfo {
     decls: Declaration[];
     synthesizedTypes: SynthesizedTypeInfo[];
@@ -773,6 +777,7 @@ export interface TypeEvaluator {
     getDeclaredTypeForExpression: (expression: ExpressionNode, usage?: EvaluatorUsage) => Type | undefined;
     getDeclaredReturnType: (node: FunctionNode) => Type | undefined;
     getInferredReturnType: (type: FunctionType, callSiteInfo?: CallSiteEvaluationInfo) => Type;
+    getEffectiveReturnTypeResult: (type: FunctionType, options?: EffectiveReturnTypeOptions) => TypeResult;
     getBestOverloadForArgs: (
         errorNode: ExpressionNode,
         typeResult: TypeResult<OverloadedType>,

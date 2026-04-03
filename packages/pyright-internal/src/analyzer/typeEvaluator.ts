@@ -41,7 +41,6 @@ import {
     ConstantNode,
     DecoratorNode,
     DictionaryNode,
-    ErrorExpressionCategory,
     ExceptNode,
     ExecutionScopeNode,
     ExpressionNode,
@@ -155,7 +154,6 @@ import { SpeculativeModeOptions } from './typeCacheUtils';
 import {
     assignToTypedDict,
     createTypedDictType,
-    createTypedDictTypeInlined,
     getTypedDictMembersForClass,
     getTypeOfIndexedTypedDict,
     synthesizeTypedDictClassMethods,
@@ -172,6 +170,7 @@ import {
     CallSiteEvaluationInfo,
     ClassTypeResult,
     DeclaredSymbolTypeInfo,
+    EffectiveReturnTypeOptions,
     EffectiveTypeResult,
     EvalFlags,
     EvaluatorUsage,
@@ -379,9 +378,6 @@ interface ValidateArgTypeOptions {
     skipReportError?: boolean;
 }
 
-interface EffectiveReturnTypeOptions {
-    callSiteInfo?: CallSiteEvaluationInfo;
-}
 
 // This table contains the names of several built-in types that
 // are not subscriptable at runtime on older versions of Python.
@@ -469,7 +465,6 @@ export function createTypeEvaluator(
     state.setImportLookup(importLookup);
     state.setWrapWithLogger(wrapWithLogger);
     const isTypeFormSupported = specialForms.isTypeFormSupported;
-    const applyUnpackToTupleLike = specialForms.applyUnpackToTupleLike;
     const getFunctionFullName = specialForms.getFunctionFullName;
     let registry!: TypeRegistry;
     let registryInitialized = false;
@@ -5912,9 +5907,6 @@ export function createTypeEvaluator(
     }
 
 
-    function getTypeArg(node: ExpressionNode, flags: EvalFlags, supportsDictExpression: boolean): TypeResultWithNode {
-        return callValidation.getTypeArg(evaluatorInterface, state, registry, node, flags, supportsDictExpression);
-    }
 
 
     function buildTupleTypesList(
@@ -14969,6 +14961,7 @@ export function createTypeEvaluator(
         getDeclaredTypeForExpression,
         getDeclaredReturnType,
         getInferredReturnType,
+        getEffectiveReturnTypeResult,
         getBestOverloadForArgs,
         getBuiltInType,
         getTypeOfMember,
