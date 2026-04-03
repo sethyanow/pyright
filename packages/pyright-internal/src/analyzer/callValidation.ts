@@ -68,6 +68,7 @@ import {
     isUnpackedTypeVarTuple,
     isTypeSame,
     isFunctionOrOverloaded,
+    OverloadedType,
     maxTypeRecursionCount,
     TypeBase,
     AnyType,
@@ -2896,4 +2897,63 @@ export function validateArgs(
             inferenceContext?.returnTypeOverride
         )
     );
+}
+
+export function getBestOverloadForArgs(
+    evaluator: TypeEvaluator,
+    state: TypeEvaluatorState,
+    registry: TypeRegistry,
+    errorNode: ExpressionNode,
+    typeResult: TypeResult<OverloadedType>,
+    argList: Arg[]
+): FunctionType | undefined {
+    let overloadIndex = 0;
+    const matches: MatchArgsToParamsResult[] = [];
+    const speculativeNode = getSpeculativeNodeForCall(errorNode);
+
+    state.useSignatureTracker(errorNode, () => {
+        OverloadedType.getOverloads(typeResult.type).forEach((overload) => {
+            state.useSpeculativeMode(speculativeNode, () => {
+                const matchResults = matchArgsToParams(
+                    evaluator,
+                    state,
+                    registry,
+                    errorNode,
+                    argList,
+                    { type: overload, isIncomplete: typeResult.isIncomplete },
+                    overloadIndex
+                );
+
+                if (!matchResults.argumentErrors) {
+                    matches.push(matchResults);
+                }
+
+                overloadIndex++;
+            });
+        });
+    });
+
+    let winningOverloadIndex: number | undefined;
+
+    matches.forEach((match, matchIndex) => {
+        if (winningOverloadIndex === undefined) {
+            state.useSpeculativeMode(speculativeNode, () => {
+                const callResult = validateArgTypes(
+                    evaluator,
+                    state,
+                    registry,
+                    errorNode,
+                    match,
+                    new ConstraintTracker(),
+                    /* skipUnknownArgCheck */ true
+                );
+
+                if (callResult && !callResult.argumentErrors) {
+                    winningOverloadIndex = matchIndex;
+                }
+            });
+        }
+    });
+
+    return winningOverloadIndex === undefined ? undefined : matches[winningOverloadIndex].overload;
 }

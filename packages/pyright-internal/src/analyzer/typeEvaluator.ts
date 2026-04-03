@@ -6913,50 +6913,7 @@ export function createTypeEvaluator(
         typeResult: TypeResult<OverloadedType>,
         argList: Arg[]
     ): FunctionType | undefined {
-        let overloadIndex = 0;
-        const matches: MatchArgsToParamsResult[] = [];
-        const speculativeNode = getSpeculativeNodeForCall(errorNode);
-
-        useSignatureTracker(errorNode, () => {
-            // Create a list of potential overload matches based on arguments.
-            OverloadedType.getOverloads(typeResult.type).forEach((overload) => {
-                useSpeculativeMode(speculativeNode, () => {
-                    const matchResults = matchArgsToParams(
-                        errorNode,
-                        argList,
-                        { type: overload, isIncomplete: typeResult.isIncomplete },
-                        overloadIndex
-                    );
-
-                    if (!matchResults.argumentErrors) {
-                        matches.push(matchResults);
-                    }
-
-                    overloadIndex++;
-                });
-            });
-        });
-
-        let winningOverloadIndex: number | undefined;
-
-        matches.forEach((match, matchIndex) => {
-            if (winningOverloadIndex === undefined) {
-                useSpeculativeMode(speculativeNode, () => {
-                    const callResult = validateArgTypes(
-                        errorNode,
-                        match,
-                        new ConstraintTracker(),
-                        /* skipUnknownArgCheck */ true
-                    );
-
-                    if (callResult && !callResult.argumentErrors) {
-                        winningOverloadIndex = matchIndex;
-                    }
-                });
-            }
-        });
-
-        return winningOverloadIndex === undefined ? undefined : matches[winningOverloadIndex].overload;
+        return callValidation.getBestOverloadForArgs(evaluatorInterface, state, registry, errorNode, typeResult, argList);
     }
 
     function validateOverloadedArgTypes(
@@ -8010,16 +7967,6 @@ export function createTypeEvaluator(
     ): CallResult {
         return callValidation.validateArgTypesWithContext(evaluatorInterface, state, registry, errorNode, matchResults, constraints, skipUnknownArgCheck, inferenceContext);
     }
-
-    function validateArgTypes(
-        errorNode: ExpressionNode,
-        matchResults: MatchArgsToParamsResult,
-        constraints: ConstraintTracker,
-        skipUnknownArgCheck: boolean | undefined
-    ): CallResult {
-        return callValidation.validateArgTypes(evaluatorInterface, state, registry, errorNode, matchResults, constraints, skipUnknownArgCheck);
-    }
-
 
     function validateArgs(
         errorNode: ExpressionNode,
