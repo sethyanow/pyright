@@ -43,6 +43,8 @@ import { TypeEvaluatorState } from './typeEvaluatorState';
 import {
     AbstractSymbol,
     DeclaredSymbolTypeInfo,
+    EvalFlags,
+    EvaluatorUsage,
     Reachability,
     SymbolDeclInfo,
     TypeEvaluator,
@@ -53,14 +55,18 @@ import {
     combineTypes,
     FunctionType,
     FunctionTypeFlags,
+    isAnyOrUnknown,
     isClassInstance,
     isFunction,
+    isFunctionOrOverloaded,
     isInstantiableClass,
     isModule,
     isOverloaded,
+    isTypeVar,
     ModuleType,
     OverloadedType,
     Type,
+    TypeVarType,
     UnboundType,
     UnknownType,
 } from './types';
@@ -74,8 +80,11 @@ import {
     makeTypeVarsBound,
     makeTypeVarsFree,
     MemberAccessFlags,
+    partiallySpecializeType,
     specializeWithUnknownTypeArgs,
 } from './typeUtils';
+import { getTypeOfIndexedTypedDict } from './typedDicts';
+import { makeTupleObject } from './tuples';
 
 import type { Symbol } from './symbol';
 
@@ -1058,4 +1067,231 @@ export function getTypeForDeclaration(evaluator: TypeEvaluator, declaration: Dec
             return { type: undefined };
         }
     }
+}
+
+export function getDeclaredTypeForExpression(
+    evaluator: TypeEvaluator,
+    expression: ExpressionNode,
+    usage?: EvaluatorUsage
+): Type | undefined {
+    let symbol: Symbol | undefined;
+    let selfType: ClassType | TypeVarType | undefined;
+    let classOrObjectBase: ClassType | undefined;
+    let memberAccessClass: Type | undefined;
+    let bindFunction = true;
+    let useDescriptorSetterType = false;
+
+    switch (expression.nodeType) {
+        case ParseNodeType.Name: {
+            const symbolWithScope = evaluator.lookUpSymbolRecursive(
+                expression,
+                expression.d.value,
+                /* honorCodeFlow */ true
+            );
+            if (symbolWithScope) {
+                symbol = symbolWithScope.symbol;
+
+                if (
+                    !evaluator.getDeclaredTypeOfSymbol(symbol, expression)?.type &&
+                    symbolWithScope.scope.type === ScopeType.Class
+                ) {
+                    const enclosingClass = ParseTreeUtils.getEnclosingClassOrFunction(expression);
+                    if (enclosingClass && enclosingClass.nodeType === ParseNodeType.Class) {
+                        const classTypeInfo = evaluator.getTypeOfClass(enclosingClass);
+                        if (classTypeInfo) {
+                            const classMemberInfo = lookUpClassMember(
+                                classTypeInfo.classType,
+                                expression.d.value,
+                                MemberAccessFlags.SkipInstanceMembers | MemberAccessFlags.DeclaredTypesOnly
+                            );
+                            if (classMemberInfo) {
+                                symbol = classMemberInfo.symbol;
+                            }
+                        }
+                    }
+                }
+            }
+            break;
+        }
+
+        case ParseNodeType.TypeAnnotation: {
+            return getDeclaredTypeForExpression(evaluator, expression.d.valueExpr, usage);
+        }
+
+        case ParseNodeType.MemberAccess: {
+            const baseType = evaluator.getTypeOfExpression(
+                expression.d.leftExpr,
+                EvalFlags.MemberAccessBaseDefaults
+            ).type;
+            const baseTypeConcrete = evaluator.makeTopLevelTypeVarsConcrete(baseType);
+            const memberName = expression.d.member.d.value;
+
+            doForEachSubtype(
+                baseTypeConcrete,
+                (baseSubtype) => {
+                    if (isClassInstance(baseSubtype)) {
+                        const classMemberInfo = lookUpObjectMember(
+                            baseSubtype,
+                            memberName,
+                            MemberAccessFlags.DeclaredTypesOnly
+                        );
+
+                        classOrObjectBase = baseSubtype;
+                        memberAccessClass = classMemberInfo?.classType;
+                        symbol = classMemberInfo?.symbol;
+                        useDescriptorSetterType = true;
+                        bindFunction = !classMemberInfo?.isInstanceMember;
+                    } else if (isInstantiableClass(baseSubtype)) {
+                        const classMemberInfo = lookUpClassMember(
+                            baseSubtype,
+                            memberName,
+                            MemberAccessFlags.SkipInstanceMembers | MemberAccessFlags.DeclaredTypesOnly
+                        );
+
+                        classOrObjectBase = baseSubtype;
+                        memberAccessClass = classMemberInfo?.classType;
+                        symbol = classMemberInfo?.symbol;
+                        useDescriptorSetterType = false;
+                        bindFunction = true;
+                    } else if (isModule(baseSubtype)) {
+                        classOrObjectBase = undefined;
+                        memberAccessClass = undefined;
+                        symbol = ModuleType.getField(baseSubtype, memberName);
+                        if (symbol && !symbol.hasTypedDeclarations()) {
+                            symbol = undefined;
+                        }
+                        useDescriptorSetterType = false;
+                        bindFunction = false;
+                    }
+                },
+                /* sortSubtypes */ true
+            );
+
+            if (isTypeVar(baseType)) {
+                selfType = baseType;
+            }
+            break;
+        }
+
+        case ParseNodeType.Index: {
+            const baseType = evaluator.makeTopLevelTypeVarsConcrete(
+                evaluator.getTypeOfExpression(expression.d.leftExpr, EvalFlags.IndexBaseDefaults).type
+            );
+
+            if (baseType && isClassInstance(baseType)) {
+                if (ClassType.isTypedDictClass(baseType)) {
+                    const typeFromTypedDict = getTypeOfIndexedTypedDict(
+                        evaluator,
+                        expression,
+                        baseType,
+                        usage || { method: 'get' }
+                    );
+                    if (typeFromTypedDict) {
+                        return typeFromTypedDict.type;
+                    }
+                }
+
+                let setItemType = evaluator.getBoundMagicMethod(baseType, '__setitem__');
+                if (!setItemType) {
+                    break;
+                }
+
+                if (isOverloaded(setItemType)) {
+                    const expectsSlice =
+                        expression.d.items.length === 1 &&
+                        expression.d.items[0].d.valueExpr.nodeType === ParseNodeType.Slice;
+                    const overloads = OverloadedType.getOverloads(setItemType);
+                    setItemType = overloads.find((overload) => {
+                        if (overload.shared.parameters.length < 2) {
+                            return false;
+                        }
+
+                        const keyType = FunctionType.getParamType(overload, 0);
+                        const isSlice = isClassInstance(keyType) && ClassType.isBuiltIn(keyType, 'slice');
+                        return expectsSlice === isSlice;
+                    });
+
+                    if (!setItemType) {
+                        break;
+                    }
+                }
+
+                if (isFunction(setItemType) && setItemType.shared.parameters.length >= 2) {
+                    const paramType = FunctionType.getParamType(setItemType, 1);
+                    if (!isAnyOrUnknown(paramType)) {
+                        return paramType;
+                    }
+                }
+            }
+            break;
+        }
+
+        case ParseNodeType.Tuple: {
+            if (
+                expression.d.items.length > 0 &&
+                !expression.d.items.some((item) => item.nodeType === ParseNodeType.Unpack)
+            ) {
+                const itemTypes: Type[] = [];
+                expression.d.items.forEach((expr) => {
+                    const itemType = getDeclaredTypeForExpression(evaluator, expr, usage);
+                    if (itemType) {
+                        itemTypes.push(itemType);
+                    }
+                });
+
+                if (itemTypes.length === expression.d.items.length) {
+                    return makeTupleObject(
+                        evaluator,
+                        itemTypes.map((t) => {
+                            return { type: t, isUnbounded: false };
+                        })
+                    );
+                }
+            }
+            break;
+        }
+    }
+
+    if (symbol) {
+        let declaredType = evaluator.getDeclaredTypeOfSymbol(symbol)?.type;
+        if (declaredType) {
+            if (useDescriptorSetterType && isClassInstance(declaredType)) {
+                const setter = evaluator.getBoundMagicMethod(declaredType, '__set__');
+                if (setter && isFunction(setter) && setter.shared.parameters.length >= 2) {
+                    declaredType = FunctionType.getParamType(setter, 1);
+
+                    if (isAnyOrUnknown(declaredType)) {
+                        return undefined;
+                    }
+                }
+            }
+
+            if (classOrObjectBase) {
+                if (memberAccessClass && isInstantiableClass(memberAccessClass)) {
+                    declaredType = partiallySpecializeType(
+                        declaredType,
+                        memberAccessClass,
+                        evaluator.getTypeClassType(),
+                        selfType
+                    );
+                }
+
+                if (isFunctionOrOverloaded(declaredType)) {
+                    if (bindFunction) {
+                        declaredType = evaluator.bindFunctionToClassOrObject(
+                            classOrObjectBase,
+                            declaredType,
+                            /* memberClass */ undefined,
+                            /* treatConstructorAsClassMethod */ undefined,
+                            selfType
+                        );
+                    }
+                }
+            }
+
+            return declaredType;
+        }
+    }
+
+    return undefined;
 }
