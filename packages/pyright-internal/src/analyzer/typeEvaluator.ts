@@ -8123,47 +8123,7 @@ export function createTypeEvaluator(
         expectedType: Type,
         returnType: Type
     ): CallResult {
-        const liveTypeVarScopes = ParseTreeUtils.getTypeVarScopesForNode(errorNode);
-        let assignFlags = AssignTypeFlags.PopulateExpectedType;
-        if (containsLiteralType(expectedType, /* includeTypeArgs */ true)) {
-            assignFlags |= AssignTypeFlags.RetainLiteralsForTypeVar;
-        }
-
-        // Prepopulate the constraints based on the specialized expected type.
-        // This will allow us to more closely match the expected type if possible.
-        if (isClassInstance(returnType) && isClassInstance(expectedType) && !isTypeSame(returnType, expectedType)) {
-            const tempConstraints = new ConstraintTracker();
-            if (
-                addConstraintsForExpectedType(
-                    evaluatorInterface,
-                    returnType,
-                    expectedType,
-                    tempConstraints,
-                    liveTypeVarScopes,
-                    errorNode.start
-                )
-            ) {
-                const genericReturnType = selfSpecializeClass(returnType, {
-                    overrideTypeArgs: true,
-                });
-
-                expectedType = solveAndApplyConstraints(genericReturnType, tempConstraints, {
-                    replaceUnsolved: {
-                        scopeIds: getTypeVarScopeIds(returnType),
-                        useUnknown: true,
-                        tupleClassType: getTupleClassType(),
-                    },
-                });
-
-                assignFlags |= AssignTypeFlags.SkipPopulateUnknownExpectedType;
-            }
-        }
-
-        expectedType = transformExpectedType(expectedType, liveTypeVarScopes, errorNode.start);
-
-        assignType(returnType, expectedType, /* diag */ undefined, constraints, assignFlags);
-
-        return validateArgTypes(errorNode, matchResults, constraints, skipUnknownArgCheck);
+        return callValidation.validateArgTypesWithExpectedType(evaluatorInterface, state, registry, errorNode, matchResults, constraints, skipUnknownArgCheck, expectedType, returnType);
     }
 
     function validateArgTypes(

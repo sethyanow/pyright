@@ -82,7 +82,7 @@ import {
     Variance,
 } from './types';
 import { ConstraintSolution } from './constraintSolution';
-import { applySourceSolutionToConstraints, solveConstraints, solveConstraintSet } from './constraintSolver';
+import { addConstraintsForExpectedType, applySourceSolutionToConstraints, solveConstraints, solveConstraintSet } from './constraintSolver';
 import { ConstraintSet } from './constraintTracker';
 import * as symbolResolution from './symbolResolution';
 import { enumerateLiteralsForType } from './typeGuards';
@@ -107,6 +107,9 @@ import {
     convertTypeToParamSpecValue,
     preserveUnknown,
     addConditionToType,
+    containsLiteralType,
+    selfSpecializeClass,
+    transformExpectedType,
     makeInferenceContext,
     requiresSpecialization,
 } from './typeUtils';
@@ -2670,4 +2673,56 @@ export function validateArgTypes(
         specializedInitSelfType,
         overloadsUsedForCall: argumentErrors ? [] : [type],
     };
+}
+
+export function validateArgTypesWithExpectedType(
+    evaluator: TypeEvaluator,
+    state: TypeEvaluatorState,
+    registry: TypeRegistry,
+    errorNode: ExpressionNode,
+    matchResults: MatchArgsToParamsResult,
+    constraints: ConstraintTracker,
+    skipUnknownArgCheck = false,
+    expectedType: Type,
+    returnType: Type
+): CallResult {
+    const liveTypeVarScopes = ParseTreeUtils.getTypeVarScopesForNode(errorNode);
+    let assignFlags = AssignTypeFlags.PopulateExpectedType;
+    if (containsLiteralType(expectedType, /* includeTypeArgs */ true)) {
+        assignFlags |= AssignTypeFlags.RetainLiteralsForTypeVar;
+    }
+
+    if (isClassInstance(returnType) && isClassInstance(expectedType) && !isTypeSame(returnType, expectedType)) {
+        const tempConstraints = new ConstraintTracker();
+        if (
+            addConstraintsForExpectedType(
+                evaluator,
+                returnType,
+                expectedType,
+                tempConstraints,
+                liveTypeVarScopes,
+                errorNode.start
+            )
+        ) {
+            const genericReturnType = selfSpecializeClass(returnType, {
+                overrideTypeArgs: true,
+            });
+
+            expectedType = evaluator.solveAndApplyConstraints(genericReturnType, tempConstraints, {
+                replaceUnsolved: {
+                    scopeIds: getTypeVarScopeIds(returnType),
+                    useUnknown: true,
+                    tupleClassType: evaluator.getTupleClassType(),
+                },
+            });
+
+            assignFlags |= AssignTypeFlags.SkipPopulateUnknownExpectedType;
+        }
+    }
+
+    expectedType = transformExpectedType(expectedType, liveTypeVarScopes, errorNode.start);
+
+    evaluator.assignType(returnType, expectedType, /* diag */ undefined, constraints, assignFlags);
+
+    return validateArgTypes(evaluator, state, registry, errorNode, matchResults, constraints, skipUnknownArgCheck);
 }
