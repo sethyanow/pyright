@@ -260,7 +260,6 @@ import {
     areTypesSame,
     buildSolutionFromSpecializedClass,
     ClassMember,
-    combineSameSizedTuples,
     combineVariances,
     computeMroLinearization,
     containsAnyOrUnknown,
@@ -8262,56 +8261,8 @@ export function createTypeEvaluator(
         return convertToInstance(castToType);
     }
 
-    // Expands any unpacked tuples within an argument list.
     function expandArgList(argList: Arg[]): Arg[] {
-        const expandedArgList: Arg[] = [];
-
-        for (const arg of argList) {
-            if (arg.argCategory === ArgCategory.UnpackedList) {
-                const argType = getTypeOfArg(arg, /* inferenceContext */ undefined).type;
-
-                // If this is a tuple with specified element types, use those
-                // specified types rather than using the more generic iterator
-                // type which will be a union of all element types.
-                const combinedArgType = combineSameSizedTuples(
-                    makeTopLevelTypeVarsConcrete(argType),
-                    registry.tupleClass
-                );
-
-                if (isClassInstance(combinedArgType) && isTupleClass(combinedArgType)) {
-                    const tupleTypeArgs = combinedArgType.priv.tupleTypeArgs ?? [];
-
-                    if (tupleTypeArgs.length !== 1 || !tupleTypeArgs[0].isUnbounded) {
-                        for (const tupleTypeArg of tupleTypeArgs) {
-                            if (tupleTypeArg.isUnbounded) {
-                                expandedArgList.push({
-                                    ...arg,
-                                    argCategory: ArgCategory.UnpackedList,
-                                    valueExpression: undefined,
-                                    typeResult: {
-                                        type: makeTupleObject(evaluatorInterface, [tupleTypeArg]),
-                                    },
-                                });
-                            } else {
-                                expandedArgList.push({
-                                    ...arg,
-                                    argCategory: ArgCategory.Simple,
-                                    valueExpression: undefined,
-                                    typeResult: {
-                                        type: tupleTypeArg.type,
-                                    },
-                                });
-                            }
-                        }
-                        continue;
-                    }
-                }
-            }
-
-            expandedArgList.push(arg);
-        }
-
-        return expandedArgList;
+        return callValidation.expandArgList(evaluatorInterface, registry, argList);
     }
 
     // Matches the arguments passed to a function to the corresponding parameters in that

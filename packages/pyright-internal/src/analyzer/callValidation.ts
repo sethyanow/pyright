@@ -7,7 +7,7 @@
  * extracted from typeEvaluator.ts.
  */
 
-import { ArgumentNode, ExpressionNode, ParseNode, ParseNodeType } from '../parser/parseNodes';
+import { ArgCategory, ArgumentNode, ExpressionNode, ParseNode, ParseNodeType } from '../parser/parseNodes';
 import * as ParseTreeUtils from './parseTreeUtils';
 import { assert } from '../common/debug';
 import { DiagnosticRule } from '../common/diagnosticRules';
@@ -47,14 +47,17 @@ import {
 import { ConstraintSolution } from './constraintSolution';
 import { enumerateLiteralsForType } from './typeGuards';
 import { expandTuple, makeTupleObject } from './tuples';
+import { TypeRegistry } from './typeRegistry';
 import {
     applySolvedTypeVars,
     areTypesSame,
+    combineSameSizedTuples,
     convertToInstance,
     doForEachSubtype,
     getTypeVarArgsRecursive,
     InferenceContext,
     isEllipsisType,
+    isTupleClass,
 } from './typeUtils';
 import { appendArray } from '../common/collectionUtils';
 
@@ -602,4 +605,56 @@ export function validateTypeArg(
     }
 
     return true;
+}
+
+// Expands any unpacked tuples within an argument list.
+export function expandArgList(evaluator: TypeEvaluator, registry: TypeRegistry, argList: Arg[]): Arg[] {
+    const expandedArgList: Arg[] = [];
+
+    for (const arg of argList) {
+        if (arg.argCategory === ArgCategory.UnpackedList) {
+            const argType = getTypeOfArg(evaluator, arg, /* inferenceContext */ undefined).type;
+
+            // If this is a tuple with specified element types, use those
+            // specified types rather than using the more generic iterator
+            // type which will be a union of all element types.
+            const combinedArgType = combineSameSizedTuples(
+                evaluator.makeTopLevelTypeVarsConcrete(argType),
+                registry.tupleClass
+            );
+
+            if (isClassInstance(combinedArgType) && isTupleClass(combinedArgType)) {
+                const tupleTypeArgs = combinedArgType.priv.tupleTypeArgs ?? [];
+
+                if (tupleTypeArgs.length !== 1 || !tupleTypeArgs[0].isUnbounded) {
+                    for (const tupleTypeArg of tupleTypeArgs) {
+                        if (tupleTypeArg.isUnbounded) {
+                            expandedArgList.push({
+                                ...arg,
+                                argCategory: ArgCategory.UnpackedList,
+                                valueExpression: undefined,
+                                typeResult: {
+                                    type: makeTupleObject(evaluator, [tupleTypeArg]),
+                                },
+                            });
+                        } else {
+                            expandedArgList.push({
+                                ...arg,
+                                argCategory: ArgCategory.Simple,
+                                valueExpression: undefined,
+                                typeResult: {
+                                    type: tupleTypeArg.type,
+                                },
+                            });
+                        }
+                    }
+                    continue;
+                }
+            }
+        }
+
+        expandedArgList.push(arg);
+    }
+
+    return expandedArgList;
 }
