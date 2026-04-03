@@ -24,6 +24,7 @@ import {
     TypeResult,
     TypeResultWithNode,
     ValidateArgTypeParams,
+    ValidateTypeArgsOptions,
 } from './typeEvaluatorTypes';
 import {
     FunctionParam,
@@ -31,6 +32,7 @@ import {
     isAnyOrUnknown,
     isClassInstance,
     isFunction,
+    isModule,
     isParamSpec,
     isTypeVarTuple,
     isUnpackedClass,
@@ -52,6 +54,7 @@ import {
     doForEachSubtype,
     getTypeVarArgsRecursive,
     InferenceContext,
+    isEllipsisType,
 } from './typeUtils';
 import { appendArray } from '../common/collectionUtils';
 
@@ -515,4 +518,88 @@ export function adjustTypeArgsForTypeVarTuple(
     }
 
     return typeArgs;
+}
+
+// Verifies that a type argument's type is not disallowed.
+export function validateTypeArg(
+    evaluator: TypeEvaluator,
+    argResult: TypeResultWithNode,
+    options?: ValidateTypeArgsOptions
+): boolean {
+    if (argResult.typeList) {
+        if (!options?.allowTypeArgList) {
+            evaluator.addDiagnostic(
+                DiagnosticRule.reportInvalidTypeForm,
+                LocMessage.typeArgListNotAllowed(),
+                argResult.node
+            );
+            return false;
+        } else {
+            argResult.typeList.forEach((typeArg) => {
+                validateTypeArg(evaluator, typeArg);
+            });
+        }
+    }
+
+    if (isEllipsisType(argResult.type)) {
+        if (!options?.allowTypeArgList) {
+            evaluator.addDiagnostic(
+                DiagnosticRule.reportInvalidTypeForm,
+                LocMessage.ellipsisContext(),
+                argResult.node
+            );
+            return false;
+        }
+    }
+
+    if (isModule(argResult.type)) {
+        evaluator.addDiagnostic(DiagnosticRule.reportInvalidTypeForm, LocMessage.moduleAsType(), argResult.node);
+        return false;
+    }
+
+    if (isParamSpec(argResult.type)) {
+        if (!options?.allowParamSpec) {
+            evaluator.addDiagnostic(
+                DiagnosticRule.reportInvalidTypeForm,
+                LocMessage.paramSpecContext(),
+                argResult.node
+            );
+            return false;
+        }
+    }
+
+    if (isTypeVarTuple(argResult.type) && !argResult.type.priv.isInUnion) {
+        if (!options?.allowTypeVarTuple) {
+            evaluator.addDiagnostic(
+                DiagnosticRule.reportInvalidTypeForm,
+                LocMessage.typeVarTupleContext(),
+                argResult.node
+            );
+            return false;
+        } else {
+            specialForms.validateTypeVarTupleIsUnpacked(evaluator, argResult.type, argResult.node);
+        }
+    }
+
+    if (!options?.allowEmptyTuple && argResult.isEmptyTupleShorthand) {
+        evaluator.addDiagnostic(
+            DiagnosticRule.reportInvalidTypeForm,
+            LocMessage.zeroLengthTupleNotAllowed(),
+            argResult.node
+        );
+        return false;
+    }
+
+    if (isUnpackedClass(argResult.type)) {
+        if (!options?.allowUnpackedTuples) {
+            evaluator.addDiagnostic(
+                DiagnosticRule.reportInvalidTypeForm,
+                LocMessage.unpackedArgInTypeArgument(),
+                argResult.node
+            );
+            return false;
+        }
+    }
+
+    return true;
 }

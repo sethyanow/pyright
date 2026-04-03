@@ -11939,64 +11939,8 @@ export function createTypeEvaluator(
         return { type: ClassType.specialize(sliceType, [startType, endType, stepType]), isIncomplete };
     }
 
-    // Verifies that a type argument's type is not disallowed.
     function validateTypeArg(argResult: TypeResultWithNode, options?: ValidateTypeArgsOptions): boolean {
-        if (argResult.typeList) {
-            if (!options?.allowTypeArgList) {
-                addDiagnostic(DiagnosticRule.reportInvalidTypeForm, LocMessage.typeArgListNotAllowed(), argResult.node);
-                return false;
-            } else {
-                argResult.typeList.forEach((typeArg) => {
-                    validateTypeArg(typeArg);
-                });
-            }
-        }
-
-        if (isEllipsisType(argResult.type)) {
-            if (!options?.allowTypeArgList) {
-                addDiagnostic(DiagnosticRule.reportInvalidTypeForm, LocMessage.ellipsisContext(), argResult.node);
-                return false;
-            }
-        }
-
-        if (isModule(argResult.type)) {
-            addDiagnostic(DiagnosticRule.reportInvalidTypeForm, LocMessage.moduleAsType(), argResult.node);
-            return false;
-        }
-
-        if (isParamSpec(argResult.type)) {
-            if (!options?.allowParamSpec) {
-                addDiagnostic(DiagnosticRule.reportInvalidTypeForm, LocMessage.paramSpecContext(), argResult.node);
-                return false;
-            }
-        }
-
-        if (isTypeVarTuple(argResult.type) && !argResult.type.priv.isInUnion) {
-            if (!options?.allowTypeVarTuple) {
-                addDiagnostic(DiagnosticRule.reportInvalidTypeForm, LocMessage.typeVarTupleContext(), argResult.node);
-                return false;
-            } else {
-                specialForms.validateTypeVarTupleIsUnpacked(evaluatorInterface, argResult.type, argResult.node);
-            }
-        }
-
-        if (!options?.allowEmptyTuple && argResult.isEmptyTupleShorthand) {
-            addDiagnostic(DiagnosticRule.reportInvalidTypeForm, LocMessage.zeroLengthTupleNotAllowed(), argResult.node);
-            return false;
-        }
-
-        if (isUnpackedClass(argResult.type)) {
-            if (!options?.allowUnpackedTuples) {
-                addDiagnostic(
-                    DiagnosticRule.reportInvalidTypeForm,
-                    LocMessage.unpackedArgInTypeArgument(),
-                    argResult.node
-                );
-                return false;
-            }
-        }
-
-        return true;
+        return callValidation.validateTypeArg(evaluatorInterface, argResult, options);
     }
 
     // Evaluates the type arguments for a Callable type. It should have zero
