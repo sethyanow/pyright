@@ -15877,34 +15877,11 @@ export function createTypeEvaluator(
     }
 
     function getTypeOfArg(arg: Arg, inferenceContext: InferenceContext | undefined): TypeResult {
-        if (arg.typeResult) {
-            const type = arg.typeResult.type;
-            return { type: type?.props?.specialForm ?? type, isIncomplete: arg.typeResult.isIncomplete };
-        }
-
-        if (!arg.valueExpression) {
-            // We shouldn't ever get here, but just in case.
-            return { type: UnknownType.create() };
-        }
-
-        // If there was no defined type provided, there should always
-        // be a value expression from which we can retrieve the type.
-        return getTypeOfExpression(arg.valueExpression, /* flags */ undefined, inferenceContext);
+        return callValidation.getTypeOfArg(evaluatorInterface, arg, inferenceContext);
     }
 
-    // This function is like getTypeOfArg except that it is
-    // used in cases where the argument is expected to be a type
-    // and therefore follows the normal rules of types (e.g. they
-    // can be forward-declared in stubs, etc.).
     function getTypeOfArgExpectingType(arg: Arg, options?: ExpectedTypeOptions): TypeResult {
-        if (arg.typeResult) {
-            return { type: arg.typeResult.type, isIncomplete: arg.typeResult.isIncomplete };
-        }
-
-        // If there was no defined type provided, there should always
-        // be a value expression from which we can retrieve the type.
-        assert(arg.valueExpression !== undefined);
-        return getTypeOfExpressionExpectingType(arg.valueExpression, options);
+        return callValidation.getTypeOfArgExpectingType(evaluatorInterface, arg, options);
     }
 
     function getTypeOfExpressionExpectingType(node: ExpressionNode, options?: ExpectedTypeOptions): TypeResult {
