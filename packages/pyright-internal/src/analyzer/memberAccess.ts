@@ -4,18 +4,24 @@
 import { assert } from '../common/debug';
 import { DiagnosticAddendum } from '../common/diagnostic';
 import { LocMessage } from '../localization/localize';
+import { DiagnosticRule } from '../common/diagnosticRules';
 import { ArgCategory, ExpressionNode, ParamCategory } from '../parser/parseNodes';
+import * as ParseTreeUtils from './parseTreeUtils';
 import { ConstraintTracker } from './constraintTracker';
+import * as specialForms from './specialForms';
+import { makeTupleObject } from './tuples';
 import { TypeRegistry } from './typeRegistry';
 import {
     Arg,
     AssignTypeFlags,
     CallResult,
+    EvalFlags,
     MagicMethodDeprecationInfo,
     TypeEvaluator,
     TypeResult,
 } from './typeEvaluatorTypes';
 import {
+    AnyType,
     ClassType,
     FunctionParam,
     FunctionParamFlags,
@@ -27,6 +33,8 @@ import {
     isFunctionOrOverloaded,
     isInstantiableClass,
     isNever,
+    isParamSpec,
+    isTypeVarTuple,
     isOverloaded,
     isTypeVar,
     OverloadedType,
@@ -38,11 +46,14 @@ import {
 import {
     ClassMember,
     convertToInstance,
-    InferenceContext,
     convertToInstantiable,
+    InferenceContext,
     isInstantiableMetaclass,
     isNoneInstance,
     isNoneTypeClass,
+    isSentinelLiteral,
+    isTypeAliasPlaceholder,
+    makeTypeVarsBound,
     mapSignatures,
     mapSubtypes,
     partiallySpecializeType,
@@ -463,4 +474,155 @@ export function getTypeOfMagicMethodCall(
     }
 
     return { type: returnType, isIncomplete, magicMethodDeprecationInfo: deprecationInfo, overloadsUsedForCall };
+}
+
+export function isSymbolValidTypeExpression(type: Type, includesVarDecl: boolean): boolean {
+    // Verify that the name does not refer to a (non type alias) variable.
+    if (!includesVarDecl || type.props?.typeAliasInfo) {
+        return true;
+    }
+
+    if (isTypeAliasPlaceholder(type)) {
+        return true;
+    }
+
+    if (isTypeVar(type)) {
+        if (type.props?.specialForm || type.props?.typeAliasInfo) {
+            return true;
+        }
+    }
+
+    // Exempts class types that are created by calling NewType, NamedTuple, etc.
+    if (isClass(type) && !type.priv.includeSubclasses && ClassType.isValidTypeAliasClass(type)) {
+        return true;
+    }
+
+    if (isSentinelLiteral(type)) {
+        return true;
+    }
+
+    return false;
+}
+
+export function specializeTypeAliasWithDefaults(
+    evaluator: TypeEvaluator,
+    registry: TypeRegistry,
+    type: Type,
+    errorNode: ExpressionNode | undefined
+) {
+    // Is this a type alias?
+    const aliasInfo = type.props?.typeAliasInfo;
+    if (!aliasInfo) {
+        return type;
+    }
+
+    // Is this a generic type alias that needs specializing?
+    if (!aliasInfo.shared.typeParams || aliasInfo.shared.typeParams.length === 0 || aliasInfo.typeArgs) {
+        return type;
+    }
+
+    let reportDiag = false;
+    const defaultTypeArgs: Type[] = [];
+    const constraints = new ConstraintTracker();
+
+    aliasInfo.shared.typeParams.forEach((param) => {
+        if (!param.shared.isDefaultExplicit) {
+            reportDiag = true;
+        }
+
+        let defaultType: Type;
+        if (param.shared.isDefaultExplicit || isParamSpec(param)) {
+            defaultType = evaluator.solveAndApplyConstraints(param, constraints, {
+                replaceUnsolved: {
+                    scopeIds: [aliasInfo.shared.typeVarScopeId],
+                    tupleClassType: evaluator.getTupleClassType(),
+                },
+            });
+        } else if (isTypeVarTuple(param) && registry.tupleClass && isInstantiableClass(registry.tupleClass)) {
+            defaultType = makeTupleObject(evaluator, [{ type: UnknownType.create(), isUnbounded: true }], /* isUnpacked */ true);
+        } else {
+            defaultType = UnknownType.create();
+        }
+
+        defaultTypeArgs.push(defaultType);
+        constraints.setBounds(param, defaultType);
+    });
+
+    if (reportDiag && errorNode) {
+        evaluator.addDiagnostic(
+            DiagnosticRule.reportMissingTypeArgument,
+            LocMessage.typeArgsMissingForAlias().format({
+                name: aliasInfo.shared.name,
+            }),
+            errorNode
+        );
+    }
+
+    type = TypeBase.cloneForTypeAlias(
+        evaluator.solveAndApplyConstraints(type, constraints, {
+            replaceUnsolved: {
+                scopeIds: [aliasInfo.shared.typeVarScopeId],
+                tupleClassType: evaluator.getTupleClassType(),
+            },
+        }),
+        { ...aliasInfo, typeArgs: defaultTypeArgs }
+    );
+
+    return type;
+}
+
+export function addTypeFormForSymbol(
+    evaluator: TypeEvaluator,
+    registry: TypeRegistry,
+    node: ExpressionNode,
+    type: Type,
+    flags: EvalFlags,
+    includesVarDecl: boolean
+): Type {
+    if (!specialForms.isTypeFormSupported(node)) {
+        return type;
+    }
+
+    const isValid = isSymbolValidTypeExpression(type, includesVarDecl);
+
+    // If the type already has type information associated with it, don't replace.
+    if (type.props?.typeForm) {
+        // If the NoConvertSpecialForm flag is set, we are evaluating in
+        // the interior of a type expression, so variables are not allowed.
+        // Clear any existing type form type for this symbol in this case.
+        if ((flags & EvalFlags.NoConvertSpecialForm) !== 0 && !isValid) {
+            type = TypeBase.cloneWithTypeForm(type, undefined);
+        }
+        return type;
+    }
+
+    // If the symbol is not valid for a type expression (e.g. it's a variable),
+    // don't add TypeForm info.
+    if (!isValid) {
+        return type;
+    }
+
+    if (isTypeVar(type) && type.priv.scopeId && !type.shared.isSynthesized) {
+        if (!isTypeVarTuple(type) || !type.priv.isInUnion) {
+            const liveScopeIds = ParseTreeUtils.getTypeVarScopesForNode(node);
+            type = TypeBase.cloneWithTypeForm(type, convertToInstance(makeTypeVarsBound(type, liveScopeIds)));
+        }
+    } else if (isInstantiableClass(type) && !type.priv.includeSubclasses && !ClassType.isSpecialBuiltIn(type)) {
+        if (ClassType.isBuiltIn(type, 'Any')) {
+            type = TypeBase.cloneWithTypeForm(type, AnyType.create());
+        } else {
+            type = TypeBase.cloneWithTypeForm(type, ClassType.cloneAsInstance(specializeWithDefaultTypeArgs(type)));
+        }
+    }
+
+    if (type.props?.typeAliasInfo && TypeBase.isInstantiable(type)) {
+        let typeFormType = type;
+        if ((flags & EvalFlags.NoSpecialize) === 0) {
+            typeFormType = specializeTypeAliasWithDefaults(evaluator, registry, typeFormType, /* errorNode */ undefined);
+        }
+
+        type = TypeBase.cloneWithTypeForm(type, convertToInstance(typeFormType));
+    }
+
+    return type;
 }
