@@ -8,6 +8,14 @@
  */
 
 import { ArgCategory, ArgumentNode, ExpressionNode, ParamCategory, ParameterNode, ParseNode, ParseNodeType } from '../parser/parseNodes';
+import {
+    getParamListDetails,
+    isParamSpecArgs,
+    isParamSpecKwargs,
+    ParamAssignmentTracker,
+    ParamKind,
+} from './parameterUtils';
+import { getTypedDictMembersForClass } from './typedDicts';
 import { KeywordType } from '../parser/tokenizerTypes';
 import * as ParseTreeUtils from './parseTreeUtils';
 import { assert } from '../common/debug';
@@ -47,8 +55,13 @@ import {
     combineTypes,
     ClassType,
     isClass,
+    isInstantiableClass,
+    isNever,
+    isUnpacked,
     isUnpackedClass,
+    isUnpackedTypeVarTuple,
     maxTypeRecursionCount,
+    AnyType,
     ParamSpecType,
     removeUnbound,
     TupleTypeArg,
@@ -76,7 +89,10 @@ import {
     isOptionalType,
     isPartlyUnknown,
     getTypeCondition,
+    getTypeVarScopeIds,
+    isUnboundedTupleClass,
     isTupleClass,
+    makePacked,
     makeInferenceContext,
     requiresSpecialization,
 } from './typeUtils';
@@ -1025,4 +1041,979 @@ export function applyConditionFilterToType(
     }
 
     return type;
+}
+
+// Matches the arguments passed to a function to the corresponding parameters in that
+// function. This matching is done based on positions and keywords.
+// This logic is based on PEP 3102: https://www.python.org/dev/peps/pep-3102/
+export function matchArgsToParams(
+    evaluator: TypeEvaluator,
+    state: TypeEvaluatorState,
+    registry: TypeRegistry,
+    errorNode: ExpressionNode,
+    argList: Arg[],
+    typeResult: TypeResult<FunctionType>,
+    overloadIndex: number
+): MatchArgsToParamsResult {
+    const overload = typeResult.type;
+    const paramDetails = getParamListDetails(overload, { disallowExtraKwargsForTd: true });
+    const paramSpec = FunctionType.getParamSpecFromArgsKwargs(overload);
+
+    let argIndex = 0;
+    let unpackedArgOfUnknownLength = false;
+    let unpackedArgMapsToVariadic = false;
+    let reportedArgError = false;
+    let isTypeIncomplete = !!typeResult.isIncomplete;
+    let isTypeVarTupleFullyMatched = false;
+
+    // Expand any unpacked tuples in the arg list.
+    argList = expandArgList(evaluator, registry, argList);
+
+    const paramTracker = new ParamAssignmentTracker(paramDetails.params);
+
+    let positionalOnlyLimitIndex = paramDetails.positionOnlyParamCount;
+    let positionParamLimitIndex = paramDetails.firstKeywordOnlyIndex ?? paramDetails.params.length;
+
+    const varArgListParamIndex = paramDetails.argsIndex;
+    const varArgDictParamIndex = paramDetails.kwargsIndex;
+
+    let paramSpecArgList: Arg[] | undefined;
+    let paramSpecTarget: ParamSpecType | undefined;
+    let hasParamSpecArgsKwargs = false;
+
+    let positionalArgCount = argList.findIndex(
+        (arg) => arg.argCategory === ArgCategory.UnpackedDictionary || arg.name !== undefined
+    );
+    if (positionalArgCount < 0) {
+        positionalArgCount = argList.length;
+    }
+
+    if (varArgListParamIndex !== undefined && varArgDictParamIndex !== undefined) {
+        assert(paramDetails.params[varArgListParamIndex], 'varArgListParamIndex params entry is undefined');
+        const varArgListParamType = paramDetails.params[varArgListParamIndex].type;
+        assert(paramDetails.params[varArgDictParamIndex], 'varArgDictParamIndex params entry is undefined');
+        const varArgDictParamType = paramDetails.params[varArgDictParamIndex].type;
+
+        if (
+            isParamSpec(varArgListParamType) &&
+            varArgListParamType.priv.paramSpecAccess === 'args' &&
+            isParamSpec(varArgDictParamType) &&
+            varArgDictParamType.priv.paramSpecAccess === 'kwargs' &&
+            varArgListParamType.shared.name === varArgDictParamType.shared.name
+        ) {
+            hasParamSpecArgsKwargs = true;
+
+            const paramSpecScopeId = varArgListParamType.priv.scopeId;
+
+            if (getTypeVarScopeIds(overload).some((id) => id === paramSpecScopeId)) {
+                paramSpecArgList = [];
+                paramSpecTarget = TypeVarType.cloneForParamSpecAccess(varArgListParamType, /* access */ undefined);
+            } else {
+                positionalOnlyLimitIndex = varArgListParamIndex;
+                positionalArgCount = Math.min(varArgListParamIndex, positionalArgCount);
+                positionParamLimitIndex = varArgListParamIndex;
+            }
+        }
+    } else if (paramSpec) {
+        if (getTypeVarScopeIds(overload).some((id) => id === paramSpec.priv.scopeId)) {
+            hasParamSpecArgsKwargs = true;
+            paramSpecArgList = [];
+            paramSpecTarget = paramSpec;
+        }
+    }
+
+    if (argList.some((arg) => arg.argCategory === ArgCategory.UnpackedList)) {
+        argList.forEach((arg) => {
+            if (arg.name) {
+                const keywordParamIndex = paramDetails.params.findIndex((paramInfo) => {
+                    assert(paramInfo, 'paramInfo entry is undefined for kwargs check');
+                    return (
+                        paramInfo.param.name === arg.name!.d.value &&
+                        paramInfo.param.category === ParamCategory.Simple
+                    );
+                });
+
+                if (keywordParamIndex >= 0 && keywordParamIndex >= positionalOnlyLimitIndex) {
+                    if (positionParamLimitIndex < 0 || keywordParamIndex < positionParamLimitIndex) {
+                        positionParamLimitIndex = keywordParamIndex;
+                    }
+                }
+            }
+        });
+    }
+
+    if (positionParamLimitIndex < 0) {
+        positionParamLimitIndex = paramDetails.params.length;
+    }
+
+    let validateArgTypeParams: ValidateArgTypeParams[] = [];
+
+    let activeParam: FunctionParam | undefined;
+    function trySetActive(arg: Arg, param: FunctionParam) {
+        if (arg.active) {
+            activeParam = param;
+        }
+    }
+
+    const foundUnpackedListArg = argList.find((arg) => arg.argCategory === ArgCategory.UnpackedList) !== undefined;
+
+    let paramIndex = 0;
+
+    while (argIndex < positionalArgCount) {
+        if (argIndex < positionalOnlyLimitIndex && argList[argIndex].name) {
+            const nameNode = argList[argIndex].name;
+            if (nameNode) {
+                evaluator.addDiagnostic(DiagnosticRule.reportCallIssue, LocMessage.argPositional(), nameNode);
+                reportedArgError = true;
+            }
+        }
+
+        const remainingArgCount = positionalArgCount - argIndex;
+        const remainingParamCount = positionParamLimitIndex - paramIndex - 1;
+
+        if (paramIndex >= positionParamLimitIndex) {
+            if (paramSpecArgList) {
+                while (argIndex < positionalArgCount) {
+                    paramSpecArgList.push(argList[argIndex]);
+                    argIndex++;
+                }
+            } else {
+                let tooManyPositionals = false;
+
+                if (argList[argIndex].argCategory === ArgCategory.UnpackedList) {
+                    const argType = getTypeOfArg(evaluator, argList[argIndex], /* inferenceContext */ undefined).type;
+
+                    if (
+                        isClassInstance(argType) &&
+                        isTupleClass(argType) &&
+                        !isUnboundedTupleClass(argType) &&
+                        argType.priv.tupleTypeArgs !== undefined &&
+                        argType.priv.tupleTypeArgs.length > 0
+                    ) {
+                        tooManyPositionals = true;
+                    } else {
+                        unpackedArgOfUnknownLength = true;
+                    }
+                } else {
+                    tooManyPositionals = true;
+                }
+
+                if (tooManyPositionals) {
+                    if (!state.canSkipDiagnosticForNode(errorNode) && !isTypeIncomplete) {
+                        evaluator.addDiagnostic(
+                            DiagnosticRule.reportCallIssue,
+                            positionParamLimitIndex === 1
+                                ? LocMessage.argPositionalExpectedOne()
+                                : LocMessage.argPositionalExpectedCount().format({
+                                      expected: positionParamLimitIndex,
+                                  }),
+                            argList[argIndex].valueExpression ?? errorNode
+                        );
+                    }
+                    reportedArgError = true;
+                }
+            }
+            break;
+        }
+
+        if (paramIndex >= paramDetails.params.length) {
+            break;
+        }
+
+        assert(paramDetails.params[paramIndex], 'paramIndex params entry is undefined');
+        const paramInfo = paramDetails.params[paramIndex];
+        const paramType = paramInfo.type;
+        const paramName = paramInfo.param.name;
+
+        const isParamVariadic = paramInfo.param.category === ParamCategory.ArgsList && isUnpacked(paramType);
+
+        if (argList[argIndex].argCategory === ArgCategory.UnpackedList) {
+            let isArgCompatibleWithVariadic = false;
+
+            const argTypeResult = getTypeOfArg(evaluator, argList[argIndex], /* inferenceContext */ undefined);
+
+            let listElementType: Type | undefined;
+            let enforceIterable = false;
+            let advanceToNextArg = false;
+
+            if (paramIndex < positionParamLimitIndex) {
+                if (
+                    isParamSpec(argTypeResult.type) &&
+                    argTypeResult.type.priv.paramSpecAccess === 'args' &&
+                    paramInfo.param.category !== ParamCategory.ArgsList
+                ) {
+                    if (!state.canSkipDiagnosticForNode(errorNode) && !isTypeIncomplete) {
+                        evaluator.addDiagnostic(
+                            DiagnosticRule.reportCallIssue,
+                            positionParamLimitIndex === 1
+                                ? LocMessage.argPositionalExpectedOne()
+                                : LocMessage.argPositionalExpectedCount().format({
+                                      expected: positionParamLimitIndex,
+                                  }),
+                            argList[argIndex].valueExpression ?? errorNode
+                        );
+                    }
+                    reportedArgError = true;
+                }
+            }
+
+            const argType = argTypeResult.type;
+
+            if (isParamVariadic && isUnpackedTypeVarTuple(argType)) {
+                listElementType = argType;
+                isArgCompatibleWithVariadic = true;
+                advanceToNextArg = true;
+                isTypeVarTupleFullyMatched = true;
+            } else if (
+                isClassInstance(argType) &&
+                isTupleClass(argType) &&
+                argType.priv.tupleTypeArgs &&
+                argType.priv.tupleTypeArgs.length === 1 &&
+                isUnpackedTypeVarTuple(argType.priv.tupleTypeArgs[0].type)
+            ) {
+                listElementType = argType.priv.tupleTypeArgs[0].type;
+                isArgCompatibleWithVariadic = true;
+                advanceToNextArg = true;
+                isTypeVarTupleFullyMatched = true;
+            } else if (isParamVariadic && isClassInstance(argType) && isTupleClass(argType)) {
+                isArgCompatibleWithVariadic = true;
+                advanceToNextArg = true;
+
+                if (remainingArgCount < remainingParamCount) {
+                    isTypeVarTupleFullyMatched = true;
+                }
+
+                listElementType = ClassType.cloneForUnpacked(argType);
+            } else if (isParamSpec(argType) && argType.priv.paramSpecAccess === 'args') {
+                listElementType = undefined;
+            } else {
+                listElementType = evaluator.getTypeOfIterator(
+                    { type: argType, isIncomplete: argTypeResult.isIncomplete },
+                    /* isAsync */ false,
+                    errorNode,
+                    /* emitNotIterableError */ false
+                )?.type;
+
+                if (!listElementType) {
+                    enforceIterable = true;
+                }
+
+                unpackedArgOfUnknownLength = true;
+
+                if (paramInfo.param.category === ParamCategory.ArgsList) {
+                    unpackedArgMapsToVariadic = true;
+                }
+
+                if (isParamVariadic && listElementType) {
+                    isArgCompatibleWithVariadic = true;
+                    listElementType = makeTupleObject(
+                        evaluator,
+                        [{ type: listElementType, isUnbounded: true }],
+                        /* isUnpacked */ true
+                    );
+                }
+            }
+
+            const funcArg: Arg | undefined = listElementType
+                ? {
+                      argCategory: ArgCategory.Simple,
+                      typeResult: { type: listElementType, isIncomplete: argTypeResult.isIncomplete },
+                  }
+                : { ...argList[argIndex], enforceIterable };
+
+            if (argTypeResult.isIncomplete) {
+                isTypeIncomplete = true;
+            }
+
+            if (isParamVariadic && !isArgCompatibleWithVariadic) {
+                if (!state.canSkipDiagnosticForNode(errorNode) && !isTypeIncomplete) {
+                    evaluator.addDiagnostic(
+                        DiagnosticRule.reportCallIssue,
+                        LocMessage.unpackedArgWithVariadicParam(),
+                        argList[argIndex].valueExpression || errorNode
+                    );
+                }
+                reportedArgError = true;
+            } else {
+                if (paramSpecArgList && paramInfo.param.category !== ParamCategory.Simple) {
+                    paramSpecArgList.push(argList[argIndex]);
+                }
+
+                if (funcArg) {
+                    validateArgTypeParams.push({
+                        paramCategory: paramInfo.param.category,
+                        paramType,
+                        requiresTypeVarMatching: requiresSpecialization(paramType),
+                        argument: funcArg,
+                        errorNode: argList[argIndex].valueExpression ?? errorNode,
+                        paramName,
+                        isParamNameSynthesized: FunctionParam.isNameSynthesized(paramInfo.param),
+                        mapsToVarArgList: isParamVariadic && remainingArgCount > remainingParamCount,
+                    });
+                }
+            }
+
+            trySetActive(argList[argIndex], paramDetails.params[paramIndex].param);
+
+            if (paramName && paramDetails.params[paramIndex].param.category === ParamCategory.Simple) {
+                paramTracker.markArgReceived(paramInfo);
+            }
+
+            if (advanceToNextArg || paramDetails.params[paramIndex].param.category === ParamCategory.ArgsList) {
+                argIndex++;
+            }
+
+            if (
+                isTypeVarTupleFullyMatched ||
+                paramDetails.params[paramIndex].param.category !== ParamCategory.ArgsList
+            ) {
+                paramIndex++;
+            }
+        } else if (paramDetails.params[paramIndex].param.category === ParamCategory.ArgsList) {
+            trySetActive(argList[argIndex], paramDetails.params[paramIndex].param);
+
+            if (paramSpecArgList) {
+                paramSpecArgList.push(argList[argIndex]);
+                argIndex++;
+            } else {
+                let paramCategory = paramDetails.params[paramIndex].param.category;
+                let effectiveParamType = paramType;
+                const paramName = paramDetails.params[paramIndex].param.name;
+
+                if (
+                    isUnpackedClass(paramType) &&
+                    paramType.priv.tupleTypeArgs &&
+                    paramType.priv.tupleTypeArgs.length > 0
+                ) {
+                    effectiveParamType = paramType.priv.tupleTypeArgs[0].type;
+                }
+
+                paramCategory = isUnpacked(effectiveParamType) ? ParamCategory.ArgsList : ParamCategory.Simple;
+
+                if (remainingArgCount <= remainingParamCount) {
+                    if (remainingArgCount < remainingParamCount) {
+                        if (!state.canSkipDiagnosticForNode(errorNode) && !isTypeIncomplete) {
+                            evaluator.addDiagnostic(
+                                DiagnosticRule.reportCallIssue,
+                                remainingArgCount === 1
+                                    ? LocMessage.argMorePositionalExpectedOne()
+                                    : LocMessage.argMorePositionalExpectedCount().format({
+                                          expected: remainingArgCount,
+                                      }),
+                                argList[argIndex].valueExpression || errorNode
+                            );
+                        }
+                        reportedArgError = true;
+                    }
+
+                    paramIndex++;
+                } else {
+                    validateArgTypeParams.push({
+                        paramCategory,
+                        paramType: effectiveParamType,
+                        requiresTypeVarMatching: requiresSpecialization(paramType),
+                        argument: argList[argIndex],
+                        errorNode: argList[argIndex].valueExpression || errorNode,
+                        paramName,
+                        isParamNameSynthesized: FunctionParam.isNameSynthesized(
+                            paramDetails.params[paramIndex].param
+                        ),
+                        mapsToVarArgList: true,
+                    });
+
+                    argIndex++;
+                }
+            }
+        } else {
+            const paramInfo = paramDetails.params[paramIndex];
+            const paramName = paramInfo.param.name;
+
+            validateArgTypeParams.push({
+                paramCategory: paramInfo.param.category,
+                paramType,
+                requiresTypeVarMatching: requiresSpecialization(paramType),
+                argument: argList[argIndex],
+                errorNode: argList[argIndex].valueExpression || errorNode,
+                paramName,
+                isParamNameSynthesized: FunctionParam.isNameSynthesized(paramInfo.param),
+            });
+            trySetActive(argList[argIndex], paramInfo.param);
+
+            paramTracker.markArgReceived(paramInfo);
+
+            argIndex++;
+            paramIndex++;
+        }
+    }
+
+    // If there weren't enough positional arguments to populate all of the
+    // positional-only parameters and the next positional-only parameter is
+    // an unbounded tuple, skip past it.
+    let skippedArgsParam = false;
+    if (
+        positionalOnlyLimitIndex >= 0 &&
+        paramIndex < positionalOnlyLimitIndex &&
+        paramIndex < paramDetails.params.length &&
+        paramDetails.params[paramIndex].param.category === ParamCategory.ArgsList &&
+        !isParamSpec(paramDetails.params[paramIndex].type)
+    ) {
+        paramIndex++;
+        skippedArgsParam = true;
+    }
+
+    // Check if there weren't enough positional arguments to populate all of
+    // the positional-only parameters.
+    if (
+        positionalOnlyLimitIndex >= 0 &&
+        paramIndex < positionalOnlyLimitIndex &&
+        (!foundUnpackedListArg || hasParamSpecArgsKwargs)
+    ) {
+        const firstParamWithDefault = paramDetails.params.findIndex((paramInfo) => !!paramInfo.defaultType);
+        const positionOnlyWithoutDefaultsCount =
+            firstParamWithDefault >= 0 && firstParamWithDefault < positionalOnlyLimitIndex
+                ? firstParamWithDefault
+                : positionalOnlyLimitIndex;
+
+        let argsRemainingCount = positionOnlyWithoutDefaultsCount - positionalArgCount;
+        if (skippedArgsParam) {
+            argsRemainingCount--;
+        }
+
+        const firstArgsParam = paramDetails.params.findIndex(
+            (paramInfo) => paramInfo.param.category === ParamCategory.ArgsList && !isParamSpec(paramInfo.type)
+        );
+        if (firstArgsParam >= paramIndex && firstArgsParam < positionalOnlyLimitIndex) {
+            argsRemainingCount--;
+        }
+
+        if (argsRemainingCount > 0) {
+            if (!state.canSkipDiagnosticForNode(errorNode) && !isTypeIncomplete) {
+                evaluator.addDiagnostic(
+                    DiagnosticRule.reportCallIssue,
+                    argsRemainingCount === 1
+                        ? LocMessage.argMorePositionalExpectedOne()
+                        : LocMessage.argMorePositionalExpectedCount().format({
+                              expected: argsRemainingCount,
+                          }),
+                    argList.length > positionalArgCount
+                        ? argList[positionalArgCount].valueExpression || errorNode
+                        : errorNode
+                );
+            }
+            reportedArgError = true;
+        }
+    }
+
+    if (!reportedArgError) {
+        let unpackedDictKeyNames: string[] | undefined;
+        let unpackedDictArgType: Type | undefined;
+
+        // Now consume any keyword arguments.
+        while (argIndex < argList.length) {
+            if (argList[argIndex].argCategory === ArgCategory.UnpackedDictionary) {
+                const argTypeResult = getTypeOfArg(
+                    evaluator,
+                    argList[argIndex],
+                    makeInferenceContext(paramDetails.unpackedKwargsTypedDictType)
+                );
+                const argType = argTypeResult.type;
+
+                if (argTypeResult.isIncomplete) {
+                    isTypeIncomplete = true;
+                }
+
+                if (isAnyOrUnknown(argType)) {
+                    unpackedDictArgType = argType;
+                } else if (isClassInstance(argType) && ClassType.isTypedDictClass(argType)) {
+                    const tdEntries = getTypedDictMembersForClass(evaluator, argType);
+                    const diag = new DiagnosticAddendum();
+
+                    tdEntries.knownItems.forEach((entry, name) => {
+                        const paramEntry = paramTracker.lookupName(name);
+                        if (paramEntry) {
+                            if (paramEntry.argsReceived > 0) {
+                                diag.addMessage(LocMessage.paramAlreadyAssigned().format({ name }));
+                            } else {
+                                paramEntry.argsReceived++;
+
+                                const paramInfoIndex = paramDetails.params.findIndex(
+                                    (paramInfo) => paramInfo.param.name === name
+                                );
+                                assert(paramInfoIndex >= 0);
+                                const paramType = paramDetails.params[paramInfoIndex].type;
+
+                                validateArgTypeParams.push({
+                                    paramCategory: ParamCategory.Simple,
+                                    paramType,
+                                    requiresTypeVarMatching: requiresSpecialization(paramType),
+                                    argument: {
+                                        argCategory: ArgCategory.Simple,
+                                        typeResult: { type: entry.valueType },
+                                    },
+                                    errorNode: argList[argIndex].valueExpression ?? errorNode,
+                                    paramName: name,
+                                });
+                            }
+                        } else if (paramDetails.kwargsIndex !== undefined) {
+                            const paramType = paramDetails.params[paramDetails.kwargsIndex].type;
+                            validateArgTypeParams.push({
+                                paramCategory: ParamCategory.KwargsDict,
+                                paramType,
+                                requiresTypeVarMatching: requiresSpecialization(paramType),
+                                argument: {
+                                    argCategory: ArgCategory.Simple,
+                                    typeResult: { type: entry.valueType },
+                                },
+                                errorNode: argList[argIndex].valueExpression ?? errorNode,
+                                paramName: name,
+                            });
+
+                            paramTracker.addKeywordParam(name, paramDetails.params[paramDetails.kwargsIndex]);
+                        } else {
+                            if (!paramDetails.hasUnpackedTypedDict) {
+                                diag.addMessage(LocMessage.paramNameMissing().format({ name }));
+                            }
+                        }
+                    });
+
+                    const extraItemsType =
+                        tdEntries.extraItems?.valueType ??
+                        (registry.objectClass ? convertToInstance(registry.objectClass) : UnknownType.create());
+                    if (!isNever(extraItemsType)) {
+                        if (paramDetails.kwargsIndex !== undefined) {
+                            const kwargsParam = paramDetails.params[paramDetails.kwargsIndex];
+
+                            validateArgTypeParams.push({
+                                paramCategory: ParamCategory.KwargsDict,
+                                paramType: kwargsParam.type,
+                                requiresTypeVarMatching: requiresSpecialization(kwargsParam.type),
+                                argument: {
+                                    argCategory: ArgCategory.UnpackedDictionary,
+                                    typeResult: { type: extraItemsType },
+                                },
+                                errorNode: argList[argIndex].valueExpression ?? errorNode,
+                                paramName: kwargsParam.param.name,
+                            });
+                        }
+                    }
+
+                    if (!diag.isEmpty()) {
+                        if (!state.canSkipDiagnosticForNode(errorNode) && !isTypeIncomplete) {
+                            evaluator.addDiagnostic(
+                                DiagnosticRule.reportCallIssue,
+                                LocMessage.unpackedTypedDictArgument() + diag.getString(),
+                                argList[argIndex].valueExpression || errorNode
+                            );
+                        }
+                        reportedArgError = true;
+                    }
+                } else if (paramSpec && isParamSpecKwargs(paramSpec, argType)) {
+                    unpackedDictArgType = AnyType.create();
+
+                    if (!paramSpecArgList) {
+                        validateArgTypeParams.push({
+                            paramCategory: ParamCategory.KwargsDict,
+                            paramType: paramSpec,
+                            requiresTypeVarMatching: false,
+                            argument: argList[argIndex],
+                            argType: isParamSpec(argType) ? undefined : AnyType.create(),
+                            errorNode: argList[argIndex].valueExpression || errorNode,
+                        });
+                    }
+                } else {
+                    const strObjType = evaluator.getBuiltInObject(errorNode, 'str');
+
+                    if (
+                        registry.supportsKeysAndGetItemClass &&
+                        isInstantiableClass(registry.supportsKeysAndGetItemClass) &&
+                        strObjType &&
+                        isClassInstance(strObjType)
+                    ) {
+                        const mappingConstraints = new ConstraintTracker();
+                        let isValidMappingType = false;
+
+                        if (isTypeVar(argType)) {
+                            isValidMappingType = true;
+                        } else if (
+                            evaluator.assignType(
+                                ClassType.cloneAsInstance(registry.supportsKeysAndGetItemClass),
+                                argType,
+                                /* diag */ undefined,
+                                mappingConstraints
+                            )
+                        ) {
+                            const specializedMapping = evaluator.solveAndApplyConstraints(
+                                registry.supportsKeysAndGetItemClass,
+                                mappingConstraints
+                            ) as ClassType;
+                            const typeArgs = specializedMapping.priv.typeArgs;
+                            if (typeArgs && typeArgs.length >= 2) {
+                                if (evaluator.assignType(strObjType, typeArgs[0])) {
+                                    isValidMappingType = true;
+                                }
+
+                                unpackedDictKeyNames = [];
+                                doForEachSubtype(typeArgs[0], (keyType) => {
+                                    if (isClassInstance(keyType) && typeof keyType.priv.literalValue === 'string') {
+                                        unpackedDictKeyNames?.push(keyType.priv.literalValue);
+                                    } else {
+                                        unpackedDictKeyNames = undefined;
+                                    }
+                                });
+
+                                unpackedDictArgType = typeArgs[1];
+                            } else {
+                                isValidMappingType = true;
+                                unpackedDictArgType = UnknownType.create();
+                            }
+                        }
+
+                        unpackedArgOfUnknownLength = true;
+
+                        if (paramDetails.kwargsIndex !== undefined && unpackedDictArgType) {
+                            const paramType = paramDetails.params[paramDetails.kwargsIndex].type;
+                            validateArgTypeParams.push({
+                                paramCategory: ParamCategory.Simple,
+                                paramType,
+                                requiresTypeVarMatching: requiresSpecialization(paramType),
+                                argType: unpackedDictArgType,
+                                argument: argList[argIndex],
+                                errorNode: argList[argIndex].valueExpression || errorNode,
+                                paramName: paramDetails.params[paramDetails.kwargsIndex].param.name,
+                            });
+
+                            unpackedArgMapsToVariadic = true;
+                        }
+
+                        if (!isValidMappingType) {
+                            if (!state.canSkipDiagnosticForNode(errorNode) && !isTypeIncomplete) {
+                                evaluator.addDiagnostic(
+                                    DiagnosticRule.reportCallIssue,
+                                    LocMessage.unpackedDictArgumentNotMapping(),
+                                    argList[argIndex].valueExpression || errorNode
+                                );
+                            }
+                            reportedArgError = true;
+                        }
+                    }
+                }
+
+                if (paramSpecArgList) {
+                    paramSpecArgList.push(argList[argIndex]);
+                }
+            } else {
+                const paramName = argList[argIndex].name;
+                if (paramName) {
+                    const paramNameValue = paramName.d.value;
+                    const paramEntry = paramTracker.lookupName(paramNameValue);
+
+                    if (paramEntry) {
+                        if (paramEntry.argsReceived > 0) {
+                            if (!state.canSkipDiagnosticForNode(errorNode) && !isTypeIncomplete) {
+                                evaluator.addDiagnostic(
+                                    DiagnosticRule.reportCallIssue,
+                                    LocMessage.paramAlreadyAssigned().format({ name: paramNameValue }),
+                                    paramName
+                                );
+                            }
+                            reportedArgError = true;
+                        } else {
+                            paramEntry.argsReceived++;
+
+                            const paramInfoIndex = paramDetails.params.findIndex(
+                                (paramInfo) =>
+                                    paramInfo.param.name === paramNameValue &&
+                                    paramInfo.kind !== ParamKind.Positional
+                            );
+                            assert(paramInfoIndex >= 0);
+                            const paramType = paramDetails.params[paramInfoIndex].type;
+
+                            validateArgTypeParams.push({
+                                paramCategory: ParamCategory.Simple,
+                                paramType,
+                                requiresTypeVarMatching: requiresSpecialization(paramType),
+                                argument: argList[argIndex],
+                                errorNode: argList[argIndex].valueExpression ?? errorNode,
+                                paramName: paramNameValue,
+                            });
+                            trySetActive(argList[argIndex], paramDetails.params[paramInfoIndex].param);
+                        }
+                    } else if (paramSpecArgList) {
+                        paramSpecArgList.push(argList[argIndex]);
+                    } else if (paramDetails.kwargsIndex !== undefined) {
+                        const paramType = paramDetails.params[paramDetails.kwargsIndex].type;
+                        if (isParamSpec(paramType)) {
+                            if (!state.canSkipDiagnosticForNode(errorNode) && !isTypeIncomplete) {
+                                evaluator.addDiagnostic(
+                                    DiagnosticRule.reportCallIssue,
+                                    LocMessage.paramNameMissing().format({ name: paramName.d.value }),
+                                    paramName
+                                );
+                            }
+                            reportedArgError = true;
+                        } else {
+                            validateArgTypeParams.push({
+                                paramCategory: ParamCategory.KwargsDict,
+                                paramType,
+                                requiresTypeVarMatching: requiresSpecialization(paramType),
+                                argument: argList[argIndex],
+                                errorNode: argList[argIndex].valueExpression ?? errorNode,
+                                paramName: paramNameValue,
+                            });
+
+                            assert(
+                                paramDetails.params[paramDetails.kwargsIndex],
+                                'paramDetails.kwargsIndex params entry is undefined'
+                            );
+
+                            paramTracker.addKeywordParam(
+                                paramNameValue,
+                                paramDetails.params[paramDetails.kwargsIndex]
+                            );
+                        }
+                        trySetActive(argList[argIndex], paramDetails.params[paramDetails.kwargsIndex].param);
+                    } else {
+                        if (!state.canSkipDiagnosticForNode(errorNode) && !isTypeIncomplete) {
+                            evaluator.addDiagnostic(
+                                DiagnosticRule.reportCallIssue,
+                                LocMessage.paramNameMissing().format({ name: paramName.d.value }),
+                                paramName
+                            );
+                        }
+                        reportedArgError = true;
+                    }
+                } else if (argList[argIndex].argCategory === ArgCategory.Simple) {
+                    if (paramSpecArgList) {
+                        paramSpecArgList.push(argList[argIndex]);
+                    } else {
+                        if (!state.canSkipDiagnosticForNode(errorNode) && !isTypeIncomplete) {
+                            evaluator.addDiagnostic(
+                                DiagnosticRule.reportCallIssue,
+                                positionParamLimitIndex === 1
+                                    ? LocMessage.argPositionalExpectedOne()
+                                    : LocMessage.argPositionalExpectedCount().format({
+                                          expected: positionParamLimitIndex,
+                                      }),
+                                argList[argIndex].valueExpression || errorNode
+                            );
+                        }
+                        reportedArgError = true;
+                    }
+                } else if (argList[argIndex].argCategory === ArgCategory.UnpackedList) {
+                    if (paramSpec) {
+                        const argTypeResult = getTypeOfArg(evaluator, argList[argIndex], /* inferenceContext */ undefined);
+                        const argType = argTypeResult.type;
+
+                        if (argTypeResult.isIncomplete) {
+                            isTypeIncomplete = true;
+                        }
+
+                        if (isParamSpecArgs(paramSpec, argType)) {
+                            validateArgTypeParams.push({
+                                paramCategory: ParamCategory.ArgsList,
+                                paramType: paramSpec,
+                                requiresTypeVarMatching: false,
+                                argument: argList[argIndex],
+                                argType: isParamSpec(argType) ? undefined : AnyType.create(),
+                                errorNode: argList[argIndex].valueExpression ?? errorNode,
+                            });
+                        }
+                    }
+                }
+            }
+
+            argIndex++;
+        }
+
+        // If there are keyword-only parameters that haven't been matched but we
+        // have an unpacked dictionary arg, assume that it applies to them.
+        if (unpackedDictArgType && (!foundUnpackedListArg || paramDetails.argsIndex !== undefined)) {
+            paramDetails.params.forEach((paramInfo, paramIndex) => {
+                const param = paramInfo.param;
+                if (
+                    paramIndex >= paramDetails.firstPositionOrKeywordIndex &&
+                    param.category === ParamCategory.Simple &&
+                    param.name &&
+                    paramTracker.lookupDetails(paramInfo).argsReceived === 0
+                ) {
+                    const paramType = paramDetails.params[paramIndex].type;
+
+                    if (!unpackedDictKeyNames || unpackedDictKeyNames.includes(param.name)) {
+                        validateArgTypeParams.push({
+                            paramCategory: ParamCategory.Simple,
+                            paramType,
+                            requiresTypeVarMatching: requiresSpecialization(paramType),
+                            argument: {
+                                argCategory: ArgCategory.Simple,
+                                typeResult: { type: unpackedDictArgType! },
+                            },
+                            errorNode:
+                                argList.find((arg) => arg.argCategory === ArgCategory.UnpackedDictionary)
+                                    ?.valueExpression ?? errorNode,
+                            paramName: param.name,
+                            isParamNameSynthesized: FunctionParam.isNameSynthesized(param),
+                        });
+
+                        paramTracker.markArgReceived(paramDetails.params[paramIndex]);
+                    }
+                }
+            });
+        }
+
+        // Determine whether there are any parameters that require arguments
+        // but have not yet received them.
+        if (!unpackedDictArgType && !FunctionType.isDefaultParamCheckDisabled(overload)) {
+            const unassignedParams = paramTracker.getUnassignedParams();
+
+            if (unassignedParams.length > 0) {
+                if (!state.canSkipDiagnosticForNode(errorNode)) {
+                    const missingParamNames = unassignedParams.map((p: string) => `"${p}"`).join(', ');
+                    if (!state.canSkipDiagnosticForNode(errorNode) && !isTypeIncomplete) {
+                        evaluator.addDiagnostic(
+                            DiagnosticRule.reportCallIssue,
+                            unassignedParams.length === 1
+                                ? LocMessage.argMissingForParam().format({ name: missingParamNames })
+                                : LocMessage.argMissingForParams().format({ names: missingParamNames }),
+                            errorNode
+                        );
+                    }
+                }
+                reportedArgError = true;
+            }
+
+            paramDetails.params.forEach((paramInfo) => {
+                const param = paramInfo.param;
+                if (param.category === ParamCategory.Simple && param.name) {
+                    const entry = paramTracker.lookupDetails(paramInfo);
+
+                    if (entry.argsNeeded === 0 && entry.argsReceived === 0) {
+                        const defaultArgType = paramInfo.defaultType;
+
+                        if (
+                            defaultArgType &&
+                            !isEllipsisType(defaultArgType) &&
+                            requiresSpecialization(paramInfo.declaredType, { ignorePseudoGeneric: true })
+                        ) {
+                            validateArgTypeParams.push({
+                                paramCategory: param.category,
+                                paramType: paramInfo.type,
+                                requiresTypeVarMatching: true,
+                                argument: {
+                                    argCategory: ArgCategory.Simple,
+                                    typeResult: { type: defaultArgType },
+                                },
+                                isDefaultArg: true,
+                                errorNode,
+                                paramName: param.name,
+                                isParamNameSynthesized: FunctionParam.isNameSynthesized(param),
+                            });
+                        }
+                    }
+                }
+            });
+        }
+    }
+
+    if (!reportedArgError || !state.isSpeculativeModeInUse(undefined)) {
+        assert(
+            paramDetails.argsIndex === undefined || paramDetails.argsIndex < paramDetails.params.length,
+            'paramDetails.argsIndex params entry is invalid'
+        );
+        if (
+            paramDetails.argsIndex !== undefined &&
+            paramDetails.argsIndex >= 0 &&
+            FunctionParam.isTypeDeclared(paramDetails.params[paramDetails.argsIndex].param) &&
+            !isTypeVarTupleFullyMatched
+        ) {
+            const paramType = paramDetails.params[paramDetails.argsIndex].type;
+            const variadicArgs = validateArgTypeParams.filter((argParam) => argParam.mapsToVarArgList);
+
+            if (isUnpacked(paramType) && (!isTypeVarTuple(paramType) || !paramType.priv.isInUnion)) {
+                const tupleTypeArgs: TupleTypeArg[] = variadicArgs.map((argParam) => {
+                    const argType = getTypeOfArg(evaluator, argParam.argument, /* inferenceContext */ undefined).type;
+
+                    const containsTypeVarTuple =
+                        isUnpackedTypeVarTuple(argType) ||
+                        (isClassInstance(argType) &&
+                            isTupleClass(argType) &&
+                            argType.priv.tupleTypeArgs &&
+                            argType.priv.tupleTypeArgs.length === 1 &&
+                            isUnpackedTypeVarTuple(argType.priv.tupleTypeArgs[0].type));
+
+                    if (
+                        containsTypeVarTuple &&
+                        argParam.argument.argCategory !== ArgCategory.UnpackedList &&
+                        !argParam.mapsToVarArgList
+                    ) {
+                        if (!state.canSkipDiagnosticForNode(errorNode) && !isTypeIncomplete) {
+                            evaluator.addDiagnostic(
+                                DiagnosticRule.reportCallIssue,
+                                LocMessage.typeVarTupleMustBeUnpacked(),
+                                argParam.argument.valueExpression ?? errorNode
+                            );
+                        }
+                        reportedArgError = true;
+                    }
+
+                    return {
+                        type: argType,
+                        isUnbounded: argParam.argument.argCategory === ArgCategory.UnpackedList,
+                    };
+                });
+
+                let specializedTuple: Type | undefined;
+                if (tupleTypeArgs.length === 1 && !tupleTypeArgs[0].isUnbounded) {
+                    const entryType = tupleTypeArgs[0].type;
+
+                    if (isUnpacked(entryType)) {
+                        specializedTuple = makePacked(entryType);
+                    }
+                }
+
+                if (!specializedTuple) {
+                    specializedTuple = makeTupleObject(evaluator, tupleTypeArgs, /* isUnpacked */ false);
+                }
+
+                const combinedArg: ValidateArgTypeParams = {
+                    paramCategory: ParamCategory.Simple,
+                    paramType: makePacked(paramType),
+                    requiresTypeVarMatching: true,
+                    argument: {
+                        argCategory: ArgCategory.Simple,
+                        typeResult: { type: specializedTuple },
+                    },
+                    errorNode,
+                    paramName: paramDetails.params[paramDetails.argsIndex].param.name,
+                    isParamNameSynthesized: FunctionParam.isNameSynthesized(
+                        paramDetails.params[paramDetails.argsIndex].param
+                    ),
+                    mapsToVarArgList: true,
+                };
+
+                validateArgTypeParams = [
+                    ...validateArgTypeParams.filter((argParam) => !argParam.mapsToVarArgList),
+                    combinedArg,
+                ];
+            }
+        }
+    }
+
+    // Special-case the builtin isinstance and issubclass functions.
+    if (FunctionType.isBuiltIn(overload, ['isinstance', 'issubclass']) && validateArgTypeParams.length === 2) {
+        validateArgTypeParams[1].isinstanceParam = true;
+    }
+
+    return {
+        overload,
+        overloadIndex,
+        argumentErrors: reportedArgError,
+        isTypeIncomplete,
+        argParams: validateArgTypeParams,
+        paramSpecTarget,
+        paramSpecArgList,
+        activeParam,
+        unpackedArgOfUnknownLength,
+        unpackedArgMapsToVariadic,
+        argumentMatchScore: 0,
+    };
 }

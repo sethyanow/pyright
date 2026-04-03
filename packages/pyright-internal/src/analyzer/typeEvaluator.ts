@@ -8212,8 +8212,17 @@ export function createTypeEvaluator(
     // Matches the arguments passed to a function to the corresponding parameters in that
     // function. This matching is done based on positions and keywords. Type evaluation and
     // validation is left to the caller.
-    // This logic is based on PEP 3102: https://www.python.org/dev/peps/pep-3102/
     function matchArgsToParams(
+        errorNode: ExpressionNode,
+        argList: Arg[],
+        typeResult: TypeResult<FunctionType>,
+        overloadIndex: number
+    ): MatchArgsToParamsResult {
+        return callValidation.matchArgsToParams(evaluatorInterface, state, registry, errorNode, argList, typeResult, overloadIndex);
+    }
+
+    // This logic is based on PEP 3102: https://www.python.org/dev/peps/pep-3102/
+    function _matchArgsToParams_dead(
         errorNode: ExpressionNode,
         argList: Arg[],
         typeResult: TypeResult<FunctionType>,
