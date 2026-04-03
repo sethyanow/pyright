@@ -680,6 +680,7 @@ export interface TypeEvaluator {
     canBeTruthy: (type: Type) => boolean;
     canBeFalsy: (type: Type) => boolean;
     stripLiteralValue: (type: Type) => Type;
+    convertSpecialFormToRuntimeValue: (type: Type, flags: EvalFlags, convertModule?: boolean) => Type;
     removeTruthinessFromType: (type: Type) => Type;
     removeFalsinessFromType: (type: Type) => Type;
     stripTypeGuard: (type: Type) => Type;

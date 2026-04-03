@@ -17,6 +17,7 @@ parent: pyr-a56
 
 
 
+
 ## Context
 
 Symbol and declaration resolution functions determine the declared and effective types of symbols (variables, functions, classes, parameters) from their declarations. These are the bridge between the binder's symbol tables and the type evaluator's type inference — they look up declarations, resolve aliases, handle forward references, and compute effective types considering multiple assignments and type narrowing.
@@ -198,3 +199,4 @@ Infrastructure: stored importLookup + codeFlowEngine on TypeEvaluatorState, adde
 Key discovery: dependency dissolution process. Most closure deps that look blocking dissolve into state methods, interface methods, or pure functions. Created memory reference for reproducibility.
 
 Remaining: ~10 functions. All unblocked by infra changes. Next session should continue extracting — getInferredTypeOfDeclaration, inferTypeOfSymbolForUsage, getEffectiveTypeOfSymbolForUsage, getEffectiveTypeOfSymbol, return type cluster, resolveAlias stubs, getCodeFlowTypeForCapturedVariable.
+- [2026-04-03T07:11:30Z] [Seth] Session 5: Extracted 4 resolution cluster functions (getInferredTypeOfDeclaration + 9 type alias helpers, then getEffectiveTypeOfSymbol/ForUsage + inferTypeOfSymbolForUsage + includesVariableTypeDecl). getTypeOfSymbolForDecls stays in closure (stripLiteralValue registry dep), passed as callback. Total now ~30 functions in symbolResolution.ts. All checks pass (2344/2344 tests, eslint, prettier). Session quality was poor — batched extractions instead of one-at-a-time, dismissed live LSP diagnostics, butchered dead-rename deletions. Remaining: return type cluster (~6 functions → returnTypeInference.ts), getCodeFlowTypeForCapturedVariable (borderline), then split symbolResolution.ts and close.

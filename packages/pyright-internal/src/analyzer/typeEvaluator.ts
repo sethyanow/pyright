@@ -111,7 +111,7 @@ import {
     VariableDeclaration,
 } from './declaration';
 import { getNameNodeForDeclaration, ResolvedAliasInfo } from './declarationUtils';
-import { TypeCacheEntry, TypeEvaluatorState } from './typeEvaluatorState';
+import { LogWrapper, TypeCacheEntry, TypeEvaluatorState } from './typeEvaluatorState';
 import { populateTypeRegistry, TypeRegistry } from './typeRegistry';
 import {
     addOverloadsToFunctionType,
@@ -149,6 +149,7 @@ import { assignTypeToPatternTargets, checkForUnusedPattern, narrowTypeBasedOnPat
 import { Scope, ScopeType, SymbolWithScope } from './scope';
 import * as specialForms from './specialForms';
 import * as typeAssignment from './typeAssignment';
+import * as returnTypeInference from './returnTypeInference';
 import * as symbolResolution from './symbolResolution';
 import * as ScopeUtils from './scopeUtils';
 import { createSentinelType } from './sentinel';
@@ -439,41 +440,10 @@ interface ParamSpecArgResult {
 }
 
 // How many levels deep should we attempt to infer return
-// types based on call-site argument types? The deeper we go,
-// the more types we may be able to infer, but the worse the
-// performance.
-const maxReturnTypeInferenceStackSize = 2;
-
-// What is the max number of input arguments we should allow
-// for call-site return type inference? We've found that large,
-// complex functions with many arguments can take too long to
-// analyze.
-const maxReturnTypeInferenceArgCount = 6;
-
-// What is the max complexity of the code flow graph that
-// we will analyze to determine the return type of a function
-// when its parameters are unannotated? We want to keep this
-// pretty low because this can be very costly.
-const maxReturnTypeInferenceCodeFlowComplexity = 32;
-
-// What is the max complexity of the code flow graph for
-// call-site type inference? This is very expensive, so we
-// want to keep this very low.
-const maxReturnCallSiteTypeInferenceCodeFlowComplexity = 8;
-
-// What is the max number of return types cached per function
-// when using call-site inference?
-const maxCallSiteReturnTypeCacheSize = 8;
-
 // How many entries in a list, set, or dict should we examine
 // when inferring the type? We need to cut it off at some point
 // to avoid excessive computation.
 const maxEntriesToUseForInference = 64;
-
-// How many times should attempt to infer a return type of a
-// function before giving up and assuming that it won't converge
-// due to recursion?
-const maxReturnTypeInferenceAttempts = 8;
 
 // How many assignments to an unannotated variable should be used
 // Maximum number of times to attempt effective type evaluation
@@ -514,8 +484,6 @@ export interface EvaluatorOptions {
 // fully created and the "PartiallyEvaluated" flag has just been cleared.
 // This allows us to properly compute information like the MRO which
 // depends on a full understanding of base classes.
-type LogWrapper = <T extends (...args: any[]) => any>(func: T) => (...args: Parameters<T>) => ReturnType<T>;
-
 export function createTypeEvaluator(
     importLookup: ImportLookup,
     evaluatorOptions: EvaluatorOptions,
@@ -523,6 +491,7 @@ export function createTypeEvaluator(
 ): TypeEvaluator {
     const state = new TypeEvaluatorState(evaluatorOptions);
     state.setImportLookup(importLookup);
+    state.setWrapWithLogger(wrapWithLogger);
     const isTypeFormSupported = specialForms.isTypeFormSupported;
     const applyUnpackToTupleLike = specialForms.applyUnpackToTupleLike;
     const getFunctionFullName = specialForms.getFunctionFullName;
@@ -16232,13 +16201,6 @@ export function createTypeEvaluator(
         }
     }
 
-    function inferFunctionReturnType(
-        node: FunctionNode,
-        isAbstract: boolean,
-        callerNode: ExpressionNode | undefined
-    ): TypeResult | undefined {
-        return symbolResolution.inferFunctionReturnType(evaluatorInterface, state, node, isAbstract, callerNode);
-    }
 
     function evaluateTypesForForStatement(node: ForNode): void {
         if (isTypeCached(node)) {
@@ -17572,9 +17534,6 @@ export function createTypeEvaluator(
     ) {
         return state.useSpeculativeMode(speculativeNode, callback, options);
     }
-    function disableSpeculativeMode(callback: () => void) {
-        state.disableSpeculativeMode(callback);
-    }
     function isSpeculativeModeInUse(node: ParseNode | undefined) {
         return state.isSpeculativeModeInUse(node);
     }
@@ -17967,308 +17926,7 @@ export function createTypeEvaluator(
     }
 
     function _getInferredReturnTypeResult(type: FunctionType, callSiteInfo?: CallSiteEvaluationInfo): TypeResult {
-        let returnType: Type | undefined;
-        let isIncomplete = false;
-        const analyzeUnannotatedFunctions = true;
-
-        // Don't attempt to infer the return type for a stub file.
-        if (FunctionType.isStubDefinition(type)) {
-            return { type: UnknownType.create() };
-        }
-
-        // Don't infer the return type for a ParamSpec value.
-        if (FunctionType.isParamSpecValue(type)) {
-            return { type: UnknownType.create() };
-        }
-
-        // Don't infer the return type for an overloaded function (unless it's synthesized,
-        // which is needed for proper operation of the __get__ method in properties).
-        if (FunctionType.isOverloaded(type) && !FunctionType.isSynthesizedMethod(type)) {
-            return { type: UnknownType.create() };
-        }
-
-        const evalCount = type.shared.inferredReturnType?.evaluationCount ?? 0;
-
-        // If the return type has already been lazily evaluated,
-        // don't bother computing it again.
-        if (type.shared.inferredReturnType && !type.shared.inferredReturnType.isIncomplete) {
-            returnType = type.shared.inferredReturnType.type;
-        } else if (evalCount > maxReturnTypeInferenceAttempts) {
-            // Detect a case where a return type won't converge because of recursion.
-            returnType = UnknownType.create();
-        } else {
-            // Don't bother inferring the return type of __init__ because it's
-            // always None.
-            if (FunctionType.isInstanceMethod(type) && type.shared.name === '__init__') {
-                returnType = getNoneType();
-            } else if (type.shared.declaration) {
-                const functionNode = type.shared.declaration.node;
-                const skipUnannotatedFunction =
-                    !AnalyzerNodeInfo.getFileInfo(functionNode).diagnosticRuleSet.analyzeUnannotatedFunctions &&
-                    ParseTreeUtils.isUnannotatedFunction(functionNode);
-
-                // Skip return type inference if we are in "skip unannotated function" mode.
-                if (!skipUnannotatedFunction && !checkCodeFlowTooComplex(functionNode.d.suite)) {
-                    const codeFlowComplexity = AnalyzerNodeInfo.getCodeFlowComplexity(functionNode);
-
-                    // For very complex functions that have no annotated parameter types,
-                    // don't attempt to infer the return type because it can be extremely
-                    // expensive.
-                    const parametersAreAnnotated =
-                        type.shared.parameters.length <= 1 ||
-                        type.shared.parameters.some((param) => FunctionParam.isTypeDeclared(param));
-
-                    if (parametersAreAnnotated || codeFlowComplexity < maxReturnTypeInferenceCodeFlowComplexity) {
-                        // Temporarily disable speculative mode while we
-                        // lazily evaluate the return type.
-                        let returnTypeResult: TypeResult | undefined;
-                        disableSpeculativeMode(() => {
-                            returnTypeResult = inferFunctionReturnType(
-                                functionNode,
-                                FunctionType.isAbstractMethod(type),
-                                callSiteInfo?.errorNode
-                            );
-                        });
-
-                        returnType = returnTypeResult?.type;
-                        if (returnTypeResult?.isIncomplete) {
-                            isIncomplete = true;
-                        }
-                    }
-                }
-            }
-
-            if (!returnType) {
-                returnType = UnknownType.create();
-            }
-
-            // Externalize any TypeVars that appear in the type.
-            const typeVarScopes: TypeVarScopeId[] = [];
-            if (type.shared.typeVarScopeId) {
-                typeVarScopes.push(type.shared.typeVarScopeId);
-            }
-            if (type.shared.methodClass?.shared.typeVarScopeId) {
-                typeVarScopes.push(type.shared.methodClass.shared.typeVarScopeId);
-            }
-            returnType = makeTypeVarsFree(returnType, typeVarScopes);
-
-            // Cache the type for next time.
-            type.shared.inferredReturnType = { type: returnType, isIncomplete, evaluationCount: evalCount + 1 };
-        }
-
-        // If the type is partially unknown and the function has one or more unannotated
-        // params, try to analyze the function with the provided argument types and
-        // attempt to do a better job at inference.
-        if (
-            !isIncomplete &&
-            analyzeUnannotatedFunctions &&
-            isPartlyUnknown(returnType) &&
-            FunctionType.hasUnannotatedParams(type) &&
-            !FunctionType.isStubDefinition(type) &&
-            !FunctionType.isPyTypedDefinition(type) &&
-            callSiteInfo
-        ) {
-            let hasDecorators = false;
-            let isAsync = false;
-            const declNode = type.shared.declaration?.node;
-            if (declNode) {
-                if (declNode.d.decorators.length > 0) {
-                    hasDecorators = true;
-                }
-                if (declNode.d.isAsync) {
-                    isAsync = true;
-                }
-            }
-
-            // We can't use this technique if decorators or async are used because they
-            // would need to be applied to the inferred return type.
-            if (!hasDecorators && !isAsync) {
-                const contextualReturnType = inferReturnTypeForCallSite(type, callSiteInfo);
-                if (contextualReturnType) {
-                    returnType = contextualReturnType;
-
-                    if (type.shared.declaration?.node) {
-                        // Externalize any TypeVars that appear in the type.
-                        const liveScopeIds = ParseTreeUtils.getTypeVarScopesForNode(type.shared.declaration.node);
-                        returnType = makeTypeVarsFree(returnType, liveScopeIds);
-                    }
-                }
-            }
-        }
-
-        return { type: returnType, isIncomplete };
-    }
-
-    function inferReturnTypeForCallSite(type: FunctionType, callSiteInfo: CallSiteEvaluationInfo): Type | undefined {
-        const args = callSiteInfo.args;
-        let contextualReturnType: Type | undefined;
-
-        if (!type.shared.declaration) {
-            return undefined;
-        }
-        const functionNode = type.shared.declaration.node;
-        const codeFlowComplexity = AnalyzerNodeInfo.getCodeFlowComplexity(functionNode);
-
-        if (codeFlowComplexity >= maxReturnCallSiteTypeInferenceCodeFlowComplexity) {
-            return undefined;
-        }
-
-        // If an arg hasn't been matched to a specific named parameter,
-        // it's an unpacked value that corresponds to multiple parameters.
-        // That's an edge case that we don't handle here.
-        if (args.some((arg) => !arg.paramName)) {
-            return undefined;
-        }
-
-        // Detect recurrence. If a function invokes itself either directly
-        // or indirectly, we won't attempt to infer contextual return
-        // types any further.
-        if (state.returnTypeInferenceContextStack.some((context) => context.functionNode === functionNode)) {
-            return undefined;
-        }
-
-        const functionTypeResult = getTypeOfFunction(functionNode);
-        if (!functionTypeResult) {
-            return undefined;
-        }
-
-        // Very complex functions with many arguments can take a long time to analyze,
-        // so we'll use a heuristic and avoiding this inference technique for any
-        // call site that involves too many arguments.
-        if (args.length > maxReturnTypeInferenceArgCount) {
-            return undefined;
-        }
-
-        // Don't explore arbitrarily deep in the call graph.
-        if (state.returnTypeInferenceContextStack.length >= maxReturnTypeInferenceStackSize) {
-            return undefined;
-        }
-
-        const paramTypes: Type[] = [];
-        let isResultFromCache = false;
-
-        // If the call is located in a loop, don't use literal argument types
-        // for the same reason we don't do literal math in loops.
-        const stripLiteralArgTypes = ParseTreeUtils.isWithinLoop(callSiteInfo.errorNode);
-
-        // Suppress diagnostics because we don't want to generate errors.
-        suppressDiagnostics(functionNode, () => {
-            // Allocate a new temporary type cache for the context of just
-            // this function so we can analyze it separately without polluting
-            // the main type cache.
-            const prevTypeCache = state.returnTypeInferenceTypeCache;
-            state.returnTypeInferenceContextStack.push({
-                functionNode,
-                codeFlowAnalyzer: codeFlowEngine.createCodeFlowAnalyzer(),
-            });
-
-            try {
-                state.returnTypeInferenceTypeCache = new Map<number, TypeCacheEntry>();
-
-                let allArgTypesAreUnknown = true;
-                functionNode.d.params.forEach((param, index) => {
-                    if (param.d.name) {
-                        let paramType: Type | undefined;
-                        const arg = args.find((arg) => param.d.name!.d.value === arg.paramName);
-
-                        if (arg && arg.argument.valueExpression) {
-                            paramType = getTypeOfExpression(arg.argument.valueExpression).type;
-                            if (!isUnknown(paramType)) {
-                                allArgTypesAreUnknown = false;
-                            }
-                        } else if (param.d.defaultValue) {
-                            paramType = getTypeOfExpression(param.d.defaultValue).type;
-                            if (!isUnknown(paramType)) {
-                                allArgTypesAreUnknown = false;
-                            }
-                        } else if (index === 0) {
-                            // If this is an instance or class method, use the implied
-                            // parameter type for the "self" or "cls" parameter.
-                            if (
-                                FunctionType.isInstanceMethod(functionTypeResult.functionType) ||
-                                FunctionType.isClassMethod(functionTypeResult.functionType)
-                            ) {
-                                if (functionTypeResult.functionType.shared.parameters.length > 0) {
-                                    if (functionNode.d.params[0].d.name) {
-                                        paramType = FunctionType.getParamType(functionTypeResult.functionType, 0);
-                                    }
-                                }
-                            }
-                        }
-
-                        if (!paramType) {
-                            paramType = UnknownType.create();
-                        }
-
-                        if (stripLiteralArgTypes) {
-                            paramType = stripTypeForm(
-                                convertSpecialFormToRuntimeValue(
-                                    stripLiteralValue(paramType),
-                                    EvalFlags.None,
-                                    /* convertModule */ true
-                                )
-                            );
-                        }
-
-                        paramTypes.push(paramType);
-                        writeTypeCache(param.d.name, { type: paramType }, EvalFlags.None);
-                    }
-                });
-
-                // Don't bother trying to determine the contextual return
-                // type if none of the argument types are known.
-                if (!allArgTypesAreUnknown) {
-                    // See if the return type is already cached. If so, skip the
-                    // inference step, which is potentially very expensive.
-                    const cacheEntry = functionTypeResult.functionType.priv.callSiteReturnTypeCache?.find((entry) => {
-                        return (
-                            entry.paramTypes.length === paramTypes.length &&
-                            entry.paramTypes.every((t, i) => isTypeSame(t, paramTypes[i]))
-                        );
-                    });
-
-                    if (cacheEntry) {
-                        contextualReturnType = cacheEntry.returnType;
-                        isResultFromCache = true;
-                    } else {
-                        contextualReturnType = inferFunctionReturnType(
-                            functionNode,
-                            FunctionType.isAbstractMethod(type),
-                            callSiteInfo?.errorNode
-                        )?.type;
-                    }
-                }
-            } finally {
-                state.returnTypeInferenceContextStack.pop();
-                state.returnTypeInferenceTypeCache = prevTypeCache;
-            }
-        });
-
-        if (contextualReturnType) {
-            contextualReturnType = removeUnbound(contextualReturnType);
-
-            if (!isResultFromCache) {
-                // Cache the resulting type.
-                if (!functionTypeResult.functionType.priv.callSiteReturnTypeCache) {
-                    functionTypeResult.functionType.priv.callSiteReturnTypeCache = [];
-                }
-                if (
-                    functionTypeResult.functionType.priv.callSiteReturnTypeCache.length >=
-                    maxCallSiteReturnTypeCacheSize
-                ) {
-                    functionTypeResult.functionType.priv.callSiteReturnTypeCache =
-                        functionTypeResult.functionType.priv.callSiteReturnTypeCache.slice(1);
-                }
-                functionTypeResult.functionType.priv.callSiteReturnTypeCache.push({
-                    paramTypes,
-                    returnType: contextualReturnType,
-                });
-            }
-
-            return contextualReturnType;
-        }
-
-        return undefined;
+        return returnTypeInference.getInferredReturnTypeResultImpl(evaluatorInterface, state, type, callSiteInfo);
     }
 
     // If the function has an explicitly-declared return type, it is returned
@@ -18983,6 +18641,7 @@ export function createTypeEvaluator(
         canBeTruthy,
         canBeFalsy,
         stripLiteralValue,
+        convertSpecialFormToRuntimeValue,
         removeTruthinessFromType,
         removeFalsinessFromType,
         stripTypeGuard,

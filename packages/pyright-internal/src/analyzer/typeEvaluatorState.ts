@@ -84,6 +84,8 @@ export interface EvaluatorOptions {
     verifyTypeCacheEvaluatorFlags: boolean;
 }
 
+export type LogWrapper = <T extends (...args: any[]) => any>(func: T) => (...args: Parameters<T>) => ReturnType<T>;
+
 // Module-level constant matching the one in typeEvaluator.ts.
 const verifyTypeCacheEvaluatorFlags = false;
 
@@ -112,6 +114,7 @@ export class TypeEvaluatorState {
     private _isNodeReachable: ((node: ParseNode) => boolean) | undefined;
     private _importLookup: ImportLookup | undefined;
     private _codeFlowEngine: CodeFlowEngine | undefined;
+    private _wrapWithLogger: LogWrapper | undefined;
 
     private _evaluatorOptions: EvaluatorOptions;
 
@@ -143,6 +146,15 @@ export class TypeEvaluatorState {
 
     setCodeFlowEngine(engine: CodeFlowEngine): void {
         this._codeFlowEngine = engine;
+    }
+
+    get wrapWithLogger(): LogWrapper {
+        assert(this._wrapWithLogger !== undefined, 'wrapWithLogger not yet initialized');
+        return this._wrapWithLogger!;
+    }
+
+    setWrapWithLogger(wrapper: LogWrapper): void {
+        this._wrapWithLogger = wrapper;
     }
 
     // --- Cache management (7 methods) ---
