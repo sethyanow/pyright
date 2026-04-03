@@ -704,7 +704,11 @@ export interface TypeEvaluator {
     isNodeReachable: (node: ParseNode, sourceNode?: ParseNode | undefined) => boolean;
     isAfterNodeReachable: (node: ParseNode) => boolean;
     isFlowPathBetweenNodes: (sourceNode: ParseNode, sinkNode: ParseNode, allowSelf?: boolean) => boolean;
-    getNodeReachability: (node: ParseNode, sourceNode?: ParseNode | undefined) => Reachability;
+    getNodeReachability: (
+        node: ParseNode,
+        sourceNode?: ParseNode | undefined,
+        ignoreNoReturn?: boolean
+    ) => Reachability;
     getAfterNodeReachability: (node: ParseNode) => Reachability;
 
     isAsymmetricAccessorAssignment: (node: ParseNode) => boolean;
