@@ -5908,6 +5908,10 @@ export function createTypeEvaluator(
     }
 
     function getTypeArgs(node: IndexNode, flags: EvalFlags, options?: GetTypeArgsOptions): TypeResultWithNode[] {
+        return callValidation.getTypeArgs(evaluatorInterface, state, registry, node, flags, options);
+    }
+
+    function _getTypeArgs_dead(node: IndexNode, flags: EvalFlags, options?: GetTypeArgsOptions): TypeResultWithNode[] {
         const typeArgs: TypeResultWithNode[] = [];
         let adjFlags = flags | EvalFlags.NoConvertSpecialForm;
         adjFlags &= ~EvalFlags.TypeFormArg;
@@ -6055,6 +6059,10 @@ export function createTypeEvaluator(
     }
 
     function getTypeArg(node: ExpressionNode, flags: EvalFlags, supportsDictExpression: boolean): TypeResultWithNode {
+        return callValidation.getTypeArg(evaluatorInterface, state, registry, node, flags, supportsDictExpression);
+    }
+
+    function _getTypeArg_dead(node: ExpressionNode, flags: EvalFlags, supportsDictExpression: boolean): TypeResultWithNode {
         let typeResult: TypeResultWithNode;
 
         let adjustedFlags =

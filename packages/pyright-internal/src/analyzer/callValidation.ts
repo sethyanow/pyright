@@ -15,7 +15,9 @@ import {
     ParamAssignmentTracker,
     ParamKind,
 } from './parameterUtils';
-import { getTypedDictMembersForClass } from './typedDicts';
+import { createTypedDictTypeInlined, getTypedDictMembersForClass } from './typedDicts';
+import { isAnnotationEvaluationPostponed } from './analyzerFileInfo';
+import { ErrorExpressionCategory, IndexNode, ListNode } from '../parser/parseNodes';
 import { KeywordType } from '../parser/tokenizerTypes';
 import * as ParseTreeUtils from './parseTreeUtils';
 import { assert } from '../common/debug';
@@ -33,6 +35,7 @@ import {
     AssignTypeFlags,
     EvalFlags,
     EvaluatorUsage,
+    GetTypeArgsOptions,
     ExpectedTypeOptions,
     TypeEvaluator,
     TypeResult,
@@ -2016,4 +2019,206 @@ export function matchArgsToParams(
         unpackedArgMapsToVariadic,
         argumentMatchScore: 0,
     };
+}
+
+export function getTypeArgs(
+    evaluator: TypeEvaluator,
+    state: TypeEvaluatorState,
+    registry: TypeRegistry,
+    node: IndexNode,
+    flags: EvalFlags,
+    options?: GetTypeArgsOptions
+): TypeResultWithNode[] {
+    const typeArgs: TypeResultWithNode[] = [];
+    let adjFlags = flags | EvalFlags.NoConvertSpecialForm;
+    adjFlags &= ~EvalFlags.TypeFormArg;
+
+    const allowFinalClassVar = () => {
+        const enclosingClassNode = ParseTreeUtils.getEnclosingClass(node, /* stopeAtFunction */ true);
+        if (enclosingClassNode) {
+            const classTypeInfo = evaluator.getTypeOfClass(enclosingClassNode);
+            if (classTypeInfo && ClassType.isDataClass(classTypeInfo.classType)) {
+                return true;
+            }
+        }
+        return false;
+    };
+
+    if (options?.isFinalAnnotation) {
+        adjFlags |= EvalFlags.NoFinal;
+
+        if (!allowFinalClassVar()) {
+            adjFlags |= EvalFlags.NoClassVar;
+        }
+    } else if (options?.isClassVarAnnotation) {
+        adjFlags |= EvalFlags.NoClassVar;
+
+        if (!allowFinalClassVar()) {
+            adjFlags |= EvalFlags.NoFinal;
+        }
+    } else {
+        adjFlags &= ~(
+            EvalFlags.NoSpecialize |
+            EvalFlags.NoParamSpec |
+            EvalFlags.NoTypeVarTuple |
+            EvalFlags.AllowRequired |
+            EvalFlags.EnforceVarianceConsistency
+        );
+
+        if (!options?.isAnnotatedClass) {
+            adjFlags |= EvalFlags.NoClassVar | EvalFlags.NoFinal;
+        }
+
+        adjFlags |= EvalFlags.AllowUnpackedTuple | EvalFlags.AllowConcatenate;
+    }
+
+    const getTypeArgTypeResult = (expr: ExpressionNode, argIndex: number) => {
+        let typeResult: TypeResultWithNode;
+
+        if (options?.hasCustomClassGetItem) {
+            adjFlags =
+                EvalFlags.NoParamSpec | EvalFlags.NoTypeVarTuple | EvalFlags.NoSpecialize | EvalFlags.NoClassVar;
+            typeResult = {
+                ...evaluator.getTypeOfExpression(expr, adjFlags),
+                node: expr,
+            };
+        } else if (options?.isAnnotatedClass && argIndex > 0) {
+            adjFlags =
+                EvalFlags.NoParamSpec | EvalFlags.NoTypeVarTuple | EvalFlags.NoSpecialize | EvalFlags.NoClassVar;
+            if (isAnnotationEvaluationPostponed(AnalyzerNodeInfo.getFileInfo(node))) {
+                adjFlags |= EvalFlags.ForwardRefs;
+            }
+
+            typeResult = {
+                ...evaluator.getTypeOfExpression(expr, adjFlags),
+                node: expr,
+            };
+        } else {
+            typeResult = getTypeArg(evaluator, state, registry, expr, adjFlags, !!options?.supportsTypedDictTypeArg && argIndex === 0);
+        }
+
+        return typeResult;
+    };
+
+    if (
+        node.d.items.length === 1 &&
+        !node.d.trailingComma &&
+        !node.d.items[0].d.name &&
+        node.d.items[0].d.valueExpr.nodeType === ParseNodeType.Tuple
+    ) {
+        node.d.items[0].d.valueExpr.d.items.forEach((item, index) => {
+            typeArgs.push(getTypeArgTypeResult(item, index));
+        });
+
+        state.writeTypeCache(node.d.items[0].d.valueExpr, { type: UnknownType.create() }, EvalFlags.None);
+
+        return typeArgs;
+    }
+
+    node.d.items.forEach((arg, index) => {
+        const typeResult = getTypeArgTypeResult(arg.d.valueExpr, index);
+
+        if (arg.d.argCategory !== ArgCategory.Simple) {
+            if (arg.d.argCategory === ArgCategory.UnpackedList) {
+                if (!options?.isAnnotatedClass || index === 0) {
+                    const unpackedType = specialForms.applyUnpackToTupleLike(typeResult.type);
+
+                    if (unpackedType) {
+                        typeResult.type = unpackedType;
+                    } else {
+                        if ((flags & EvalFlags.TypeExpression) !== 0) {
+                            evaluator.addDiagnostic(
+                                DiagnosticRule.reportInvalidTypeForm,
+                                LocMessage.unpackNotAllowed(),
+                                arg.d.valueExpr
+                            );
+                            typeResult.typeErrors = true;
+                        } else {
+                            typeResult.type = UnknownType.create();
+                        }
+                    }
+                }
+            }
+        }
+
+        if (arg.d.name) {
+            if ((flags & EvalFlags.TypeExpression) !== 0) {
+                evaluator.addDiagnostic(
+                    DiagnosticRule.reportInvalidTypeForm,
+                    LocMessage.keywordArgInTypeArgument(),
+                    arg.d.valueExpr
+                );
+                typeResult.typeErrors = true;
+            } else {
+                typeResult.type = UnknownType.create();
+            }
+        }
+
+        if (
+            arg.d.valueExpr.nodeType !== ParseNodeType.Error ||
+            arg.d.valueExpr.d.category !== ErrorExpressionCategory.MissingIndexOrSlice
+        ) {
+            typeArgs.push(typeResult);
+        }
+    });
+
+    return typeArgs;
+}
+
+export function getTypeArg(
+    evaluator: TypeEvaluator,
+    state: TypeEvaluatorState,
+    registry: TypeRegistry,
+    node: ExpressionNode,
+    flags: EvalFlags,
+    supportsDictExpression: boolean
+): TypeResultWithNode {
+    let typeResult: TypeResultWithNode;
+
+    let adjustedFlags =
+        flags | EvalFlags.InstantiableType | EvalFlags.ConvertEllipsisToAny | EvalFlags.StrLiteralAsType;
+
+    const fileInfo = AnalyzerNodeInfo.getFileInfo(node);
+    if (fileInfo.isStubFile) {
+        adjustedFlags |= EvalFlags.ForwardRefs;
+    }
+
+    if (node.nodeType === ParseNodeType.List) {
+        typeResult = {
+            type: UnknownType.create(),
+            typeList: (node as ListNode).d.items.map((entry) => {
+                return { ...evaluator.getTypeOfExpression(entry, adjustedFlags), node: entry };
+            }),
+            node,
+        };
+
+        state.writeTypeCache(node, { type: UnknownType.create() }, EvalFlags.None);
+    } else if (node.nodeType === ParseNodeType.Dictionary && supportsDictExpression) {
+        const inlinedTypeDict =
+            registry.typedDictClass && isInstantiableClass(registry.typedDictClass)
+                ? createTypedDictTypeInlined(evaluator, node, registry.typedDictClass)
+                : undefined;
+        const keyTypeFallback =
+            registry.strClass && isInstantiableClass(registry.strClass) ? registry.strClass : UnknownType.create();
+
+        typeResult = {
+            type: keyTypeFallback,
+            inlinedTypeDict,
+            node,
+        };
+    } else {
+        typeResult = { ...evaluator.getTypeOfExpression(node, adjustedFlags), node };
+
+        if (node.nodeType === ParseNodeType.Dictionary) {
+            evaluator.addDiagnostic(DiagnosticRule.reportInvalidTypeForm, LocMessage.dictInAnnotation(), node);
+        }
+
+        if ((flags & EvalFlags.NoClassVar) !== 0) {
+            if (isClass(typeResult.type) && ClassType.isBuiltIn(typeResult.type, 'ClassVar')) {
+                evaluator.addDiagnostic(DiagnosticRule.reportInvalidTypeForm, LocMessage.classVarNotAllowed(), node);
+            }
+        }
+    }
+
+    return typeResult;
 }
