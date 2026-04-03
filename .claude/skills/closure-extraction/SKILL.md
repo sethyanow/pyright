@@ -51,16 +51,42 @@ Log the extraction order to bones before writing any code.
 
 ## LSP Drives Extraction
 
-**LSP is the primary extraction tool, not reading.** For each function, `outgoingCalls` gives you the complete dependency map — every closure ref, every external import, every intra-batch call, with exact file and line. This IS the dependency classification step. You don't need to read the function body to classify its dependencies; `outgoingCalls` already did it.
+**LSP is the primary extraction tool, not reading.** For each function, `outgoingCalls` gives you the dependency map — every closure ref, every external import, every intra-batch call, with exact file and line.
 
 | LSP Operation | What it tells you | When to use |
 |---|---|---|
-| `outgoingCalls` | Complete dependency classification for a function | Before writing each function — this IS step 2 |
+| `outgoingCalls` | Dependency classification for a function | Before writing each function — this IS step 2 |
 | `goToDefinition` | Which module exports an ambiguous symbol | When outgoingCalls shows a symbol you can't place |
 | `incomingCalls` | How many callers a function has | Choosing delegation pattern (many callers = local stub, few = interface lambda) |
 | `hover` | Function signatures | Wiring delegation params — confirm types match |
 
-Read the function body only when you're ready to WRITE the transformed version — not before, not for "understanding."
+**LSP blind spot:** `outgoingCalls` misses property access chains on closure variables. Example: `codeFlowEngine.createCodeFlowAnalyzer()` won't appear in the results because it's a method call on an object, not a direct function call. **Always read the function body** after outgoingCalls to catch closure variable property access that LSP won't report.
+
+Read the function body when you're ready to WRITE the transformed version, and to catch closure variable access that outgoingCalls missed.
+
+## Dependency Dissolution
+
+**Most closure deps that look blocking dissolve when you check them.** Before classifying ANY dep as a blocker, run this check:
+
+For each outgoing call that resolves to typeEvaluator.ts:
+
+1. **State wrapper?** Check lines ~570-610 in typeEvaluator.ts. Many closure functions are thin wrappers: `function readTypeCache(...) { return state.readTypeCache(...); }`. The extracted function calls `state.xxx()` directly. Common state wrappers: `readTypeCache`, `writeTypeCache`, `pushSymbolResolution`, `popSymbolResolution`, `suppressDiagnostics`, `disableSpeculativeMode`, `isSpeculativeModeInUse`, `isTypeCached`.
+
+2. **On TypeEvaluator interface?** Run `documentSymbol` on `typeEvaluatorTypes.ts` and search. If yes, call `evaluator.xxx()`.
+
+3. **Already extracted?** If the function is in symbolResolution.ts or another extracted module, call it directly as an intra-module call.
+
+4. **Pure function?** Run `outgoingCalls` on the dep ITSELF. If it has zero closure deps, it can be extracted alongside as a helper or standalone function.
+
+5. **Nested function?** If it's defined inside the function being extracted (not a separate closure function), it comes along for free.
+
+6. **Stored on state?** `importLookup` and `codeFlowEngine` are stored on `TypeEvaluatorState`. Access via `state.importLookup` and `state.codeFlowEngine`.
+
+**Only after all six checks fail** is a dep genuinely blocking. At that point: add it to the TypeEvaluator interface (if it's an evaluation entry point) or extract it first.
+
+**The dissolution cascade:** When a dep dissolves, re-check everything it was blocking. One dissolved dep can unblock several functions previously classified as "too entangled."
+
+**Prior session logs are claims to verify.** Never trust a log that says "deferred — deep closure deps." Run outgoingCalls fresh.
 
 ## Phase 2: Extract Leaves (one at a time)
 
@@ -80,11 +106,11 @@ For each leaf function:
 
 2. **Read and write the function** — Read the function body, transform it, append to the target module file via Edit. Add `export`, add the needed params (evaluator/registry/state) as first arguments, replace `evaluatorInterface` with `evaluator`, replace bare closure calls with `evaluator.xxx(...)`.
 
-3. **Wire delegation** — In typeEvaluator.ts, replace the function body with a call to the extracted version. For functions over ~100 lines, use the **dead-rename technique**: match the signature + first unique lines, insert a delegation stub, rename the old function to `_functionName_dead`. Delete `_dead` functions after tests pass (bottom-up to avoid line shifts).
+3. **Wire delegation** — In typeEvaluator.ts, replace the function body with a call to the extracted version. For large functions, use the **dead-rename technique**: insert a delegation stub above the old function, rename the old to `_functionName_dead`. After tests pass, delete the entire `_dead` function in one Edit (match from its `function _xxx_dead(` to the closing `}`). Don't try to suppress unused-param warnings in the dead copy — just delete it whole.
 
-4. **Compile** — `npx tsc --noEmit`. Fix errors before moving to the next function. Don't pre-solve imports — add what you know, compile, fix what the compiler reports.
+4. **Compile** — `npm run typecheck`. Fix errors before moving to the next function. Don't pre-solve imports — add what you know, compile, fix what the compiler reports.
 
-5. **Commit** — Each leaf extraction is one commit.
+5. **Commit** — Each leaf extraction is one commit. Run `npm run check` periodically (every 2-3 extractions) to catch eslint/prettier drift before it accumulates.
 
 ## Phase 3: Extract the Cycle
 

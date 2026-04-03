@@ -41,6 +41,33 @@ The `TypeEvaluatorState` holds mutable state for the evaluation session.
 Known state fields used by assignment functions:
 - `state.assignClassToSelfStack` — used by assignClassToSelf (push/pop), assignTypeArgs (read)
 
+### State Wrappers (Closure Functions That Dissolve)
+
+These closure functions in typeEvaluator.ts (~lines 570-610) are thin wrappers around `state.xxx()`. Extracted functions should call `state.xxx()` directly instead of going through the closure wrapper.
+
+| Closure function | State method |
+|---|---|
+| `readTypeCache(node, flags)` | `state.readTypeCache(node, flags)` |
+| `writeTypeCache(node, result, flags)` | `state.writeTypeCache(node, result, flags)` |
+| `isTypeCached(node)` | `state.isTypeCached(node)` |
+| `pushSymbolResolution(symbol, decl)` | `state.pushSymbolResolution(symbol, decl)` |
+| `popSymbolResolution(symbol)` | `state.popSymbolResolution(symbol)` |
+| `suppressDiagnostics(node, cb)` | `state.suppressDiagnostics(node, cb)` |
+| `disableSpeculativeMode(cb)` | `state.disableSpeculativeMode(cb)` |
+| `isSpeculativeModeInUse(node)` | `state.isSpeculativeModeInUse(node)` |
+| `isNodeInReturnTypeInferenceContext(node)` | `state.isNodeInReturnTypeInferenceContext(node)` |
+| `getCodeFlowAnalyzerForReturnTypeInferenceContext()` | `state.getCodeFlowAnalyzerForReturnTypeInferenceContext()` |
+
+### Stored Dependencies on State
+
+These were closure parameters or late-created objects, now stored on `TypeEvaluatorState`:
+
+| Access | What it is |
+|---|---|
+| `state.importLookup` | The program's import resolver (was closure param to `createTypeEvaluator`) |
+| `state.codeFlowEngine` | The code flow analysis engine (was closure const, created after evaluator interface) |
+| `state.evaluatorOptions` | Evaluator configuration options |
+
 ## External Module Imports
 
 Functions imported from other analyzer modules (not the closure):
