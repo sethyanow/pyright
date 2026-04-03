@@ -31,7 +31,6 @@ import {
     pythonVersion3_9,
 } from '../common/pythonVersion';
 import { TextRange } from '../common/textRange';
-import { Uri } from '../common/uri/uri';
 import { LocAddendum, LocMessage } from '../localization/localize';
 import {
     ArgCategory,
@@ -15256,91 +15255,7 @@ export function createTypeEvaluator(
     }
 
     function inferVarianceForClass(classType: ClassType): void {
-        if (!classType.shared.requiresVarianceInference) {
-            return;
-        }
-
-        // Presumptively mark the variance inference as complete. This
-        // prevents potential recursion.
-        classType.shared.requiresVarianceInference = false;
-
-        // Presumptively mark the computed variance to "unknown". We'll
-        // replace this below once the variance has been inferred.
-        classType.shared.typeParams.forEach((param) => {
-            if (param.shared.declaredVariance === Variance.Auto) {
-                param.priv.computedVariance = Variance.Unknown;
-            }
-        });
-
-        const dummyTypeObject = ClassType.createInstantiable(
-            '__varianceDummy',
-            '',
-            '',
-            Uri.empty(),
-            0,
-            0,
-            undefined,
-            undefined
-        );
-
-        classType.shared.typeParams.forEach((param, paramIndex) => {
-            // Skip TypeVarTuples and ParamSpecs.
-            if (isTypeVarTuple(param) || isParamSpec(param)) {
-                return;
-            }
-
-            // Skip type variables without auto-variance.
-            if (param.shared.declaredVariance !== Variance.Auto) {
-                return;
-            }
-
-            // Replace all type arguments with a dummy type except for the
-            // TypeVar of interest, which is replaced with an object instance.
-            const srcTypeArgs = classType.shared.typeParams.map((p, i) => {
-                if (isTypeVarTuple(p)) {
-                    return p;
-                }
-                return i === paramIndex ? getObjectType() : dummyTypeObject;
-            });
-
-            // Replace all type arguments with a dummy type except for the
-            // TypeVar of interest, which is replaced with itself.
-            const destTypeArgs = classType.shared.typeParams.map((p, i) => {
-                return i === paramIndex || isTypeVarTuple(p) ? p : dummyTypeObject;
-            });
-
-            const srcType = ClassType.specialize(classType, srcTypeArgs);
-            const destType = ClassType.specialize(classType, destTypeArgs);
-
-            const isDestSubtypeOfSrc = assignClassToSelf(
-                srcType,
-                destType,
-                Variance.Covariant,
-                /* ignoreBaseClassVariance */ false
-            );
-
-            let inferredVariance: Variance;
-            if (isDestSubtypeOfSrc) {
-                inferredVariance = Variance.Covariant;
-            } else {
-                const isSrcSubtypeOfDest = assignClassToSelf(
-                    destType,
-                    srcType,
-                    Variance.Contravariant,
-                    /* ignoreBaseClassVariance */ false
-                );
-                if (isSrcSubtypeOfDest) {
-                    inferredVariance = Variance.Contravariant;
-                } else {
-                    inferredVariance = Variance.Invariant;
-                }
-            }
-
-            // We assume here that we don't need to clone the type var object
-            // because it was already cloned when it was associated with this
-            // class scope.
-            classType.shared.typeParams[paramIndex].priv.computedVariance = inferredVariance;
-        });
+        symbolResolution.inferVarianceForClass(evaluatorInterface, classType);
     }
 
     function evaluateTypeParamList(node: TypeParameterListNode): TypeVarType[] {

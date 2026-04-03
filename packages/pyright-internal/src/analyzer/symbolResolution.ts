@@ -62,13 +62,16 @@ import {
     isInstantiableClass,
     isModule,
     isOverloaded,
+    isParamSpec,
     isTypeVar,
+    isTypeVarTuple,
     ModuleType,
     OverloadedType,
     Type,
     TypeVarType,
     UnboundType,
     UnknownType,
+    Variance,
 } from './types';
 import {
     convertToInstance,
@@ -85,6 +88,7 @@ import {
 } from './typeUtils';
 import { getTypeOfIndexedTypedDict } from './typedDicts';
 import { makeTupleObject } from './tuples';
+import { Uri } from '../common/uri/uri';
 
 import type { Symbol } from './symbol';
 
@@ -1294,4 +1298,69 @@ export function getDeclaredTypeForExpression(
     }
 
     return undefined;
+}
+
+export function inferVarianceForClass(evaluator: TypeEvaluator, classType: ClassType): void {
+    if (!classType.shared.requiresVarianceInference) {
+        return;
+    }
+
+    classType.shared.requiresVarianceInference = false;
+
+    classType.shared.typeParams.forEach((param) => {
+        if (param.shared.declaredVariance === Variance.Auto) {
+            param.priv.computedVariance = Variance.Unknown;
+        }
+    });
+
+    const dummyTypeObject = ClassType.createInstantiable(
+        '__varianceDummy',
+        '',
+        '',
+        Uri.empty(),
+        0,
+        0,
+        undefined,
+        undefined
+    );
+
+    classType.shared.typeParams.forEach((param, paramIndex) => {
+        if (isTypeVarTuple(param) || isParamSpec(param)) {
+            return;
+        }
+
+        if (param.shared.declaredVariance !== Variance.Auto) {
+            return;
+        }
+
+        const srcTypeArgs = classType.shared.typeParams.map((p, i) => {
+            if (isTypeVarTuple(p)) {
+                return p;
+            }
+            return i === paramIndex ? evaluator.getObjectType() : dummyTypeObject;
+        });
+
+        const destTypeArgs = classType.shared.typeParams.map((p, i) => {
+            return i === paramIndex || isTypeVarTuple(p) ? p : dummyTypeObject;
+        });
+
+        const srcType = ClassType.specialize(classType, srcTypeArgs);
+        const destType = ClassType.specialize(classType, destTypeArgs);
+
+        const isDestSubtypeOfSrc = evaluator.assignClassToSelf(srcType, destType, Variance.Covariant);
+
+        let inferredVariance: Variance;
+        if (isDestSubtypeOfSrc) {
+            inferredVariance = Variance.Covariant;
+        } else {
+            const isSrcSubtypeOfDest = evaluator.assignClassToSelf(destType, srcType, Variance.Contravariant);
+            if (isSrcSubtypeOfDest) {
+                inferredVariance = Variance.Contravariant;
+            } else {
+                inferredVariance = Variance.Invariant;
+            }
+        }
+
+        classType.shared.typeParams[paramIndex].priv.computedVariance = inferredVariance;
+    });
 }
