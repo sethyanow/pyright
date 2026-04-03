@@ -1937,46 +1937,17 @@ export function createTypeEvaluator(
         diag?: DiagnosticAddendum,
         recursionCount = 0
     ): FunctionType | OverloadedType | undefined {
-        const boundMethodResult = getTypeOfBoundMember(
-            errorNode,
+        return memberAccessModule.getBoundMagicMethod(
+            evaluatorInterface,
+            state,
+            registry,
             classType,
             memberName,
-            /* usage */ undefined,
-            diag,
-            MemberAccessFlags.SkipInstanceMembers | MemberAccessFlags.SkipAttributeAccessOverride,
             selfType,
+            errorNode,
+            diag,
             recursionCount
         );
-
-        if (!boundMethodResult || boundMethodResult.typeErrors) {
-            return undefined;
-        }
-
-        if (isFunctionOrOverloaded(boundMethodResult.type)) {
-            return boundMethodResult.type;
-        }
-
-        if (isClassInstance(boundMethodResult.type)) {
-            if (recursionCount > maxTypeRecursionCount) {
-                return undefined;
-            }
-            recursionCount++;
-
-            return getBoundMagicMethod(
-                boundMethodResult.type,
-                '__call__',
-                /* selfType */ undefined,
-                errorNode,
-                diag,
-                recursionCount
-            );
-        }
-
-        if (isAnyOrUnknown(boundMethodResult.type)) {
-            return getUnknownTypeForCallable();
-        }
-
-        return undefined;
     }
 
     // Returns the signature(s) associated with a call node that contains
@@ -16865,58 +16836,7 @@ export function createTypeEvaluator(
         objType: ClassType,
         recursionCount = 0
     ): FunctionType | OverloadedType | undefined {
-        if (!isClassInstance(objType) || !ClassType.isProtocolClass(objType)) {
-            return undefined;
-        }
-
-        // Make sure that the protocol class doesn't define any fields that
-        // a normal function wouldn't be compatible with.
-        for (const mroClass of objType.shared.mro) {
-            if (isClass(mroClass) && ClassType.isProtocolClass(mroClass)) {
-                for (const field of ClassType.getSymbolTable(mroClass)) {
-                    const fieldName = field[0];
-                    const fieldSymbol = field[1];
-
-                    // We're expecting a __call__ method. We will also ignore a
-                    // __slots__ definition, which is (by convention) ignored for
-                    // protocol matching.
-                    if (fieldName === '__call__' || fieldName === '__slots__') {
-                        continue;
-                    }
-
-                    if (fieldSymbol.isIgnoredForProtocolMatch()) {
-                        continue;
-                    }
-
-                    let fieldIsPartOfFunction = false;
-
-                    if (registry.functionClass && isClass(registry.functionClass)) {
-                        if (ClassType.getSymbolTable(registry.functionClass).has(field[0])) {
-                            fieldIsPartOfFunction = true;
-                        }
-                    }
-
-                    if (!fieldIsPartOfFunction) {
-                        return undefined;
-                    }
-                }
-            }
-        }
-
-        const callType = getBoundMagicMethod(
-            objType,
-            '__call__',
-            /* selfType */ undefined,
-            /* errorNode */ undefined,
-            /* diag */ undefined,
-            recursionCount
-        );
-
-        if (!callType) {
-            return undefined;
-        }
-
-        return makeFunctionTypeVarsBound(callType);
+        return memberAccessModule.getCallbackProtocolType(evaluatorInterface, state, registry, objType, recursionCount);
     }
 
     function narrowTypeBasedOnAssignment(declaredType: Type, assignedTypeResult: TypeResult): TypeResult {

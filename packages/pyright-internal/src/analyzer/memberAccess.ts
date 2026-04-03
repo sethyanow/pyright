@@ -52,6 +52,7 @@ import {
     isOverloaded,
     isTypeSame,
     isTypeVar,
+    maxTypeRecursionCount,
     OverloadedType,
     Type,
     TypeBase,
@@ -64,6 +65,7 @@ import {
     convertToInstantiable,
     InferenceContext,
     isDescriptorInstance,
+    getUnknownTypeForCallable,
     isInstantiableMetaclass,
     lookUpClassMember,
     MemberAccessFlags,
@@ -71,6 +73,7 @@ import {
     isNoneTypeClass,
     isSentinelLiteral,
     isTypeAliasPlaceholder,
+    makeFunctionTypeVarsBound,
     makeTypeVarsBound,
     mapSignatures,
     mapSubtypes,
@@ -1738,5 +1741,123 @@ export function getTypeOfBoundMember(
     }
 
     return undefined;
+}
+
+export function getBoundMagicMethod(
+    evaluator: TypeEvaluator,
+    state: TypeEvaluatorState,
+    registry: TypeRegistry,
+    classType: ClassType,
+    memberName: string,
+    selfType?: ClassType | TypeVarType | undefined,
+    errorNode?: ExpressionNode | undefined,
+    diag?: DiagnosticAddendum,
+    recursionCount = 0
+): FunctionType | OverloadedType | undefined {
+    const boundMethodResult = getTypeOfBoundMember(
+        evaluator,
+        state,
+        registry,
+        errorNode,
+        classType,
+        memberName,
+        /* usage */ undefined,
+        diag,
+        MemberAccessFlags.SkipInstanceMembers | MemberAccessFlags.SkipAttributeAccessOverride,
+        selfType,
+        recursionCount
+    );
+
+    if (!boundMethodResult || boundMethodResult.typeErrors) {
+        return undefined;
+    }
+
+    if (isFunctionOrOverloaded(boundMethodResult.type)) {
+        return boundMethodResult.type;
+    }
+
+    if (isClassInstance(boundMethodResult.type)) {
+        if (recursionCount > maxTypeRecursionCount) {
+            return undefined;
+        }
+        recursionCount++;
+
+        return getBoundMagicMethod(
+            evaluator,
+            state,
+            registry,
+            boundMethodResult.type,
+            '__call__',
+            /* selfType */ undefined,
+            errorNode,
+            diag,
+            recursionCount
+        );
+    }
+
+    if (isAnyOrUnknown(boundMethodResult.type)) {
+        return getUnknownTypeForCallable();
+    }
+
+    return undefined;
+}
+
+export function getCallbackProtocolType(
+    evaluator: TypeEvaluator,
+    state: TypeEvaluatorState,
+    registry: TypeRegistry,
+    objType: ClassType,
+    recursionCount = 0
+): FunctionType | OverloadedType | undefined {
+    if (!isClassInstance(objType) || !ClassType.isProtocolClass(objType)) {
+        return undefined;
+    }
+
+    for (const mroClass of objType.shared.mro) {
+        if (isClass(mroClass) && ClassType.isProtocolClass(mroClass)) {
+            for (const field of ClassType.getSymbolTable(mroClass)) {
+                const fieldName = field[0];
+                const fieldSymbol = field[1];
+
+                if (fieldName === '__call__' || fieldName === '__slots__') {
+                    continue;
+                }
+
+                if (fieldSymbol.isIgnoredForProtocolMatch()) {
+                    continue;
+                }
+
+                let fieldIsPartOfFunction = false;
+
+                if (registry.functionClass && isClass(registry.functionClass)) {
+                    if (ClassType.getSymbolTable(registry.functionClass).has(field[0])) {
+                        fieldIsPartOfFunction = true;
+                    }
+                }
+
+                if (!fieldIsPartOfFunction) {
+                    return undefined;
+                }
+            }
+        }
+    }
+
+    const callType = getBoundMagicMethod(
+        evaluator,
+        state,
+        registry,
+        objType,
+        '__call__',
+        /* selfType */ undefined,
+        /* errorNode */ undefined,
+        /* diag */ undefined,
+        recursionCount
+    );
+
+    if (!callType) {
+        return undefined;
+    }
+
+    return makeFunctionTypeVarsBound(callType);
 }
 
