@@ -7221,58 +7221,7 @@ export function createTypeEvaluator(
         inferenceContext: InferenceContext | undefined,
         recursionCount: number
     ): CallResult {
-        const callDiag = new DiagnosticAddendum();
-        const callMethodResult = getTypeOfBoundMember(
-            errorNode,
-            expandedCallType,
-            '__call__',
-            /* usage */ undefined,
-            callDiag,
-            MemberAccessFlags.SkipInstanceMembers | MemberAccessFlags.SkipAttributeAccessOverride,
-            /* selfType */ undefined,
-            recursionCount
-        );
-        const callMethodType = callMethodResult?.type;
-
-        if (!callMethodType || callMethodResult.typeErrors) {
-            addDiagnostic(
-                DiagnosticRule.reportCallIssue,
-                LocMessage.objectNotCallable().format({
-                    type: printType(expandedCallType),
-                }) + callDiag.getString(),
-                errorNode
-            );
-
-            return { returnType: UnknownType.create(), argumentErrors: true };
-        }
-
-        const callResult = validateCallArgs(
-            errorNode,
-            argList,
-            { type: callMethodType },
-            constraints,
-            skipUnknownArgCheck,
-            inferenceContext,
-            recursionCount
-        );
-
-        let returnType = callResult.returnType ?? UnknownType.create();
-        if (
-            isTypeVar(unexpandedCallType) &&
-            TypeBase.isInstantiable(unexpandedCallType) &&
-            isClass(expandedCallType) &&
-            ClassType.isBuiltIn(expandedCallType, 'type')
-        ) {
-            // Handle the case where a type[T] is being called. We presume this
-            // will instantiate an object of type T.
-            returnType = convertToInstance(unexpandedCallType);
-        }
-
-        return {
-            returnType,
-            argumentErrors: callResult.argumentErrors,
-            overloadsUsedForCall: callResult.overloadsUsedForCall,
-        };
+        return callValidation.validateCallForClassInstance(evaluatorInterface, errorNode, argList, expandedCallType, unexpandedCallType, constraints, skipUnknownArgCheck, inferenceContext, recursionCount);
     }
 
     function validateArgs(

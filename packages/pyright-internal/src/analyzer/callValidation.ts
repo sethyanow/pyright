@@ -115,6 +115,7 @@ import {
     isTupleClass,
     makePacked,
     makeTypeVarsBound,
+    MemberAccessFlags,
     convertTypeToParamSpecValue,
     preserveUnknown,
     addConditionToType,
@@ -3595,4 +3596,64 @@ export function getTypeOfAssertType(
     }
 
     return { type: arg0TypeResult.type };
+}
+
+export function validateCallForClassInstance(
+    evaluator: TypeEvaluator,
+    errorNode: ExpressionNode,
+    argList: Arg[],
+    expandedCallType: ClassType,
+    unexpandedCallType: Type,
+    constraints: ConstraintTracker | undefined,
+    skipUnknownArgCheck: boolean | undefined,
+    inferenceContext: InferenceContext | undefined,
+    recursionCount: number
+): CallResult {
+    const callDiag = new DiagnosticAddendum();
+    const callMethodResult = evaluator.getTypeOfBoundMember(
+        errorNode,
+        expandedCallType,
+        '__call__',
+        /* usage */ undefined,
+        callDiag,
+        MemberAccessFlags.SkipInstanceMembers | MemberAccessFlags.SkipAttributeAccessOverride
+    );
+    const callMethodType = callMethodResult?.type;
+
+    if (!callMethodType || callMethodResult.typeErrors) {
+        evaluator.addDiagnostic(
+            DiagnosticRule.reportCallIssue,
+            LocMessage.objectNotCallable().format({
+                type: evaluator.printType(expandedCallType),
+            }) + callDiag.getString(),
+            errorNode
+        );
+
+        return { returnType: UnknownType.create(), argumentErrors: true };
+    }
+
+    const callResult = evaluator.validateCallArgs(
+        errorNode,
+        argList,
+        { type: callMethodType },
+        constraints,
+        skipUnknownArgCheck,
+        inferenceContext
+    );
+
+    let returnType = callResult.returnType ?? UnknownType.create();
+    if (
+        isTypeVar(unexpandedCallType) &&
+        TypeBase.isInstantiable(unexpandedCallType) &&
+        isClass(expandedCallType) &&
+        ClassType.isBuiltIn(expandedCallType, 'type')
+    ) {
+        returnType = convertToInstance(unexpandedCallType);
+    }
+
+    return {
+        returnType,
+        argumentErrors: callResult.argumentErrors,
+        overloadsUsedForCall: callResult.overloadsUsedForCall,
+    };
 }
