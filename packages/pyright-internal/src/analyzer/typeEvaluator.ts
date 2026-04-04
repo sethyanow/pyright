@@ -94,7 +94,7 @@ import {
 } from './codeFlowTypes';
 import { addConstraintsForExpectedType, solveConstraints } from './constraintSolver';
 import { ConstraintTracker } from './constraintTracker';
-import { createFunctionFromConstructor, getBoundInitMethod, validateConstructorArgs } from './constructors';
+import { createFunctionFromConstructor, validateConstructorArgs } from './constructors';
 import { applyDataClassClassBehaviorOverrides, synthesizeDataClassMethods } from './dataClasses';
 import { ClassDeclaration, Declaration, DeclarationType, FunctionDeclaration } from './declaration';
 import { getNameNodeForDeclaration, ResolvedAliasInfo } from './declarationUtils';
@@ -104,18 +104,13 @@ import {
     addOverloadsToFunctionType,
     applyClassDecorator,
     applyFunctionDecorator,
-    getDeprecatedMessageFromCall,
     getFunctionInfoFromDecorators,
 } from './decorators';
 import {
-    createEnumType,
-    getEnumAutoValueType,
     getTypeOfEnumMember,
     isDeclInEnumClass,
-    isEnumClassWithMembers,
     isEnumMetaclass,
 } from './enums';
-import { createNamedTupleType } from './namedTuples';
 import {
     getTypeOfAugmentedAssignment,
     getTypeOfBinaryOperation,
@@ -124,7 +119,6 @@ import {
 } from './operations';
 import {
     getParamListDetails,
-    ParamKind,
     ParamListDetails,
 } from './parameterUtils';
 import * as ParseTreeUtils from './parseTreeUtils';
@@ -137,7 +131,6 @@ import * as typeAssignment from './typeAssignment';
 import * as returnTypeInference from './returnTypeInference';
 import * as symbolResolution from './symbolResolution';
 import * as ScopeUtils from './scopeUtils';
-import { createSentinelType } from './sentinel';
 import { evaluateStaticBoolExpression } from './staticExpressions';
 import { indeterminateSymbolId, Symbol, SymbolFlags } from './symbol';
 import { isConstantName, isPrivateName, isPrivateOrProtectedName } from './symbolNameUtils';
@@ -145,7 +138,6 @@ import { getSlicedTupleType, getTypeOfTuple, makeTupleObject } from './tuples';
 import { SpeculativeModeOptions } from './typeCacheUtils';
 import {
     assignToTypedDict,
-    createTypedDictType,
     getTypedDictMembersForClass,
     getTypeOfIndexedTypedDict,
     synthesizeTypedDictClassMethods,
@@ -153,7 +145,6 @@ import {
 import {
     AbstractSymbol,
     Arg,
-    ArgResult,
     ArgWithExpression,
     AssignTypeFlags,
     CallResult,
@@ -182,7 +173,6 @@ import {
     TypeEvaluator,
     TypeResult,
     TypeResultWithNode,
-    ValidateArgTypeParams,
     ValidateTypeArgsOptions,
 } from './typeEvaluatorTypes';
 import * as TypePrinter from './typePrinter';
@@ -270,7 +260,6 @@ import {
     InferenceContext,
     invertVariance,
     isEffectivelyInstantiable,
-    isInstantiableMetaclass,
     isLiteralType,
     isMaybeDescriptorInstance,
     isMetaclassInstance,
@@ -328,12 +317,6 @@ interface AliasMapEntry {
     typeParamVariance?: Variance;
 }
 
-interface ValidateArgTypeOptions {
-    skipUnknownArgCheck?: boolean;
-    isArgFirstPass?: boolean;
-    conditionFilter?: TypeCondition[];
-    skipReportError?: boolean;
-}
 
 
 // This table contains the names of several built-in types that
@@ -6744,15 +6727,6 @@ export function createTypeEvaluator(
         return callValidation.validateArgs(evaluatorInterface, state, registry, errorNode, argList, typeResult, constraints, skipUnknownArgCheck, inferenceContext);
     }
 
-    function validateArgType(
-        argParam: ValidateArgTypeParams,
-        constraints: ConstraintTracker,
-        typeResult: TypeResult<FunctionType> | undefined,
-        options: ValidateArgTypeOptions
-    ): ArgResult {
-        return callValidation.validateArgType(evaluatorInterface, state, argParam, constraints, typeResult, options);
-    }
-
     function getTypeOfConstant(node: ConstantNode, flags: EvalFlags): TypeResult {
         let type: Type | undefined;
 
@@ -9941,179 +9915,6 @@ export function createTypeEvaluator(
         return callValidation.validateInitSubclassArgs(evaluatorInterface, state, registry, node, classType);
     }
 
-    function _validateInitSubclassArgs_dead(node: ClassNode, classType: ClassType) {
-        // Collect arguments that will be passed to the `__init_subclass__`
-        // method described in PEP 487 and validate it.
-        const argList: Arg[] = [];
-
-        node.d.arguments.forEach((arg) => {
-            if (arg.d.name && arg.d.name.d.value !== 'metaclass') {
-                argList.push({
-                    argCategory: ArgCategory.Simple,
-                    node: arg,
-                    name: arg.d.name,
-                    valueExpression: arg.d.valueExpr,
-                });
-            }
-        });
-
-        let newMethodMember: ClassMember | undefined;
-
-        // See if the class has a metaclass that overrides `__new__`. If so, we
-        // will validate the signature of the `__new__` method.
-        if (classType.shared.effectiveMetaclass && isClass(classType.shared.effectiveMetaclass)) {
-            // If the metaclass is 'type' or 'ABCMeta', we'll assume it will call through to
-            // __init_subclass__, so we'll skip the `__new__` method check. We need to exclude
-            // TypedDict classes here because _TypedDict uses ABCMeta as its metaclass, but its
-            // typeshed definition doesn't override __init_subclass__.
-            const metaclassCallsInitSubclass =
-                ClassType.isBuiltIn(classType.shared.effectiveMetaclass, ['ABCMeta', 'type']) &&
-                !ClassType.isTypedDictClass(classType);
-
-            if (!metaclassCallsInitSubclass) {
-                // See if the metaclass has a `__new__` method that accepts keyword parameters.
-                newMethodMember = lookUpClassMember(
-                    classType.shared.effectiveMetaclass,
-                    '__new__',
-                    MemberAccessFlags.SkipTypeBaseClass
-                );
-            }
-        }
-
-        if (newMethodMember) {
-            const newMethodType = getTypeOfMember(newMethodMember);
-            if (isFunction(newMethodType)) {
-                const paramListDetails = getParamListDetails(newMethodType);
-
-                if (paramListDetails.firstKeywordOnlyIndex !== undefined) {
-                    // Build a map of the keyword-only parameters.
-                    const paramMap = new Map<string, number>();
-                    for (let i = paramListDetails.firstKeywordOnlyIndex; i < paramListDetails.params.length; i++) {
-                        const paramInfo = paramListDetails.params[i];
-                        if (
-                            paramInfo.param.category === ParamCategory.Simple &&
-                            paramInfo.param.name &&
-                            paramInfo.kind !== ParamKind.Positional
-                        ) {
-                            paramMap.set(paramInfo.param.name, i);
-                        }
-                    }
-
-                    argList.forEach((arg) => {
-                        if (arg.argCategory === ArgCategory.Simple && arg.name) {
-                            const paramIndex = paramMap.get(arg.name.d.value) ?? paramListDetails.kwargsIndex;
-
-                            if (paramIndex !== undefined) {
-                                const paramInfo = paramListDetails.params[paramIndex];
-                                const argParam: ValidateArgTypeParams = {
-                                    paramCategory: paramInfo.param.category,
-                                    paramType: paramInfo.type,
-                                    requiresTypeVarMatching: false,
-                                    argument: arg,
-                                    errorNode: arg.valueExpression ?? node.d.name,
-                                };
-
-                                validateArgType(
-                                    argParam,
-                                    new ConstraintTracker(),
-                                    { type: newMethodType },
-                                    { skipUnknownArgCheck: true }
-                                );
-                                paramMap.delete(arg.name.d.value);
-                            } else {
-                                addDiagnostic(
-                                    DiagnosticRule.reportGeneralTypeIssues,
-                                    LocMessage.paramNameMissing().format({ name: arg.name.d.value }),
-                                    arg.name ?? node.d.name
-                                );
-                            }
-                        }
-                    });
-
-                    // See if we have any remaining unmatched parameters without
-                    // default values.
-                    const unassignedParams: string[] = [];
-                    paramMap.forEach((index, paramName) => {
-                        const paramInfo = paramListDetails.params[index];
-                        if (!paramInfo.defaultType) {
-                            unassignedParams.push(paramName);
-                        }
-                    });
-
-                    if (unassignedParams.length > 0) {
-                        const missingParamNames = unassignedParams.map((p) => `"${p}"`).join(', ');
-                        addDiagnostic(
-                            DiagnosticRule.reportGeneralTypeIssues,
-                            unassignedParams.length === 1
-                                ? LocMessage.argMissingForParam().format({ name: missingParamNames })
-                                : LocMessage.argMissingForParams().format({ names: missingParamNames }),
-                            node.d.name
-                        );
-                    }
-                }
-            }
-        } else {
-            // If there was no custom metaclass __new__ method, see if there is an __init_subclass__
-            // method present somewhere in the class hierarchy.
-            const initSubclassMethodInfo = getTypeOfBoundMember(
-                node.d.name,
-                classType,
-                '__init_subclass__',
-                /* usage */ undefined,
-                /* diag */ undefined,
-                MemberAccessFlags.SkipClassMembers |
-                    MemberAccessFlags.SkipOriginalClass |
-                    MemberAccessFlags.SkipAttributeAccessOverride
-            );
-
-            if (initSubclassMethodInfo) {
-                const initSubclassMethodType = initSubclassMethodInfo.type;
-
-                if (initSubclassMethodType && initSubclassMethodInfo.classType) {
-                    const callResult = validateCallArgs(
-                        node.d.name,
-                        argList,
-                        { type: initSubclassMethodType },
-                        /* constraints */ undefined,
-                        /* skipUnknownArgCheck */ false,
-                        makeInferenceContext(getNoneType())
-                    );
-
-                    if (callResult.argumentErrors) {
-                        const diag = addDiagnostic(
-                            DiagnosticRule.reportGeneralTypeIssues,
-                            LocMessage.initSubclassCallFailed(),
-                            node.d.name
-                        );
-
-                        const initSubclassFunction = isOverloaded(initSubclassMethodType)
-                            ? OverloadedType.getOverloads(initSubclassMethodType)[0]
-                            : initSubclassMethodType;
-                        const initSubclassDecl = isFunction(initSubclassFunction)
-                            ? initSubclassFunction.shared.declaration
-                            : undefined;
-
-                        if (diag && initSubclassDecl) {
-                            diag.addRelatedInfo(
-                                LocAddendum.initSubclassLocation().format({
-                                    name: printType(convertToInstance(initSubclassMethodInfo.classType)),
-                                }),
-                                initSubclassDecl.uri,
-                                initSubclassDecl.range
-                            );
-                        }
-                    }
-                }
-            }
-        }
-
-        // Evaluate all of the expressions so they are checked and marked referenced.
-        argList.forEach((arg) => {
-            if (arg.valueExpression) {
-                getTypeOfExpression(arg.valueExpression);
-            }
-        });
-    }
 
     function getTypeOfFunction(node: FunctionNode): FunctionTypeResult | undefined {
         ensureRegistryInitialized(node);
