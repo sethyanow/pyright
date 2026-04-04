@@ -7,7 +7,7 @@
  * extracted from typeEvaluator.ts.
  */
 
-import { ArgCategory, ArgumentNode, CallNode, ExpressionNode, ParamCategory, ParameterNode, ParseNode, ParseNodeType } from '../parser/parseNodes';
+import { ArgCategory, ArgumentNode, CallNode, ClassNode, ExpressionNode, ParamCategory, ParameterNode, ParseNode, ParseNodeType } from '../parser/parseNodes';
 import {
     getParamListDetails,
     isParamSpecArgs,
@@ -122,7 +122,9 @@ import {
     makeTypeVarsBound,
     convertToInstantiable,
     isInstantiableMetaclass,
+    ClassMember,
     isNoneInstance,
+    lookUpClassMember,
     mapSubtypes,
     MemberAccessFlags,
     transformPossibleRecursiveTypeAlias,
@@ -4086,4 +4088,171 @@ export function validateCallArgsForSubtype(
 
     touchArgTypes();
     return { argumentErrors: true };
+}
+
+export function validateInitSubclassArgs(
+    evaluator: TypeEvaluator,
+    state: TypeEvaluatorState,
+    registry: TypeRegistry,
+    node: ClassNode,
+    classType: ClassType
+) {
+    const argList: Arg[] = [];
+
+    node.d.arguments.forEach((arg) => {
+        if (arg.d.name && arg.d.name.d.value !== 'metaclass') {
+            argList.push({
+                argCategory: ArgCategory.Simple,
+                node: arg,
+                name: arg.d.name,
+                valueExpression: arg.d.valueExpr,
+            });
+        }
+    });
+
+    let newMethodMember: ClassMember | undefined;
+
+    if (classType.shared.effectiveMetaclass && isClass(classType.shared.effectiveMetaclass)) {
+        const metaclassCallsInitSubclass =
+            ClassType.isBuiltIn(classType.shared.effectiveMetaclass, ['ABCMeta', 'type']) &&
+            !ClassType.isTypedDictClass(classType);
+
+        if (!metaclassCallsInitSubclass) {
+            newMethodMember = lookUpClassMember(
+                classType.shared.effectiveMetaclass,
+                '__new__',
+                MemberAccessFlags.SkipTypeBaseClass
+            );
+        }
+    }
+
+    if (newMethodMember) {
+        const newMethodType = evaluator.getTypeOfMember(newMethodMember);
+        if (isFunction(newMethodType)) {
+            const paramListDetails = getParamListDetails(newMethodType);
+
+            if (paramListDetails.firstKeywordOnlyIndex !== undefined) {
+                const paramMap = new Map<string, number>();
+                for (let i = paramListDetails.firstKeywordOnlyIndex; i < paramListDetails.params.length; i++) {
+                    const paramInfo = paramListDetails.params[i];
+                    if (
+                        paramInfo.param.category === ParamCategory.Simple &&
+                        paramInfo.param.name &&
+                        paramInfo.kind !== ParamKind.Positional
+                    ) {
+                        paramMap.set(paramInfo.param.name, i);
+                    }
+                }
+
+                argList.forEach((arg) => {
+                    if (arg.argCategory === ArgCategory.Simple && arg.name) {
+                        const paramIndex = paramMap.get(arg.name.d.value) ?? paramListDetails.kwargsIndex;
+
+                        if (paramIndex !== undefined) {
+                            const paramInfo = paramListDetails.params[paramIndex];
+                            const argParam: ValidateArgTypeParams = {
+                                paramCategory: paramInfo.param.category,
+                                paramType: paramInfo.type,
+                                requiresTypeVarMatching: false,
+                                argument: arg,
+                                errorNode: arg.valueExpression ?? node.d.name,
+                            };
+
+                            validateArgType(
+                                evaluator,
+                                state,
+                                argParam,
+                                new ConstraintTracker(),
+                                { type: newMethodType },
+                                { skipUnknownArgCheck: true }
+                            );
+                            paramMap.delete(arg.name.d.value);
+                        } else {
+                            evaluator.addDiagnostic(
+                                DiagnosticRule.reportGeneralTypeIssues,
+                                LocMessage.paramNameMissing().format({ name: arg.name.d.value }),
+                                arg.name ?? node.d.name
+                            );
+                        }
+                    }
+                });
+
+                const unassignedParams: string[] = [];
+                paramMap.forEach((index, paramName) => {
+                    const paramInfo = paramListDetails.params[index];
+                    if (!paramInfo.defaultType) {
+                        unassignedParams.push(paramName);
+                    }
+                });
+
+                if (unassignedParams.length > 0) {
+                    const missingParamNames = unassignedParams.map((p) => `"${p}"`).join(', ');
+                    evaluator.addDiagnostic(
+                        DiagnosticRule.reportGeneralTypeIssues,
+                        unassignedParams.length === 1
+                            ? LocMessage.argMissingForParam().format({ name: missingParamNames })
+                            : LocMessage.argMissingForParams().format({ names: missingParamNames }),
+                        node.d.name
+                    );
+                }
+            }
+        }
+    } else {
+        const initSubclassMethodInfo = evaluator.getTypeOfBoundMember(
+            node.d.name,
+            classType,
+            '__init_subclass__',
+            /* usage */ undefined,
+            /* diag */ undefined,
+            MemberAccessFlags.SkipClassMembers |
+                MemberAccessFlags.SkipOriginalClass |
+                MemberAccessFlags.SkipAttributeAccessOverride
+        );
+
+        if (initSubclassMethodInfo) {
+            const initSubclassMethodType = initSubclassMethodInfo.type;
+
+            if (initSubclassMethodType && initSubclassMethodInfo.classType) {
+                const callResult = evaluator.validateCallArgs(
+                    node.d.name,
+                    argList,
+                    { type: initSubclassMethodType },
+                    /* constraints */ undefined,
+                    /* skipUnknownArgCheck */ false,
+                    makeInferenceContext(evaluator.getNoneType())
+                );
+
+                if (callResult.argumentErrors) {
+                    const diag = evaluator.addDiagnostic(
+                        DiagnosticRule.reportGeneralTypeIssues,
+                        LocMessage.initSubclassCallFailed(),
+                        node.d.name
+                    );
+
+                    const initSubclassFunction = isOverloaded(initSubclassMethodType)
+                        ? OverloadedType.getOverloads(initSubclassMethodType)[0]
+                        : initSubclassMethodType;
+                    const initSubclassDecl = isFunction(initSubclassFunction)
+                        ? initSubclassFunction.shared.declaration
+                        : undefined;
+
+                    if (diag && initSubclassDecl) {
+                        diag.addRelatedInfo(
+                            LocAddendum.initSubclassLocation().format({
+                                name: evaluator.printType(convertToInstance(initSubclassMethodInfo.classType)),
+                            }),
+                            initSubclassDecl.uri,
+                            initSubclassDecl.range
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    argList.forEach((arg) => {
+        if (arg.valueExpression) {
+            evaluator.getTypeOfExpression(arg.valueExpression);
+        }
+    });
 }

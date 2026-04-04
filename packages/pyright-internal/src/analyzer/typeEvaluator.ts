@@ -9938,6 +9938,10 @@ export function createTypeEvaluator(
     }
 
     function validateInitSubclassArgs(node: ClassNode, classType: ClassType) {
+        return callValidation.validateInitSubclassArgs(evaluatorInterface, state, registry, node, classType);
+    }
+
+    function _validateInitSubclassArgs_dead(node: ClassNode, classType: ClassType) {
         // Collect arguments that will be passed to the `__init_subclass__`
         // method described in PEP 487 and validate it.
         const argList: Arg[] = [];
