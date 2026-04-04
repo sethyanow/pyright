@@ -115,7 +115,6 @@ import {
     isEnumClassWithMembers,
     isEnumMetaclass,
 } from './enums';
-import { applyFunctionTransform } from './functionTransform';
 import { createNamedTupleType } from './namedTuples';
 import {
     getTypeOfAugmentedAssignment,
@@ -6912,54 +6911,7 @@ export function createTypeEvaluator(
         skipUnknownArgCheck: boolean | undefined,
         inferenceContext: InferenceContext | undefined
     ): CallResult {
-        const overloads = OverloadedType.getOverloads(expandedCallType);
-        // Handle the 'cast' call as a special case.
-        if (
-            overloads.length > 0 &&
-            FunctionType.isBuiltIn(overloads[0], ['typing.cast', 'typing_extensions.cast']) &&
-            argList.length === 2
-        ) {
-            return { returnType: evaluateCastCall(argList, errorNode) };
-        }
-
-        const callResult = validateOverloadedArgTypes(
-            errorNode,
-            argList,
-            { type: expandedCallType, isIncomplete: isCallTypeIncomplete },
-            constraints,
-            skipUnknownArgCheck,
-            inferenceContext
-        );
-
-        let returnType = callResult.returnType ?? UnknownType.create();
-        let isTypeIncomplete = !!callResult.isTypeIncomplete;
-        let argumentErrors = !!callResult.argumentErrors;
-
-        if (!argumentErrors) {
-            // Call the function transform logic to handle special-cased functions.
-            const transformed = applyFunctionTransform(evaluatorInterface, errorNode, argList, expandedCallType, {
-                argumentErrors: !!callResult.argumentErrors,
-                returnType: callResult.returnType ?? UnknownType.create(isTypeIncomplete),
-                isTypeIncomplete,
-            });
-
-            returnType = transformed.returnType;
-            if (transformed.isTypeIncomplete) {
-                isTypeIncomplete = true;
-            }
-
-            if (transformed.argumentErrors) {
-                argumentErrors = true;
-            }
-        }
-
-        return {
-            returnType,
-            isTypeIncomplete,
-            argumentErrors,
-            overloadsUsedForCall: callResult.overloadsUsedForCall,
-            specializedInitSelfType: callResult.specializedInitSelfType,
-        };
+        return callValidation.validateCallForOverloaded(evaluatorInterface, state, registry, errorNode, argList, expandedCallType, isCallTypeIncomplete, constraints, skipUnknownArgCheck, inferenceContext);
     }
 
     function validateCallForInstantiableClass(
@@ -7367,47 +7319,6 @@ export function createTypeEvaluator(
             argumentErrors: callResult.argumentErrors,
             overloadsUsedForCall: callResult.overloadsUsedForCall,
         };
-    }
-
-    // Evaluates the type of the "cast" call.
-    function evaluateCastCall(argList: Arg[], errorNode: ExpressionNode) {
-        if (argList[0].argCategory !== ArgCategory.Simple && argList[0].valueExpression) {
-            addDiagnostic(
-                DiagnosticRule.reportInvalidTypeForm,
-                LocMessage.unpackInAnnotation(),
-                argList[0].valueExpression
-            );
-        }
-
-        // Verify that the cast is necessary.
-        let castToType = getTypeOfArgExpectingType(argList[0], { typeExpression: true }).type;
-
-        const liveScopeIds = ParseTreeUtils.getTypeVarScopesForNode(errorNode);
-        castToType = makeTypeVarsBound(castToType, liveScopeIds);
-
-        let castFromType = getTypeOfArg(argList[1], /* inferenceContext */ undefined).type;
-
-        if (castFromType.props?.specialForm) {
-            castFromType = castFromType.props.specialForm;
-        }
-
-        if (TypeBase.isInstantiable(castToType) && !isUnknown(castToType)) {
-            if (
-                isTypeSame(convertToInstance(castToType), castFromType, {
-                    ignorePseudoGeneric: true,
-                })
-            ) {
-                addDiagnostic(
-                    DiagnosticRule.reportUnnecessaryCast,
-                    LocMessage.unnecessaryCast().format({
-                        type: printType(castFromType),
-                    }),
-                    errorNode
-                );
-            }
-        }
-
-        return convertToInstance(castToType);
     }
 
     function validateArgs(

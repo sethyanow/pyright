@@ -113,6 +113,7 @@ import {
     isUnboundedTupleClass,
     isTupleClass,
     makePacked,
+    makeTypeVarsBound,
     convertTypeToParamSpecValue,
     preserveUnknown,
     addConditionToType,
@@ -3416,5 +3417,107 @@ export function validateCallForFunction(
         argumentErrors,
         overloadsUsedForCall: functionResult.overloadsUsedForCall,
         specializedInitSelfType: functionResult.specializedInitSelfType,
+    };
+}
+
+export function evaluateCastCall(evaluator: TypeEvaluator, argList: Arg[], errorNode: ExpressionNode) {
+    if (argList[0].argCategory !== ArgCategory.Simple && argList[0].valueExpression) {
+        evaluator.addDiagnostic(
+            DiagnosticRule.reportInvalidTypeForm,
+            LocMessage.unpackInAnnotation(),
+            argList[0].valueExpression
+        );
+    }
+
+    let castToType = getTypeOfArgExpectingType(evaluator, argList[0], { typeExpression: true }).type;
+
+    const liveScopeIds = ParseTreeUtils.getTypeVarScopesForNode(errorNode);
+    castToType = makeTypeVarsBound(castToType, liveScopeIds);
+
+    let castFromType = getTypeOfArg(evaluator, argList[1], /* inferenceContext */ undefined).type;
+
+    if (castFromType.props?.specialForm) {
+        castFromType = castFromType.props.specialForm;
+    }
+
+    if (TypeBase.isInstantiable(castToType) && !isUnknown(castToType)) {
+        if (
+            isTypeSame(convertToInstance(castToType), castFromType, {
+                ignorePseudoGeneric: true,
+            })
+        ) {
+            evaluator.addDiagnostic(
+                DiagnosticRule.reportUnnecessaryCast,
+                LocMessage.unnecessaryCast().format({
+                    type: evaluator.printType(castFromType),
+                }),
+                errorNode
+            );
+        }
+    }
+
+    return convertToInstance(castToType);
+}
+
+export function validateCallForOverloaded(
+    evaluator: TypeEvaluator,
+    state: TypeEvaluatorState,
+    registry: TypeRegistry,
+    errorNode: ExpressionNode,
+    argList: Arg[],
+    expandedCallType: OverloadedType,
+    isCallTypeIncomplete: boolean,
+    constraints: ConstraintTracker | undefined,
+    skipUnknownArgCheck: boolean | undefined,
+    inferenceContext: InferenceContext | undefined
+): CallResult {
+    const overloads = OverloadedType.getOverloads(expandedCallType);
+    if (
+        overloads.length > 0 &&
+        FunctionType.isBuiltIn(overloads[0], ['typing.cast', 'typing_extensions.cast']) &&
+        argList.length === 2
+    ) {
+        return { returnType: evaluateCastCall(evaluator, argList, errorNode) };
+    }
+
+    const callResult = validateOverloadedArgTypes(
+        evaluator,
+        state,
+        registry,
+        errorNode,
+        argList,
+        { type: expandedCallType, isIncomplete: isCallTypeIncomplete },
+        constraints,
+        skipUnknownArgCheck,
+        inferenceContext
+    );
+
+    let returnType = callResult.returnType ?? UnknownType.create();
+    let isTypeIncomplete = !!callResult.isTypeIncomplete;
+    let argumentErrors = !!callResult.argumentErrors;
+
+    if (!argumentErrors) {
+        const transformed = applyFunctionTransform(evaluator, errorNode, argList, expandedCallType, {
+            argumentErrors: !!callResult.argumentErrors,
+            returnType: callResult.returnType ?? UnknownType.create(isTypeIncomplete),
+            isTypeIncomplete,
+        });
+
+        returnType = transformed.returnType;
+        if (transformed.isTypeIncomplete) {
+            isTypeIncomplete = true;
+        }
+
+        if (transformed.argumentErrors) {
+            argumentErrors = true;
+        }
+    }
+
+    return {
+        returnType,
+        isTypeIncomplete,
+        argumentErrors,
+        overloadsUsedForCall: callResult.overloadsUsedForCall,
+        specializedInitSelfType: callResult.specializedInitSelfType,
     };
 }
