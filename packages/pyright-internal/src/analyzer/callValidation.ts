@@ -7,7 +7,7 @@
  * extracted from typeEvaluator.ts.
  */
 
-import { ArgCategory, ArgumentNode, ExpressionNode, ParamCategory, ParameterNode, ParseNode, ParseNodeType } from '../parser/parseNodes';
+import { ArgCategory, ArgumentNode, CallNode, ExpressionNode, ParamCategory, ParameterNode, ParseNode, ParseNodeType } from '../parser/parseNodes';
 import {
     getParamListDetails,
     isParamSpecArgs,
@@ -43,6 +43,7 @@ import {
     CallResult,
     EffectiveReturnTypeOptions,
     EvaluatorUsage,
+    PrintTypeOptions,
     GetTypeArgsOptions,
     ExpectedTypeOptions,
     TypeEvaluator,
@@ -3520,4 +3521,78 @@ export function validateCallForOverloaded(
         overloadsUsedForCall: callResult.overloadsUsedForCall,
         specializedInitSelfType: callResult.specializedInitSelfType,
     };
+}
+
+export function printSrcDestTypes(
+    evaluator: TypeEvaluator,
+    srcType: Type,
+    destType: Type,
+    options?: PrintTypeOptions
+): { sourceType: string; destType: string } {
+    const simpleSrcType = evaluator.printType(srcType, options);
+    const simpleDestType = evaluator.printType(destType, options);
+
+    if (simpleSrcType !== simpleDestType) {
+        return { sourceType: simpleSrcType, destType: simpleDestType };
+    }
+
+    const fullSrcType = evaluator.printType(srcType, { ...(options ?? {}), useFullyQualifiedNames: true });
+    const fullDestType = evaluator.printType(destType, { ...(options ?? {}), useFullyQualifiedNames: true });
+
+    if (fullSrcType !== fullDestType) {
+        return { sourceType: fullSrcType, destType: fullDestType };
+    }
+
+    return { sourceType: simpleSrcType, destType: simpleDestType };
+}
+
+export function getTypeOfAssertType(
+    evaluator: TypeEvaluator,
+    node: CallNode,
+    inferenceContext: InferenceContext | undefined
+): TypeResult {
+    if (
+        node.d.args.length !== 2 ||
+        node.d.args[0].d.argCategory !== ArgCategory.Simple ||
+        node.d.args[0].d.name !== undefined ||
+        node.d.args[0].d.argCategory !== ArgCategory.Simple ||
+        node.d.args[1].d.name !== undefined
+    ) {
+        evaluator.addDiagnostic(DiagnosticRule.reportCallIssue, LocMessage.assertTypeArgs(), node);
+        return { type: UnknownType.create() };
+    }
+
+    const arg0TypeResult = evaluator.getTypeOfExpression(node.d.args[0].d.valueExpr, /* flags */ undefined, inferenceContext);
+    if (arg0TypeResult.isIncomplete) {
+        return { type: UnknownType.create(/* isIncomplete */ true), isIncomplete: true };
+    }
+
+    const assertedType = convertToInstance(
+        getTypeOfArgExpectingType(evaluator, convertNodeToArg(node.d.args[1]), {
+            typeExpression: true,
+        }).type
+    );
+
+    const arg0Type = evaluator.stripTypeGuard(arg0TypeResult.type);
+
+    if (
+        !isTypeSame(assertedType, arg0Type, {
+            treatAnySameAsUnknown: true,
+            ignorePseudoGeneric: true,
+            ignoreConditions: true,
+        })
+    ) {
+        const srcDestTypes = printSrcDestTypes(evaluator, arg0TypeResult.type, assertedType, { expandTypeAlias: true });
+
+        evaluator.addDiagnostic(
+            DiagnosticRule.reportAssertTypeFailure,
+            LocMessage.assertTypeTypeMismatch().format({
+                expected: srcDestTypes.destType,
+                received: srcDestTypes.sourceType,
+            }),
+            node.d.args[0].d.valueExpr
+        );
+    }
+
+    return { type: arg0TypeResult.type };
 }

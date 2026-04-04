@@ -6140,53 +6140,7 @@ export function createTypeEvaluator(
     }
 
     function getTypeOfAssertType(node: CallNode, inferenceContext: InferenceContext | undefined): TypeResult {
-        if (
-            node.d.args.length !== 2 ||
-            node.d.args[0].d.argCategory !== ArgCategory.Simple ||
-            node.d.args[0].d.name !== undefined ||
-            node.d.args[0].d.argCategory !== ArgCategory.Simple ||
-            node.d.args[1].d.name !== undefined
-        ) {
-            addDiagnostic(DiagnosticRule.reportCallIssue, LocMessage.assertTypeArgs(), node);
-            return { type: UnknownType.create() };
-        }
-
-        const arg0TypeResult = getTypeOfExpression(node.d.args[0].d.valueExpr, /* flags */ undefined, inferenceContext);
-        if (arg0TypeResult.isIncomplete) {
-            return { type: UnknownType.create(/* isIncomplete */ true), isIncomplete: true };
-        }
-
-        const assertedType = convertToInstance(
-            getTypeOfArgExpectingType(convertNodeToArg(node.d.args[1]), {
-                typeExpression: true,
-            }).type
-        );
-
-        // We'll replace TypeGuard and TypeIs with bool for purposes of assert_type testing.
-        // The spec is unclear on whether this is the correct behavior, but it seems to be
-        // what mypy does -- and what various library authors expect.
-        const arg0Type = stripTypeGuard(arg0TypeResult.type);
-
-        if (
-            !isTypeSame(assertedType, arg0Type, {
-                treatAnySameAsUnknown: true,
-                ignorePseudoGeneric: true,
-                ignoreConditions: true,
-            })
-        ) {
-            const srcDestTypes = printSrcDestTypes(arg0TypeResult.type, assertedType, { expandTypeAlias: true });
-
-            addDiagnostic(
-                DiagnosticRule.reportAssertTypeFailure,
-                LocMessage.assertTypeTypeMismatch().format({
-                    expected: srcDestTypes.destType,
-                    received: srcDestTypes.sourceType,
-                }),
-                node.d.args[0].d.valueExpr
-            );
-        }
-
-        return { type: arg0TypeResult.type };
+        return callValidation.getTypeOfAssertType(evaluatorInterface, node, inferenceContext);
     }
 
     function convertNodeToArg(node: ArgumentNode): ArgWithExpression {
@@ -13364,21 +13318,7 @@ export function createTypeEvaluator(
         destType: Type,
         options?: PrintTypeOptions
     ): { sourceType: string; destType: string } {
-        const simpleSrcType = printType(srcType, options);
-        const simpleDestType = printType(destType, options);
-
-        if (simpleSrcType !== simpleDestType) {
-            return { sourceType: simpleSrcType, destType: simpleDestType };
-        }
-
-        const fullSrcType = printType(srcType, { ...(options ?? {}), useFullyQualifiedNames: true });
-        const fullDestType = printType(destType, { ...(options ?? {}), useFullyQualifiedNames: true });
-
-        if (fullSrcType !== fullDestType) {
-            return { sourceType: fullSrcType, destType: fullDestType };
-        }
-
-        return { sourceType: simpleSrcType, destType: simpleDestType };
+        return callValidation.printSrcDestTypes(evaluatorInterface, srcType, destType, options);
     }
 
     function printType(type: Type, options?: PrintTypeOptions): string {
