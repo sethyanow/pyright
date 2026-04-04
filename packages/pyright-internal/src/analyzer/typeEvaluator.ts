@@ -6876,6 +6876,17 @@ export function createTypeEvaluator(
         skipUnknownArgCheck: boolean | undefined,
         inferenceContext: InferenceContext | undefined
     ): CallResult {
+        return callValidation.validateCallForInstantiableClass(evaluatorInterface, state, registry, errorNode, argList, expandedCallType, unexpandedCallType, skipUnknownArgCheck, inferenceContext);
+    }
+
+    function _validateCallForInstantiableClass_dead(
+        errorNode: ExpressionNode,
+        argList: Arg[],
+        expandedCallType: ClassType,
+        unexpandedCallType: Type,
+        skipUnknownArgCheck: boolean | undefined,
+        inferenceContext: InferenceContext | undefined
+    ): CallResult {
         if (expandedCallType.priv.literalValue !== undefined) {
             addDiagnostic(DiagnosticRule.reportCallIssue, LocMessage.literalNotCallable(), errorNode);
 

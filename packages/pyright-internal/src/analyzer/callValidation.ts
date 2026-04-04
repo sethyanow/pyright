@@ -20,6 +20,7 @@ import { createNamedTupleType } from './namedTuples';
 import { createTypedDictType, createTypedDictTypeInlined, getTypedDictMembersForClass } from './typedDicts';
 import { createFunctionFromConstructor, getBoundInitMethod, validateConstructorArgs } from './constructors';
 import { createEnumType, getEnumAutoValueType, isEnumClassWithMembers, isEnumMetaclass } from './enums';
+import { getDeprecatedMessageFromCall } from './decorators';
 import { createSentinelType } from './sentinel';
 import { computeMroLinearization } from './typeUtils';
 import { isAnnotationEvaluationPostponed } from './analyzerFileInfo';
@@ -68,7 +69,9 @@ import {
     ClassType,
     isClass,
     isInstantiableClass,
+    ClassTypeFlags,
     isNever,
+    isOverloaded,
     isUnpacked,
     isUnpackedClass,
     isUnion,
@@ -115,6 +118,9 @@ import {
     isTupleClass,
     makePacked,
     makeTypeVarsBound,
+    convertToInstantiable,
+    isInstantiableMetaclass,
+    mapSubtypes,
     MemberAccessFlags,
     convertTypeToParamSpecValue,
     preserveUnknown,
@@ -3596,6 +3602,291 @@ export function getTypeOfAssertType(
     }
 
     return { type: arg0TypeResult.type };
+}
+
+export function validateCallForInstantiableClass(
+    evaluator: TypeEvaluator,
+    state: TypeEvaluatorState,
+    registry: TypeRegistry,
+    errorNode: ExpressionNode,
+    argList: Arg[],
+    expandedCallType: ClassType,
+    unexpandedCallType: Type,
+    skipUnknownArgCheck: boolean | undefined,
+    inferenceContext: InferenceContext | undefined
+): CallResult {
+    if (expandedCallType.priv.literalValue !== undefined) {
+        evaluator.addDiagnostic(DiagnosticRule.reportCallIssue, LocMessage.literalNotCallable(), errorNode);
+        return { returnType: UnknownType.create(), argumentErrors: true };
+    }
+
+    if (ClassType.isBuiltIn(expandedCallType)) {
+        const className = expandedCallType.priv.aliasName ?? expandedCallType.shared.name;
+
+        if (isInstantiableMetaclass(expandedCallType)) {
+            if (expandedCallType.priv.typeArgs && expandedCallType.priv.isTypeArgExplicit) {
+                evaluator.addDiagnostic(
+                    DiagnosticRule.reportCallIssue,
+                    LocMessage.objectNotCallable().format({ type: evaluator.printType(expandedCallType) }),
+                    errorNode
+                );
+                return { returnType: UnknownType.create(), argumentErrors: true };
+            }
+
+            validateConstructorArgs(evaluator, errorNode, argList, expandedCallType, skipUnknownArgCheck, inferenceContext);
+
+            if (expandedCallType.shared.name === 'type' && argList.length === 1) {
+                const argTypeResult = getTypeOfArg(evaluator, argList[0], /* inferenceContext */ undefined);
+                const argType = argTypeResult.type;
+                const returnType = mapSubtypes(argType, (subtype) => {
+                    if (isNever(subtype)) {
+                        return subtype;
+                    }
+
+                    if (isClass(subtype)) {
+                        if (
+                            isClassInstance(subtype) &&
+                            ClassType.isNewTypeClass(subtype) &&
+                            !subtype.priv.includeSubclasses
+                        ) {
+                            if (registry.functionClass) {
+                                return registry.functionClass;
+                            }
+                        }
+
+                        return convertToInstantiable(evaluator.stripLiteralValue(subtype));
+                    }
+
+                    if (TypeBase.isInstance(subtype)) {
+                        if (isFunction(subtype) || isTypeVar(subtype)) {
+                            return convertToInstantiable(subtype);
+                        }
+                    }
+
+                    return ClassType.specialize(ClassType.cloneAsInstance(expandedCallType), [UnknownType.create()]);
+                });
+
+                return { returnType, isTypeIncomplete: argTypeResult.isIncomplete };
+            }
+
+            if (argList.length >= 2) {
+                return {
+                    returnType:
+                        specialForms.createClassFromMetaclass(evaluator, errorNode, argList, expandedCallType) ||
+                        AnyType.create(),
+                };
+            }
+
+            return { returnType: AnyType.create() };
+        }
+
+        if (className === 'TypeVar') {
+            return { returnType: specialForms.createTypeVarType(evaluator, errorNode, expandedCallType, argList) };
+        }
+
+        if (className === 'TypeVarTuple') {
+            return { returnType: specialForms.createTypeVarTupleType(evaluator, errorNode, expandedCallType, argList) };
+        }
+
+        if (className === 'ParamSpec') {
+            return { returnType: specialForms.createParamSpecType(evaluator, errorNode, expandedCallType, argList) };
+        }
+
+        if (className === 'TypeAliasType') {
+            const newTypeAlias = specialForms.createTypeAliasType(evaluator, errorNode, argList);
+            if (newTypeAlias) {
+                return { returnType: newTypeAlias };
+            }
+        }
+
+        if (className === 'NamedTuple') {
+            const result: CallResult = {
+                returnType: createNamedTupleType(evaluator, errorNode, argList, /* includesTypes */ true),
+            };
+
+            const initTypeResult = getBoundInitMethod(
+                evaluator,
+                errorNode,
+                ClassType.cloneAsInstance(expandedCallType),
+                /* diag */ undefined,
+                /* additionalFlags */ MemberAccessFlags.Default
+            );
+
+            if (initTypeResult && isOverloaded(initTypeResult.type)) {
+                validateOverloadedArgTypes(
+                    evaluator,
+                    state,
+                    registry,
+                    errorNode,
+                    argList,
+                    { type: initTypeResult.type },
+                    /* constraints */ undefined,
+                    skipUnknownArgCheck,
+                    /* inferenceContext */ undefined
+                );
+            }
+
+            return result;
+        }
+
+        if (className === 'NewType') {
+            return { returnType: specialForms.createNewType(evaluator, errorNode, argList, registry) };
+        }
+
+        if (className === 'Sentinel') {
+            if (AnalyzerNodeInfo.getFileInfo(errorNode).diagnosticRuleSet.enableExperimentalFeatures) {
+                return { returnType: createSentinelType(evaluator, errorNode, argList) };
+            }
+        }
+
+        if (ClassType.isSpecialFormClass(expandedCallType)) {
+            evaluator.addDiagnostic(
+                DiagnosticRule.reportCallIssue,
+                LocMessage.typeNotIntantiable().format({ type: className }),
+                errorNode
+            );
+            return { returnType: UnknownType.create(), argumentErrors: true };
+        }
+
+        if (className === 'TypedDict') {
+            return { returnType: createTypedDictType(evaluator, errorNode, expandedCallType, argList) };
+        }
+
+        if (className === 'auto' && argList.length === 0) {
+            return { returnType: getEnumAutoValueType(evaluator, errorNode) };
+        }
+    }
+
+    if (
+        isClass(expandedCallType) &&
+        expandedCallType.shared.effectiveMetaclass &&
+        isClass(expandedCallType.shared.effectiveMetaclass) &&
+        isEnumMetaclass(expandedCallType.shared.effectiveMetaclass) &&
+        !isEnumClassWithMembers(evaluator, expandedCallType)
+    ) {
+        return {
+            returnType:
+                createEnumType(evaluator, errorNode, expandedCallType, argList) ??
+                convertToInstance(unexpandedCallType),
+        };
+    }
+
+    if (ClassType.supportsAbstractMethods(expandedCallType)) {
+        const abstractSymbols = symbolResolution.getAbstractSymbols(evaluator, expandedCallType);
+
+        if (
+            abstractSymbols.length > 0 &&
+            !expandedCallType.priv.includeSubclasses &&
+            !isTypeVar(unexpandedCallType)
+        ) {
+            const diagAddendum = new DiagnosticAddendum();
+            const errorsToDisplay = 2;
+
+            abstractSymbols.forEach((abstractMethod, index) => {
+                if (index === errorsToDisplay) {
+                    diagAddendum.addMessage(
+                        LocAddendum.memberIsAbstractMore().format({
+                            count: abstractSymbols.length - errorsToDisplay,
+                        })
+                    );
+                } else if (index < errorsToDisplay) {
+                    if (isInstantiableClass(abstractMethod.classType)) {
+                        const className = abstractMethod.classType.shared.name;
+                        diagAddendum.addMessage(
+                            LocAddendum.memberIsAbstract().format({
+                                type: className,
+                                name: abstractMethod.symbolName,
+                            })
+                        );
+                    }
+                }
+            });
+
+            evaluator.addDiagnostic(
+                DiagnosticRule.reportAbstractUsage,
+                LocMessage.instantiateAbstract().format({
+                    type: expandedCallType.shared.name,
+                }) + diagAddendum.getString(),
+                errorNode
+            );
+        }
+    }
+
+    if (ClassType.isProtocolClass(expandedCallType) && !expandedCallType.priv.includeSubclasses) {
+        evaluator.addDiagnostic(
+            DiagnosticRule.reportAbstractUsage,
+            LocMessage.instantiateProtocol().format({ type: expandedCallType.shared.name }),
+            errorNode
+        );
+    }
+
+    const constructorResult = validateConstructorArgs(
+        evaluator,
+        errorNode,
+        argList,
+        expandedCallType,
+        skipUnknownArgCheck,
+        inferenceContext
+    );
+
+    const overloadsUsedForCall = constructorResult.overloadsUsedForCall;
+    const argumentErrors = constructorResult.argumentErrors;
+    const isTypeIncomplete = constructorResult.isTypeIncomplete;
+
+    let returnType = constructorResult.returnType;
+
+    if (isTypeVar(unexpandedCallType)) {
+        returnType = convertToInstance(unexpandedCallType);
+    }
+
+    if (
+        errorNode.nodeType === ParseNodeType.Call &&
+        returnType &&
+        isClassInstance(returnType) &&
+        ClassType.isBuiltIn(returnType, 'deprecated')
+    ) {
+        returnType = ClassType.cloneForDeprecatedInstance(returnType, getDeprecatedMessageFromCall(errorNode as CallNode));
+    }
+
+    if (
+        returnType &&
+        isClassInstance(returnType) &&
+        returnType.shared.mro.some(
+            (baseClass) => isInstantiableClass(baseClass) && ClassType.isBuiltIn(baseClass, 'type')
+        )
+    ) {
+        let newClassName = '__class_' + returnType.shared.name;
+        if (argList.length === 3) {
+            const firstArgType = getTypeOfArg(evaluator, argList[0], /* inferenceContext */ undefined).type;
+
+            if (
+                isClassInstance(firstArgType) &&
+                ClassType.isBuiltIn(firstArgType, 'str') &&
+                typeof firstArgType.priv.literalValue === 'string'
+            ) {
+                newClassName = firstArgType.priv.literalValue;
+            }
+        }
+
+        const newClassType = ClassType.createInstantiable(
+            newClassName,
+            '',
+            '',
+            AnalyzerNodeInfo.getFileInfo(errorNode).fileUri,
+            ClassTypeFlags.None,
+            ParseTreeUtils.getTypeSourceId(errorNode),
+            ClassType.cloneAsInstantiable(returnType),
+            ClassType.cloneAsInstantiable(returnType)
+        );
+        newClassType.shared.baseClasses.push(evaluator.getBuiltInType(errorNode, 'object'));
+        newClassType.shared.effectiveMetaclass = expandedCallType;
+        newClassType.shared.declaration = returnType.shared.declaration;
+
+        computeMroLinearization(newClassType);
+        returnType = newClassType;
+    }
+
+    return { returnType, overloadsUsedForCall, argumentErrors, isTypeIncomplete };
 }
 
 export function validateCallForClassInstance(
