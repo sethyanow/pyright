@@ -56,6 +56,7 @@ import {
 import {
     FunctionParam,
     FunctionType,
+    FunctionTypeFlags,
     isAny,
     isAnyOrUnknown,
     isClassInstance,
@@ -82,6 +83,7 @@ import {
     maxTypeRecursionCount,
     NeverType,
     TypeBase,
+    TypeCategory,
     AnyType,
     ParamSpecType,
     removeUnbound,
@@ -120,8 +122,10 @@ import {
     makeTypeVarsBound,
     convertToInstantiable,
     isInstantiableMetaclass,
+    isNoneInstance,
     mapSubtypes,
     MemberAccessFlags,
+    transformPossibleRecursiveTypeAlias,
     convertTypeToParamSpecValue,
     preserveUnknown,
     addConditionToType,
@@ -3947,4 +3951,139 @@ export function validateCallForClassInstance(
         argumentErrors: callResult.argumentErrors,
         overloadsUsedForCall: callResult.overloadsUsedForCall,
     };
+}
+
+export function validateCallArgsForSubtype(
+    evaluator: TypeEvaluator,
+    state: TypeEvaluatorState,
+    registry: TypeRegistry,
+    errorNode: ExpressionNode,
+    argList: Arg[],
+    expandedCallType: Type,
+    unexpandedCallType: Type,
+    isCallTypeIncomplete: boolean,
+    constraints: ConstraintTracker | undefined,
+    skipUnknownArgCheck: boolean | undefined,
+    inferenceContext: InferenceContext | undefined,
+    recursionCount: number
+): CallResult {
+    function touchArgTypes() {
+        if (!isCallTypeIncomplete) {
+            argList.forEach((arg) => {
+                if (arg.valueExpression && !state.isSpeculativeModeInUse(arg.valueExpression)) {
+                    getTypeOfArg(evaluator, arg, /* inferenceContext */ undefined);
+                }
+            });
+        }
+    }
+
+    switch (expandedCallType.category) {
+        case TypeCategory.Never:
+        case TypeCategory.Unknown:
+        case TypeCategory.Any: {
+            const dummyFunctionType = FunctionType.createInstance('', '', '', FunctionTypeFlags.None);
+            FunctionType.addDefaultParams(dummyFunctionType);
+
+            const dummyCallResult = validateCallForFunction(
+                evaluator,
+                state,
+                registry,
+                errorNode,
+                argList,
+                dummyFunctionType,
+                isCallTypeIncomplete,
+                constraints,
+                skipUnknownArgCheck,
+                inferenceContext
+            );
+
+            return { ...dummyCallResult, returnType: expandedCallType };
+        }
+
+        case TypeCategory.Function: {
+            return validateCallForFunction(
+                evaluator,
+                state,
+                registry,
+                errorNode,
+                argList,
+                expandedCallType,
+                isCallTypeIncomplete,
+                constraints,
+                skipUnknownArgCheck,
+                inferenceContext
+            );
+        }
+
+        case TypeCategory.Overloaded: {
+            return validateCallForOverloaded(
+                evaluator,
+                state,
+                registry,
+                errorNode,
+                argList,
+                expandedCallType,
+                isCallTypeIncomplete,
+                constraints,
+                skipUnknownArgCheck,
+                inferenceContext
+            );
+        }
+
+        case TypeCategory.Class: {
+            if (isNoneInstance(expandedCallType)) {
+                evaluator.addDiagnostic(DiagnosticRule.reportOptionalCall, LocMessage.noneNotCallable(), errorNode);
+
+                touchArgTypes();
+                return { argumentErrors: true };
+            }
+
+            if (TypeBase.isInstantiable(expandedCallType)) {
+                return validateCallForInstantiableClass(
+                    evaluator,
+                    state,
+                    registry,
+                    errorNode,
+                    argList,
+                    expandedCallType,
+                    unexpandedCallType,
+                    skipUnknownArgCheck,
+                    inferenceContext
+                );
+            }
+
+            return validateCallForClassInstance(
+                evaluator,
+                errorNode,
+                argList,
+                expandedCallType,
+                unexpandedCallType,
+                constraints,
+                skipUnknownArgCheck,
+                inferenceContext,
+                recursionCount
+            );
+        }
+
+        case TypeCategory.TypeVar: {
+            return evaluator.validateCallArgs(
+                errorNode,
+                argList,
+                { type: transformPossibleRecursiveTypeAlias(expandedCallType), isIncomplete: isCallTypeIncomplete },
+                constraints,
+                skipUnknownArgCheck,
+                inferenceContext
+            );
+        }
+
+        case TypeCategory.Module: {
+            evaluator.addDiagnostic(DiagnosticRule.reportCallIssue, LocMessage.moduleNotCallable(), errorNode);
+
+            touchArgTypes();
+            return { argumentErrors: true };
+        }
+    }
+
+    touchArgTypes();
+    return { argumentErrors: true };
 }
