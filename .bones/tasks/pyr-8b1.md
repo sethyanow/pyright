@@ -120,7 +120,6 @@ cd /Volumes/code/pyright && bun run check
 
 ## Anti-Patterns
 
-- **Don't extract the expression-level call evaluation.** Functions like `getTypeOfCall` (if it exists as a single entry point from expression evaluation) may be the orchestration dispatch, not call validation per se. The line between "validate these args" and "evaluate this call expression" is where the extraction boundary sits. REASON: expression evaluation orchestration stays in the closure.
 - **Don't create dependencies between `callValidation.ts` and `specialForms.ts`.** If both need `validateTypeArg`, it lives in one place and the other imports it. Prefer putting it in `callValidation.ts` since validation is its primary concern. REASON: unidirectional dependency graph.
 - **Don't chase the 5K target by force-extracting functions that belong in the orchestration layer.** If the file ends up at 6K or 7K, that's still a success — down from 29K. Document what remains and why. REASON: clean boundaries beat line-count targets.
 

@@ -15,7 +15,13 @@ import {
     ParamAssignmentTracker,
     ParamKind,
 } from './parameterUtils';
-import { createTypedDictTypeInlined, getTypedDictMembersForClass } from './typedDicts';
+import { applyFunctionTransform } from './functionTransform';
+import { createNamedTupleType } from './namedTuples';
+import { createTypedDictType, createTypedDictTypeInlined, getTypedDictMembersForClass } from './typedDicts';
+import { createFunctionFromConstructor, getBoundInitMethod, validateConstructorArgs } from './constructors';
+import { createEnumType, getEnumAutoValueType, isEnumClassWithMembers, isEnumMetaclass } from './enums';
+import { createSentinelType } from './sentinel';
+import { computeMroLinearization } from './typeUtils';
 import { isAnnotationEvaluationPostponed } from './analyzerFileInfo';
 import { ErrorExpressionCategory, IndexNode, ListNode } from '../parser/parseNodes';
 import { KeywordType } from '../parser/tokenizerTypes';
@@ -3327,4 +3333,88 @@ export function validateOverloadedArgTypes(
     }
 
     return { argumentErrors: true, isTypeIncomplete, overloadsUsedForCall: [] };
+}
+
+export function validateCallForFunction(
+    evaluator: TypeEvaluator,
+    state: TypeEvaluatorState,
+    registry: TypeRegistry,
+    errorNode: ExpressionNode,
+    argList: Arg[],
+    type: FunctionType,
+    isCallTypeIncomplete: boolean,
+    constraints: ConstraintTracker | undefined,
+    skipUnknownArgCheck: boolean | undefined,
+    inferenceContext: InferenceContext | undefined
+): CallResult {
+    if (TypeBase.isInstantiable(type)) {
+        evaluator.addDiagnostic(
+            DiagnosticRule.reportCallIssue,
+            LocMessage.callableNotInstantiable().format({
+                type: evaluator.printType(type),
+            }),
+            errorNode
+        );
+        return { returnType: undefined, argumentErrors: true };
+    }
+
+    if (FunctionType.isBuiltIn(type, 'namedtuple')) {
+        evaluator.addDiagnostic(DiagnosticRule.reportUntypedNamedTuple, LocMessage.namedTupleNoTypes(), errorNode);
+
+        const result: CallResult = {
+            returnType: createNamedTupleType(evaluator, errorNode, argList, /* includesTypes */ false),
+        };
+
+        validateArgs(evaluator, state, registry, errorNode, argList, { type }, constraints, skipUnknownArgCheck, inferenceContext);
+
+        return result;
+    }
+
+    if (FunctionType.isBuiltIn(type, 'NewType')) {
+        return { returnType: specialForms.createNewType(evaluator, errorNode, argList, registry) };
+    }
+
+    const functionResult = validateArgs(
+        evaluator,
+        state,
+        registry,
+        errorNode,
+        argList,
+        { type, isIncomplete: isCallTypeIncomplete },
+        constraints,
+        skipUnknownArgCheck,
+        inferenceContext
+    );
+
+    let isTypeIncomplete = !!functionResult.isTypeIncomplete;
+    let returnType = functionResult.returnType;
+
+    let argumentErrors = !!functionResult.argumentErrors;
+    if (!argumentErrors) {
+        const transformed = applyFunctionTransform(evaluator, errorNode, argList, type, {
+            argumentErrors: !!functionResult.argumentErrors,
+            returnType: functionResult.returnType ?? UnknownType.create(isTypeIncomplete),
+            isTypeIncomplete,
+        });
+
+        returnType = transformed.returnType;
+        if (transformed.isTypeIncomplete) {
+            isTypeIncomplete = true;
+        }
+        if (transformed.argumentErrors) {
+            argumentErrors = true;
+        }
+    }
+
+    if (FunctionType.isBuiltIn(type, '__import__')) {
+        returnType = AnyType.create();
+    }
+
+    return {
+        returnType,
+        isTypeIncomplete,
+        argumentErrors,
+        overloadsUsedForCall: functionResult.overloadsUsedForCall,
+        specializedInitSelfType: functionResult.specializedInitSelfType,
+    };
 }
