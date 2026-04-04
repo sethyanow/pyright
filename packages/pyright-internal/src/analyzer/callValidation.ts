@@ -7,7 +7,17 @@
  * extracted from typeEvaluator.ts.
  */
 
-import { ArgCategory, ArgumentNode, CallNode, ClassNode, ExpressionNode, ParamCategory, ParameterNode, ParseNode, ParseNodeType } from '../parser/parseNodes';
+import {
+    ArgCategory,
+    ArgumentNode,
+    CallNode,
+    ClassNode,
+    ExpressionNode,
+    ParamCategory,
+    ParameterNode,
+    ParseNode,
+    ParseNodeType,
+} from '../parser/parseNodes';
 import {
     getParamListDetails,
     isParamSpecArgs,
@@ -44,7 +54,6 @@ import {
     CallResult,
     CallSignature,
     CallSignatureInfo,
-    EffectiveReturnTypeOptions,
     EvaluatorUsage,
     PrintTypeOptions,
     GetTypeArgsOptions,
@@ -99,7 +108,12 @@ import {
     Variance,
 } from './types';
 import { ConstraintSolution } from './constraintSolution';
-import { addConstraintsForExpectedType, applySourceSolutionToConstraints, solveConstraints, solveConstraintSet } from './constraintSolver';
+import {
+    addConstraintsForExpectedType,
+    applySourceSolutionToConstraints,
+    solveConstraints,
+    solveConstraintSet,
+} from './constraintSolver';
 import { ConstraintSet } from './constraintTracker';
 import * as memberAccessModule from './memberAccess';
 import * as symbolResolution from './symbolResolution';
@@ -629,11 +643,7 @@ export function validateTypeArg(
 
     if (isEllipsisType(argResult.type)) {
         if (!options?.allowTypeArgList) {
-            evaluator.addDiagnostic(
-                DiagnosticRule.reportInvalidTypeForm,
-                LocMessage.ellipsisContext(),
-                argResult.node
-            );
+            evaluator.addDiagnostic(DiagnosticRule.reportInvalidTypeForm, LocMessage.ellipsisContext(), argResult.node);
             return false;
         }
     }
@@ -784,9 +794,14 @@ export function validateArgType(
                 constraints.getConstraintSets().length > 1;
 
             if (!skipApplySolvedTypeVars) {
-                expectedType = evaluator.solveAndApplyConstraints(expectedType, constraints, /* applyOptions */ undefined, {
-                    useLowerBoundOnly: !!options.isArgFirstPass,
-                });
+                expectedType = evaluator.solveAndApplyConstraints(
+                    expectedType,
+                    constraints,
+                    /* applyOptions */ undefined,
+                    {
+                        useLowerBoundOnly: !!options.isArgFirstPass,
+                    }
+                );
             }
         } else {
             skippedBareTypeVarExpectedType = true;
@@ -979,8 +994,7 @@ export function validateArgType(
                               paramName: argParam.paramName,
                               functionName,
                           })
-                        : LocAddendum.argParam().format({ paramName: argParam.paramName })) +
-                        diagAddendum.getString()
+                        : LocAddendum.argParam().format({ paramName: argParam.paramName })) + diagAddendum.getString()
                 );
             }
             return diagAddendum;
@@ -1174,8 +1188,7 @@ export function matchArgsToParams(
                 const keywordParamIndex = paramDetails.params.findIndex((paramInfo) => {
                     assert(paramInfo, 'paramInfo entry is undefined for kwargs check');
                     return (
-                        paramInfo.param.name === arg.name!.d.value &&
-                        paramInfo.param.category === ParamCategory.Simple
+                        paramInfo.param.name === arg.name!.d.value && paramInfo.param.category === ParamCategory.Simple
                     );
                 });
 
@@ -1461,9 +1474,7 @@ export function matchArgsToParams(
                         argument: argList[argIndex],
                         errorNode: argList[argIndex].valueExpression || errorNode,
                         paramName,
-                        isParamNameSynthesized: FunctionParam.isNameSynthesized(
-                            paramDetails.params[paramIndex].param
-                        ),
+                        isParamNameSynthesized: FunctionParam.isNameSynthesized(paramDetails.params[paramIndex].param),
                         mapsToVarArgList: true,
                     });
 
@@ -1768,8 +1779,7 @@ export function matchArgsToParams(
 
                             const paramInfoIndex = paramDetails.params.findIndex(
                                 (paramInfo) =>
-                                    paramInfo.param.name === paramNameValue &&
-                                    paramInfo.kind !== ParamKind.Positional
+                                    paramInfo.param.name === paramNameValue && paramInfo.kind !== ParamKind.Positional
                             );
                             assert(paramInfoIndex >= 0);
                             const paramType = paramDetails.params[paramInfoIndex].type;
@@ -1812,10 +1822,7 @@ export function matchArgsToParams(
                                 'paramDetails.kwargsIndex params entry is undefined'
                             );
 
-                            paramTracker.addKeywordParam(
-                                paramNameValue,
-                                paramDetails.params[paramDetails.kwargsIndex]
-                            );
+                            paramTracker.addKeywordParam(paramNameValue, paramDetails.params[paramDetails.kwargsIndex]);
                         }
                         trySetActive(argList[argIndex], paramDetails.params[paramDetails.kwargsIndex].param);
                     } else {
@@ -1847,7 +1854,11 @@ export function matchArgsToParams(
                     }
                 } else if (argList[argIndex].argCategory === ArgCategory.UnpackedList) {
                     if (paramSpec) {
-                        const argTypeResult = getTypeOfArg(evaluator, argList[argIndex], /* inferenceContext */ undefined);
+                        const argTypeResult = getTypeOfArg(
+                            evaluator,
+                            argList[argIndex],
+                            /* inferenceContext */ undefined
+                        );
                         const argType = argTypeResult.type;
 
                         if (argTypeResult.isIncomplete) {
@@ -2119,15 +2130,13 @@ export function getTypeArgs(
         let typeResult: TypeResultWithNode;
 
         if (options?.hasCustomClassGetItem) {
-            adjFlags =
-                EvalFlags.NoParamSpec | EvalFlags.NoTypeVarTuple | EvalFlags.NoSpecialize | EvalFlags.NoClassVar;
+            adjFlags = EvalFlags.NoParamSpec | EvalFlags.NoTypeVarTuple | EvalFlags.NoSpecialize | EvalFlags.NoClassVar;
             typeResult = {
                 ...evaluator.getTypeOfExpression(expr, adjFlags),
                 node: expr,
             };
         } else if (options?.isAnnotatedClass && argIndex > 0) {
-            adjFlags =
-                EvalFlags.NoParamSpec | EvalFlags.NoTypeVarTuple | EvalFlags.NoSpecialize | EvalFlags.NoClassVar;
+            adjFlags = EvalFlags.NoParamSpec | EvalFlags.NoTypeVarTuple | EvalFlags.NoSpecialize | EvalFlags.NoClassVar;
             if (isAnnotationEvaluationPostponed(AnalyzerNodeInfo.getFileInfo(node))) {
                 adjFlags |= EvalFlags.ForwardRefs;
             }
@@ -2137,7 +2146,14 @@ export function getTypeArgs(
                 node: expr,
             };
         } else {
-            typeResult = getTypeArg(evaluator, state, registry, expr, adjFlags, !!options?.supportsTypedDictTypeArg && argIndex === 0);
+            typeResult = getTypeArg(
+                evaluator,
+                state,
+                registry,
+                expr,
+                adjFlags,
+                !!options?.supportsTypedDictTypeArg && argIndex === 0
+            );
         }
 
         return typeResult;
@@ -2310,7 +2326,15 @@ export function validateArgTypesForParamSpec(
     const sets = destConstraints.getConstraintSets();
 
     if (sets.length === 1) {
-        return validateArgTypesForParamSpecSignature(evaluator, state, registry, errorNode, argList, paramSpec, sets[0]);
+        return validateArgTypesForParamSpecSignature(
+            evaluator,
+            state,
+            registry,
+            errorNode,
+            argList,
+            paramSpec,
+            sets[0]
+        );
     }
 
     const filteredSets: ConstraintSet[] = [];
@@ -2428,7 +2452,15 @@ export function validateArgTypesForParamSpecSignature(
         return { argumentErrors, constraintTrackers: [constraints] };
     }
 
-    const result = validateArgTypes(evaluator, state, registry, errorNode, matchResults, constraints, /* skipUnknownArgCheck */ undefined);
+    const result = validateArgTypes(
+        evaluator,
+        state,
+        registry,
+        errorNode,
+        matchResults,
+        constraints,
+        /* skipUnknownArgCheck */ undefined
+    );
     return { argumentErrors: !!result.argumentErrors, constraintTrackers: [constraints] };
 }
 
@@ -2452,7 +2484,11 @@ export function validateArgTypes(
     const paramSpec = FunctionType.getParamSpecFromArgsKwargs(type);
 
     if (type.priv.boundToType && !type.priv.boundToType.priv.includeSubclasses && type.shared.methodClass) {
-        const abstractSymbolInfo = symbolResolution.getAbstractSymbolInfo(evaluator, type.shared.methodClass, type.shared.name);
+        const abstractSymbolInfo = symbolResolution.getAbstractSymbolInfo(
+            evaluator,
+            type.shared.methodClass,
+            type.shared.name
+        );
 
         if (abstractSymbolInfo && !abstractSymbolInfo.hasImplementation) {
             evaluator.addDiagnostic(
@@ -2569,9 +2605,7 @@ export function validateArgTypes(
         }
 
         if (isAnyOrUnknown(argResult.argType)) {
-            anyOrUnknownArg = anyOrUnknownArg
-                ? preserveUnknown(argResult.argType, anyOrUnknownArg)
-                : argResult.argType;
+            anyOrUnknownArg = anyOrUnknownArg ? preserveUnknown(argResult.argType, anyOrUnknownArg) : argResult.argType;
         }
 
         if (paramSpec) {
@@ -2671,10 +2705,7 @@ export function validateArgTypes(
             if (psc) {
                 specializedReturnType = evaluator.solveAndApplyConstraints(specializedReturnType, psc);
 
-                applySourceSolutionToConstraints(
-                    constraints,
-                    solveConstraints(evaluator, psc)
-                );
+                applySourceSolutionToConstraints(constraints, solveConstraints(evaluator, psc));
             }
         });
     }
@@ -3215,12 +3246,12 @@ export function validateOverloadedArgTypes(
         if (!state.canSkipDiagnosticForNode(errorNode)) {
             const overloads = OverloadedType.getOverloads(type);
             const functionName =
-                overloads.length > 0 && overloads[0].shared.name
-                    ? overloads[0].shared.name
-                    : '<anonymous function>';
+                overloads.length > 0 && overloads[0].shared.name ? overloads[0].shared.name : '<anonymous function>';
             const diagAddendum = new DiagnosticAddendum();
             const argTypes = argList.map((t) => {
-                const typeString = evaluator.printType(getTypeOfArg(evaluator, t, /* inferenceContext */ undefined).type);
+                const typeString = evaluator.printType(
+                    getTypeOfArg(evaluator, t, /* inferenceContext */ undefined).type
+                );
 
                 if (t.argCategory === ArgCategory.UnpackedList) {
                     return `*${typeString}`;
@@ -3285,10 +3316,7 @@ export function validateOverloadedArgTypes(
     }
 
     if (filteredMatchResults.length === 1) {
-        return evaluateUsingBestMatchingOverload(
-            /* skipUnknownArgCheck */ false,
-            /* emitNoOverloadFoundError */ false
-        );
+        return evaluateUsingBestMatchingOverload(/* skipUnknownArgCheck */ false, /* emitNoOverloadFoundError */ false);
     }
 
     let expandedArgTypes: (Type | undefined)[][] | undefined = [argList.map(() => undefined)];
@@ -3383,7 +3411,17 @@ export function validateCallForFunction(
             returnType: createNamedTupleType(evaluator, errorNode, argList, /* includesTypes */ false),
         };
 
-        validateArgs(evaluator, state, registry, errorNode, argList, { type }, constraints, skipUnknownArgCheck, inferenceContext);
+        validateArgs(
+            evaluator,
+            state,
+            registry,
+            errorNode,
+            argList,
+            { type },
+            constraints,
+            skipUnknownArgCheck,
+            inferenceContext
+        );
 
         return result;
     }
@@ -3578,7 +3616,11 @@ export function getTypeOfAssertType(
         return { type: UnknownType.create() };
     }
 
-    const arg0TypeResult = evaluator.getTypeOfExpression(node.d.args[0].d.valueExpr, /* flags */ undefined, inferenceContext);
+    const arg0TypeResult = evaluator.getTypeOfExpression(
+        node.d.args[0].d.valueExpr,
+        /* flags */ undefined,
+        inferenceContext
+    );
     if (arg0TypeResult.isIncomplete) {
         return { type: UnknownType.create(/* isIncomplete */ true), isIncomplete: true };
     }
@@ -3642,7 +3684,14 @@ export function validateCallForInstantiableClass(
                 return { returnType: UnknownType.create(), argumentErrors: true };
             }
 
-            validateConstructorArgs(evaluator, errorNode, argList, expandedCallType, skipUnknownArgCheck, inferenceContext);
+            validateConstructorArgs(
+                evaluator,
+                errorNode,
+                argList,
+                expandedCallType,
+                skipUnknownArgCheck,
+                inferenceContext
+            );
 
             if (expandedCallType.shared.name === 'type' && argList.length === 1) {
                 const argTypeResult = getTypeOfArg(evaluator, argList[0], /* inferenceContext */ undefined);
@@ -3783,11 +3832,7 @@ export function validateCallForInstantiableClass(
     if (ClassType.supportsAbstractMethods(expandedCallType)) {
         const abstractSymbols = symbolResolution.getAbstractSymbols(evaluator, expandedCallType);
 
-        if (
-            abstractSymbols.length > 0 &&
-            !expandedCallType.priv.includeSubclasses &&
-            !isTypeVar(unexpandedCallType)
-        ) {
+        if (abstractSymbols.length > 0 && !expandedCallType.priv.includeSubclasses && !isTypeVar(unexpandedCallType)) {
             const diagAddendum = new DiagnosticAddendum();
             const errorsToDisplay = 2;
 
@@ -3854,7 +3899,10 @@ export function validateCallForInstantiableClass(
         isClassInstance(returnType) &&
         ClassType.isBuiltIn(returnType, 'deprecated')
     ) {
-        returnType = ClassType.cloneForDeprecatedInstance(returnType, getDeprecatedMessageFromCall(errorNode as CallNode));
+        returnType = ClassType.cloneForDeprecatedInstance(
+            returnType,
+            getDeprecatedMessageFromCall(errorNode as CallNode)
+        );
     }
 
     if (

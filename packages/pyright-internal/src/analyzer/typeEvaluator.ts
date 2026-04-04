@@ -106,21 +106,14 @@ import {
     applyFunctionDecorator,
     getFunctionInfoFromDecorators,
 } from './decorators';
-import {
-    getTypeOfEnumMember,
-    isDeclInEnumClass,
-    isEnumMetaclass,
-} from './enums';
+import { getTypeOfEnumMember, isDeclInEnumClass, isEnumMetaclass } from './enums';
 import {
     getTypeOfAugmentedAssignment,
     getTypeOfBinaryOperation,
     getTypeOfTernaryOperation,
     getTypeOfUnaryOperation,
 } from './operations';
-import {
-    getParamListDetails,
-    ParamListDetails,
-} from './parameterUtils';
+import { getParamListDetails, ParamListDetails } from './parameterUtils';
 import * as ParseTreeUtils from './parseTreeUtils';
 import { assignTypeToPatternTargets, checkForUnusedPattern, narrowTypeBasedOnPattern } from './patternMatching';
 import { Scope, ScopeType, SymbolWithScope } from './scope';
@@ -315,8 +308,6 @@ interface AliasMapEntry {
     isIllegalInIsinstance?: boolean;
     typeParamVariance?: Variance;
 }
-
-
 
 // This table contains the names of several built-in types that
 // are not subscriptable at runtime on older versions of Python.
@@ -1861,7 +1852,14 @@ export function createTypeEvaluator(
         activeIndex: number,
         activeOrFake: boolean
     ): CallSignatureInfo | undefined {
-        return callValidation.getCallSignatureInfo(evaluatorInterface, state, registry, callNode, activeIndex, activeOrFake);
+        return callValidation.getCallSignatureInfo(
+            evaluatorInterface,
+            state,
+            registry,
+            callNode,
+            activeIndex,
+            activeOrFake
+        );
     }
 
     // Determines whether the specified expression is an explicit TypeAlias declaration.
@@ -5706,9 +5704,6 @@ export function createTypeEvaluator(
         return callValidation.getTypeArgs(evaluatorInterface, state, registry, node, flags, options);
     }
 
-
-
-
     function buildTupleTypesList(
         entryTypeResults: TypeResult[],
         stripLiterals: boolean,
@@ -6466,7 +6461,14 @@ export function createTypeEvaluator(
         typeResult: TypeResult<OverloadedType>,
         argList: Arg[]
     ): FunctionType | undefined {
-        return callValidation.getBestOverloadForArgs(evaluatorInterface, state, registry, errorNode, typeResult, argList);
+        return callValidation.getBestOverloadForArgs(
+            evaluatorInterface,
+            state,
+            registry,
+            errorNode,
+            typeResult,
+            argList
+        );
     }
 
     function validateOverloadedArgTypes(
@@ -6477,7 +6479,17 @@ export function createTypeEvaluator(
         skipUnknownArgCheck: boolean | undefined,
         inferenceContext: InferenceContext | undefined
     ): CallResult {
-        return callValidation.validateOverloadedArgTypes(evaluatorInterface, state, registry, errorNode, argList, typeResult, constraints, skipUnknownArgCheck, inferenceContext);
+        return callValidation.validateOverloadedArgTypes(
+            evaluatorInterface,
+            state,
+            registry,
+            errorNode,
+            argList,
+            typeResult,
+            constraints,
+            skipUnknownArgCheck,
+            inferenceContext
+        );
     }
 
     // Validates that the arguments can be assigned to the call's parameter
@@ -6581,9 +6593,21 @@ export function createTypeEvaluator(
         inferenceContext: InferenceContext | undefined,
         recursionCount: number
     ): CallResult {
-        return callValidation.validateCallArgsForSubtype(evaluatorInterface, state, registry, errorNode, argList, expandedCallType, unexpandedCallType, isCallTypeIncomplete, constraints, skipUnknownArgCheck, inferenceContext, recursionCount);
+        return callValidation.validateCallArgsForSubtype(
+            evaluatorInterface,
+            state,
+            registry,
+            errorNode,
+            argList,
+            expandedCallType,
+            unexpandedCallType,
+            isCallTypeIncomplete,
+            constraints,
+            skipUnknownArgCheck,
+            inferenceContext,
+            recursionCount
+        );
     }
-
 
     function getTypeOfConstant(node: ConstantNode, flags: EvalFlags): TypeResult {
         let type: Type | undefined;
@@ -9772,7 +9796,6 @@ export function createTypeEvaluator(
     function validateInitSubclassArgs(node: ClassNode, classType: ClassType) {
         return callValidation.validateInitSubclassArgs(evaluatorInterface, state, registry, node, classType);
     }
-
 
     function getTypeOfFunction(node: FunctionNode): FunctionTypeResult | undefined {
         ensureRegistryInitialized(node);
