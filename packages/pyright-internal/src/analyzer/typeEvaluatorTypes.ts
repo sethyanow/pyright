@@ -762,7 +762,8 @@ export interface TypeEvaluator {
     mapSubtypesExpandTypeVars: (
         type: Type,
         options: MapSubtypesOptions | undefined,
-        callback: (expandedSubtype: Type, unexpandedSubtype: Type) => Type | undefined
+        callback: (expandedSubtype: Type, unexpandedSubtype: Type, isLastIteration: boolean) => Type | undefined,
+        recursionCount?: number
     ) => Type;
     isTypeSubsumedByOtherType: (type: Type, otherType: Type, allowAnyToSubsume: boolean) => boolean;
     lookUpSymbolRecursive: (node: ParseNode, name: string, honorCodeFlow: boolean) => SymbolWithScope | undefined;

@@ -6448,14 +6448,6 @@ export function createTypeEvaluator(
     // are some cases where we don't have a call node (e.g. in the case of an
     // __init_subclass__ validation). Here we need to find some other parent
     // node of the error node that encompasses all of the arguments.
-    function getSpeculativeNodeForCall(errorNode: ExpressionNode): ParseNode {
-        return callValidation.getSpeculativeNodeForCall(errorNode);
-    }
-
-    // Attempts to find an overloaded function for each set of argument
-    // types in the expandedArgTypes list. If an argument type is undefined,
-
-    // Determines whether one or more overloads can be eliminated because they
     function getBestOverloadForArgs(
         errorNode: ExpressionNode,
         typeResult: TypeResult<OverloadedType>,
@@ -6504,109 +6496,7 @@ export function createTypeEvaluator(
         inferenceContext: InferenceContext | undefined,
         recursionCount = 0
     ): CallResult {
-        let argumentErrors = false;
-        let isTypeIncomplete = false;
-        let specializedInitSelfType: Type | undefined;
-        const overloadsUsedForCall: FunctionType[] = [];
-
-        if (recursionCount > maxTypeRecursionCount) {
-            return { returnType: UnknownType.create(), argumentErrors: true, overloadsUsedForCall };
-        }
-        recursionCount++;
-
-        // Special forms are not callable.
-        if (callTypeResult.type.props?.specialForm) {
-            const exprNode = errorNode.nodeType === ParseNodeType.Call ? errorNode.d.leftExpr : errorNode;
-            addDiagnostic(
-                DiagnosticRule.reportCallIssue,
-                LocMessage.objectNotCallable().format({
-                    type: printType(callTypeResult.type.props.specialForm, { expandTypeAlias: true }),
-                }),
-                exprNode
-            );
-            return { returnType: UnknownType.create(), argumentErrors: true, overloadsUsedForCall };
-        }
-
-        let returnType = mapSubtypesExpandTypeVars(
-            callTypeResult.type,
-            { sortSubtypes: true },
-            (expandedSubtype, unexpandedSubtype, isLastIteration) => {
-                return useSpeculativeMode(
-                    isLastIteration ? undefined : getSpeculativeNodeForCall(errorNode),
-                    () => {
-                        const callResult = validateCallArgsForSubtype(
-                            errorNode,
-                            argList,
-                            expandedSubtype,
-                            unexpandedSubtype,
-                            !!callTypeResult.isIncomplete,
-                            constraints,
-                            skipUnknownArgCheck,
-                            inferenceContext,
-                            recursionCount
-                        );
-
-                        if (callResult.argumentErrors) {
-                            argumentErrors = true;
-                        }
-
-                        if (callResult.isTypeIncomplete) {
-                            isTypeIncomplete = true;
-                        }
-
-                        if (callResult.overloadsUsedForCall) {
-                            appendArray(overloadsUsedForCall, callResult.overloadsUsedForCall);
-                        }
-
-                        specializedInitSelfType = callResult.specializedInitSelfType;
-
-                        return callResult.returnType;
-                    },
-                    {
-                        allowDiagnostics: true,
-                    }
-                );
-            }
-        );
-
-        if (argumentErrors && isNever(returnType) && !returnType.priv.isNoReturn) {
-            returnType = UnknownType.create();
-        }
-
-        return {
-            argumentErrors,
-            returnType,
-            isTypeIncomplete,
-            specializedInitSelfType,
-            overloadsUsedForCall,
-        };
-    }
-
-    function validateCallArgsForSubtype(
-        errorNode: ExpressionNode,
-        argList: Arg[],
-        expandedCallType: Type,
-        unexpandedCallType: Type,
-        isCallTypeIncomplete: boolean,
-        constraints: ConstraintTracker | undefined,
-        skipUnknownArgCheck: boolean | undefined,
-        inferenceContext: InferenceContext | undefined,
-        recursionCount: number
-    ): CallResult {
-        return callValidation.validateCallArgsForSubtype(
-            evaluatorInterface,
-            state,
-            registry,
-            errorNode,
-            argList,
-            expandedCallType,
-            unexpandedCallType,
-            isCallTypeIncomplete,
-            constraints,
-            skipUnknownArgCheck,
-            inferenceContext,
-            recursionCount
-        );
+        return callValidation.validateCallArgsExtracted(evaluatorInterface, state, registry, errorNode, argList, callTypeResult, constraints, skipUnknownArgCheck, inferenceContext, recursionCount);
     }
 
     function getTypeOfConstant(node: ConstantNode, flags: EvalFlags): TypeResult {

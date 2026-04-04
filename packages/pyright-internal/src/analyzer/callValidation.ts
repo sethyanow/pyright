@@ -4440,3 +4440,95 @@ export function getCallSignatureInfo(
 
     return { callNode, signatures };
 }
+
+export function validateCallArgsExtracted(
+    evaluator: TypeEvaluator,
+    state: TypeEvaluatorState,
+    registry: TypeRegistry,
+    errorNode: ExpressionNode,
+    argList: Arg[],
+    callTypeResult: TypeResult,
+    constraints: ConstraintTracker | undefined,
+    skipUnknownArgCheck: boolean | undefined,
+    inferenceContext: InferenceContext | undefined,
+    recursionCount = 0
+): CallResult {
+    let argumentErrors = false;
+    let isTypeIncomplete = false;
+    let specializedInitSelfType: Type | undefined;
+    const overloadsUsedForCall: FunctionType[] = [];
+
+    if (recursionCount > maxTypeRecursionCount) {
+        return { returnType: UnknownType.create(), argumentErrors: true, overloadsUsedForCall };
+    }
+    recursionCount++;
+
+    if (callTypeResult.type.props?.specialForm) {
+        const exprNode = errorNode.nodeType === ParseNodeType.Call ? errorNode.d.leftExpr : errorNode;
+        evaluator.addDiagnostic(
+            DiagnosticRule.reportCallIssue,
+            LocMessage.objectNotCallable().format({
+                type: evaluator.printType(callTypeResult.type.props.specialForm, { expandTypeAlias: true }),
+            }),
+            exprNode
+        );
+        return { returnType: UnknownType.create(), argumentErrors: true, overloadsUsedForCall };
+    }
+
+    let returnType = evaluator.mapSubtypesExpandTypeVars(
+        callTypeResult.type,
+        { sortSubtypes: true },
+        (expandedSubtype, unexpandedSubtype, isLastIteration) => {
+            return state.useSpeculativeMode(
+                isLastIteration ? undefined : getSpeculativeNodeForCall(errorNode),
+                () => {
+                    const callResult = validateCallArgsForSubtype(
+                        evaluator,
+                        state,
+                        registry,
+                        errorNode,
+                        argList,
+                        expandedSubtype,
+                        unexpandedSubtype,
+                        !!callTypeResult.isIncomplete,
+                        constraints,
+                        skipUnknownArgCheck,
+                        inferenceContext,
+                        recursionCount
+                    );
+
+                    if (callResult.argumentErrors) {
+                        argumentErrors = true;
+                    }
+
+                    if (callResult.isTypeIncomplete) {
+                        isTypeIncomplete = true;
+                    }
+
+                    if (callResult.overloadsUsedForCall) {
+                        appendArray(overloadsUsedForCall, callResult.overloadsUsedForCall);
+                    }
+
+                    specializedInitSelfType = callResult.specializedInitSelfType;
+
+                    return callResult.returnType;
+                },
+                {
+                    allowDiagnostics: true,
+                }
+            );
+        }
+    );
+
+    if (argumentErrors && isNever(returnType) && !returnType.priv.isNoReturn) {
+        returnType = UnknownType.create();
+    }
+
+    return {
+        argumentErrors,
+        returnType,
+        isTypeIncomplete,
+        specializedInitSelfType,
+        overloadsUsedForCall,
+    };
+}
