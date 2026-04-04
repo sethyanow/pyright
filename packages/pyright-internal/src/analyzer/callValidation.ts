@@ -42,6 +42,8 @@ import {
     AssignTypeFlags,
     EvalFlags,
     CallResult,
+    CallSignature,
+    CallSignatureInfo,
     EffectiveReturnTypeOptions,
     EvaluatorUsage,
     PrintTypeOptions,
@@ -99,6 +101,7 @@ import {
 import { ConstraintSolution } from './constraintSolution';
 import { addConstraintsForExpectedType, applySourceSolutionToConstraints, solveConstraints, solveConstraintSet } from './constraintSolver';
 import { ConstraintSet } from './constraintTracker';
+import * as memberAccessModule from './memberAccess';
 import * as symbolResolution from './symbolResolution';
 import { enumerateLiteralsForType } from './typeGuards';
 import { expandTuple, makeTupleObject } from './tuples';
@@ -4255,4 +4258,137 @@ export function validateInitSubclassArgs(
             evaluator.getTypeOfExpression(arg.valueExpression);
         }
     });
+}
+
+export function getCallSignatureInfo(
+    evaluator: TypeEvaluator,
+    state: TypeEvaluatorState,
+    registry: TypeRegistry,
+    callNode: CallNode,
+    activeIndex: number,
+    activeOrFake: boolean
+): CallSignatureInfo | undefined {
+    const exprNode = callNode.d.leftExpr;
+    const callType = evaluator.getType(exprNode);
+    if (!callType) {
+        return undefined;
+    }
+
+    const argList: Arg[] = [];
+    let previousCategory = ArgCategory.Simple;
+
+    function addFakeArg() {
+        argList.push({
+            argCategory: previousCategory,
+            typeResult: { type: UnknownType.create() },
+            active: true,
+        });
+    }
+
+    callNode.d.args.forEach((arg, index) => {
+        let active = false;
+        if (index === activeIndex) {
+            if (activeOrFake) {
+                active = true;
+            } else {
+                addFakeArg();
+            }
+        }
+
+        previousCategory = arg.d.argCategory;
+
+        argList.push({
+            valueExpression: arg.d.valueExpr,
+            argCategory: arg.d.argCategory,
+            name: arg.d.name,
+            active: active,
+        });
+    });
+
+    if (callNode.d.args.length < activeIndex) {
+        addFakeArg();
+    }
+
+    let signatures: CallSignature[] = [];
+
+    function addOneFunctionToSignature(type: FunctionType) {
+        let callResult: CallResult | undefined;
+
+        state.useSpeculativeMode(callNode, () => {
+            callResult = validateArgs(
+                evaluator,
+                state,
+                registry,
+                exprNode,
+                argList,
+                { type },
+                /* constraints */ undefined,
+                /* skipUnknownArgCheck */ true,
+                /* inferenceContext */ undefined
+            );
+        });
+
+        signatures.push({
+            type: memberAccessModule.expandTypedKwargs(type),
+            activeParam: callResult?.activeParam,
+        });
+    }
+
+    function addFunctionToSignature(type: FunctionType | OverloadedType) {
+        if (isFunction(type)) {
+            addOneFunctionToSignature(type);
+        } else {
+            OverloadedType.getOverloads(type).forEach((func) => {
+                addOneFunctionToSignature(func);
+            });
+        }
+    }
+
+    doForEachSubtype(callType, (subtype) => {
+        switch (subtype.category) {
+            case TypeCategory.Function:
+            case TypeCategory.Overloaded: {
+                addFunctionToSignature(subtype);
+                break;
+            }
+
+            case TypeCategory.Class: {
+                if (TypeBase.isInstantiable(subtype)) {
+                    const constructorType = createFunctionFromConstructor(evaluator, subtype);
+
+                    if (constructorType) {
+                        doForEachSubtype(constructorType, (subtype) => {
+                            if (isFunctionOrOverloaded(subtype)) {
+                                addFunctionToSignature(subtype);
+                            }
+                        });
+
+                        const filteredSignatures = signatures.filter(
+                            (sig) =>
+                                !FunctionType.isGradualCallableForm(sig.type) ||
+                                sig.type.shared.parameters.length > 2 ||
+                                sig.type.shared.docString ||
+                                sig.type.shared.deprecatedMessage
+                        );
+
+                        if (filteredSignatures.length > 0) {
+                            signatures = filteredSignatures;
+                        }
+                    }
+                } else {
+                    const methodType = evaluator.getBoundMagicMethod(subtype, '__call__');
+                    if (methodType) {
+                        addFunctionToSignature(methodType);
+                    }
+                }
+                break;
+            }
+        }
+    });
+
+    if (signatures.length === 0) {
+        return undefined;
+    }
+
+    return { callNode, signatures };
 }

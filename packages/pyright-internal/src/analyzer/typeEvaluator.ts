@@ -94,7 +94,7 @@ import {
 } from './codeFlowTypes';
 import { addConstraintsForExpectedType, solveConstraints } from './constraintSolver';
 import { ConstraintTracker } from './constraintTracker';
-import { createFunctionFromConstructor, validateConstructorArgs } from './constructors';
+import { validateConstructorArgs } from './constructors';
 import { applyDataClassClassBehaviorOverrides, synthesizeDataClassMethods } from './dataClasses';
 import { ClassDeclaration, Declaration, DeclarationType, FunctionDeclaration } from './declaration';
 import { getNameNodeForDeclaration, ResolvedAliasInfo } from './declarationUtils';
@@ -148,7 +148,6 @@ import {
     ArgWithExpression,
     AssignTypeFlags,
     CallResult,
-    CallSignature,
     CallSignatureInfo,
     CallSiteEvaluationInfo,
     ClassTypeResult,
@@ -1862,137 +1861,7 @@ export function createTypeEvaluator(
         activeIndex: number,
         activeOrFake: boolean
     ): CallSignatureInfo | undefined {
-        const exprNode = callNode.d.leftExpr;
-        const callType = getType(exprNode);
-        if (!callType) {
-            return undefined;
-        }
-
-        const argList: Arg[] = [];
-        let previousCategory = ArgCategory.Simple;
-
-        // Empty arguments do not enter the AST as nodes, but instead are left blank.
-        // Instead, we detect when we appear to be between two known arguments or at the
-        // end of the argument list and insert a fake argument of an unknown type to have
-        // something to match later.
-        function addFakeArg() {
-            argList.push({
-                argCategory: previousCategory,
-                typeResult: { type: UnknownType.create() },
-                active: true,
-            });
-        }
-
-        callNode.d.args.forEach((arg, index) => {
-            let active = false;
-            if (index === activeIndex) {
-                if (activeOrFake) {
-                    active = true;
-                } else {
-                    addFakeArg();
-                }
-            }
-
-            previousCategory = arg.d.argCategory;
-
-            argList.push({
-                valueExpression: arg.d.valueExpr,
-                argCategory: arg.d.argCategory,
-                name: arg.d.name,
-                active: active,
-            });
-        });
-
-        if (callNode.d.args.length < activeIndex) {
-            addFakeArg();
-        }
-
-        let signatures: CallSignature[] = [];
-
-        function addOneFunctionToSignature(type: FunctionType) {
-            let callResult: CallResult | undefined;
-
-            useSpeculativeMode(callNode, () => {
-                callResult = validateArgs(
-                    exprNode,
-                    argList,
-                    { type },
-                    /* constraints */ undefined,
-                    /* skipUnknownArgCheck */ true,
-                    /* inferenceContext */ undefined
-                );
-            });
-
-            signatures.push({
-                type: expandTypedKwargs(type),
-                activeParam: callResult?.activeParam,
-            });
-        }
-
-        function addFunctionToSignature(type: FunctionType | OverloadedType) {
-            if (isFunction(type)) {
-                addOneFunctionToSignature(type);
-            } else {
-                OverloadedType.getOverloads(type).forEach((func) => {
-                    addOneFunctionToSignature(func);
-                });
-            }
-        }
-
-        doForEachSubtype(callType, (subtype) => {
-            switch (subtype.category) {
-                case TypeCategory.Function:
-                case TypeCategory.Overloaded: {
-                    addFunctionToSignature(subtype);
-                    break;
-                }
-
-                case TypeCategory.Class: {
-                    if (TypeBase.isInstantiable(subtype)) {
-                        const constructorType = createFunctionFromConstructor(evaluatorInterface, subtype);
-
-                        if (constructorType) {
-                            doForEachSubtype(constructorType, (subtype) => {
-                                if (isFunctionOrOverloaded(subtype)) {
-                                    addFunctionToSignature(subtype);
-                                }
-                            });
-
-                            // It's common for either the `__new__` or `__init__` methods to be
-                            // simple (*args: Any, **kwargs: Any) signatures. If so, we'll try
-                            // to filter out these signatures if they add nothing of value.
-                            const filteredSignatures = signatures.filter(
-                                (sig) =>
-                                    !FunctionType.isGradualCallableForm(sig.type) ||
-                                    sig.type.shared.parameters.length > 2 ||
-                                    sig.type.shared.docString ||
-                                    sig.type.shared.deprecatedMessage
-                            );
-
-                            if (filteredSignatures.length > 0) {
-                                signatures = filteredSignatures;
-                            }
-                        }
-                    } else {
-                        const methodType = getBoundMagicMethod(subtype, '__call__');
-                        if (methodType) {
-                            addFunctionToSignature(methodType);
-                        }
-                    }
-                    break;
-                }
-            }
-        });
-
-        if (signatures.length === 0) {
-            return undefined;
-        }
-
-        return { callNode, signatures };
-    }
-
-    function expandTypedKwargs(functionType: FunctionType): FunctionType {
-        return memberAccessModule.expandTypedKwargs(functionType);
+        return callValidation.getCallSignatureInfo(evaluatorInterface, state, registry, callNode, activeIndex, activeOrFake);
     }
 
     // Determines whether the specified expression is an explicit TypeAlias declaration.
@@ -6715,17 +6584,6 @@ export function createTypeEvaluator(
         return callValidation.validateCallArgsForSubtype(evaluatorInterface, state, registry, errorNode, argList, expandedCallType, unexpandedCallType, isCallTypeIncomplete, constraints, skipUnknownArgCheck, inferenceContext, recursionCount);
     }
 
-
-    function validateArgs(
-        errorNode: ExpressionNode,
-        argList: Arg[],
-        typeResult: TypeResult<FunctionType>,
-        constraints: ConstraintTracker | undefined,
-        skipUnknownArgCheck = false,
-        inferenceContext: InferenceContext | undefined
-    ): CallResult {
-        return callValidation.validateArgs(evaluatorInterface, state, registry, errorNode, argList, typeResult, constraints, skipUnknownArgCheck, inferenceContext);
-    }
 
     function getTypeOfConstant(node: ConstantNode, flags: EvalFlags): TypeResult {
         let type: Type | undefined;
