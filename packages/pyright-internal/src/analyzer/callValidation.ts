@@ -1,7 +1,5 @@
 /*
  * callValidation.ts
- * Copyright (c) Microsoft Corporation.
- * Licensed under the MIT license.
  *
  * Functions for call validation, overload resolution, and argument processing,
  * extracted from typeEvaluator.ts.

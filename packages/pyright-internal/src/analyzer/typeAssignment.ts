@@ -1,7 +1,5 @@
 /*
  * typeAssignment.ts
- * Copyright (c) Microsoft Corporation.
- * Licensed under the MIT license.
  *
  * Functions for type assignment, compatibility checking, and subtype
  * verification extracted from the createTypeEvaluator closure.

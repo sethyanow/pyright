@@ -1,7 +1,5 @@
 /*
  * typeEvaluatorState.ts
- * Copyright (c) Microsoft Corporation.
- * Licensed under the MIT license.
  *
  * Manages the mutable state and infrastructure functions
  * extracted from the createTypeEvaluator() closure.

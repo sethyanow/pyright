@@ -1,7 +1,5 @@
 /*
  * symbolResolution.ts
- * Copyright (c) Microsoft Corporation.
- * Licensed under the MIT license.
  *
  * Functions for symbol and declaration resolution extracted from
  * the createTypeEvaluator closure.

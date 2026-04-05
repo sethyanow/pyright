@@ -1,7 +1,5 @@
 /*
  * returnTypeInference.ts
- * Copyright (c) Microsoft Corporation.
- * Licensed under the MIT license.
  *
  * Functions for inferring and computing return types of functions,
  * extracted from the createTypeEvaluator() closure.

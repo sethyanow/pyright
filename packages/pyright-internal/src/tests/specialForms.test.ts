@@ -1,7 +1,5 @@
 /*
  * specialForms.test.ts
- * Copyright (c) Microsoft Corporation.
- * Licensed under the MIT license.
  *
  * Smoke tests verifying that special form creation functions
  * are exported from the specialForms module after extraction

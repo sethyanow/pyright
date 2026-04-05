@@ -1,7 +1,5 @@
 /*
  * typeEvaluatorState.test.ts
- * Copyright (c) Microsoft Corporation.
- * Licensed under the MIT license.
  *
  * Unit tests for TypeEvaluatorState extracted from the
  * createTypeEvaluator closure.

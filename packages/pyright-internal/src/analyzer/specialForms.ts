@@ -1,7 +1,5 @@
 /*
  * specialForms.ts
- * Copyright (c) Microsoft Corporation.
- * Licensed under the MIT license.
  *
  * Functions for creating special Python type constructs (Callable, Union,
  * Optional, Literal, TypeVar, ParamSpec, TypeVarTuple, Annotated, etc.)
