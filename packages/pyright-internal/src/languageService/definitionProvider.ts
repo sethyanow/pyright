@@ -155,7 +155,7 @@ class DefinitionProviderBase {
         protected readonly token: CancellationToken
     ) {}
 
-    getDefinitionsForNode(node: ParseNode, offset: number) {
+    getDefinitionsForNode(node: ParseNode, offset: number): DocumentRange[] | undefined {
         throwIfCancellationRequested(this.token);
 
         const definitions: DocumentRange[] = [];
@@ -182,6 +182,8 @@ class DefinitionProviderBase {
                     this.resolveDeclarations(declInfo.decls, definitions);
                     this.addSynthesizedTypes(declInfo.synthesizedTypes, definitions);
                 }
+            } else if (node.nodeType === ParseNodeType.Function || node.nodeType === ParseNodeType.Class) {
+                return this.getDefinitionsForNode(node.d.name, node.d.name.start);
             }
         }
 
