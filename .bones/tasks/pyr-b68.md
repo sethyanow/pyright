@@ -6,6 +6,7 @@ type: bug
 priority: 2
 ---
 
+
 ## Bug Report — Field Observation
 
 **Source:** ChunkHound MCP tool acceptance testing (chunkhound project)

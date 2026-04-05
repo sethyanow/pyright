@@ -4,8 +4,10 @@ title: Add goToImplementation provider
 status: open
 type: feature
 priority: 1
+depends_on: [pyr-b68]
 parent: pyr-lo0
 ---
+
 
 
 
