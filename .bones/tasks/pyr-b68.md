@@ -1,11 +1,12 @@
 ---
 id: pyr-b68
 title: go_to_definition returns empty on async method definitions at keyword position
-status: active
+status: closed
 type: bug
 priority: 2
 owner: Seth
 ---
+
 
 
 
@@ -87,12 +88,12 @@ This is the minimal contained fix — recursive call reuses the existing Name ha
 
 ## Success Criteria
 
-- [ ] `def` keyword position on a function definition resolves to the function's name declaration
-- [ ] `async` keyword position on an async function resolves to the function's name declaration
-- [ ] `class` keyword position on a class definition resolves to the class's name declaration
-- [ ] Existing name-based go-to-definition still works (no regression)
-- [ ] Fourslash test covers all three keyword types (def, async def, class)
-- [ ] All existing tests pass
+- [x] `def` keyword position on a function definition resolves to the function's name declaration
+- [x] `async` keyword position on an async function resolves to the function's name declaration
+- [x] `class` keyword position on a class definition resolves to the class's name declaration
+- [x] Existing name-based go-to-definition still works (no regression)
+- [x] Fourslash test covers all three keyword types (def, async def, class)
+- [x] All existing tests pass
 
 ## Edge Cases
 
