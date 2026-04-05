@@ -128,12 +128,6 @@ export class WorkspaceSymbolProvider {
     }
 
     private _reportSymbolsForProgram(program: ProgramView) {
-        // Don't do a search if the query is empty. We'll return
-        // too many results in this case.
-        if (!this._query) {
-            return;
-        }
-
         // "Workspace symbols" searches symbols only from user code.
         for (const sourceFileInfo of program.getSourceFileInfoList()) {
             if (!isUserCode(sourceFileInfo)) {

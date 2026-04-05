@@ -112,3 +112,5 @@
 {"timestamp":"2026-04-05T17:50:07.350668+00:00","actor":"Seth","event_type":"dep_added","task_id":"pyr-lo0","details":{"kind":"blocks","to":"pyr-rcy"}}
 {"timestamp":"2026-04-05T17:50:07.417894+00:00","actor":"Seth","event_type":"dep_added","task_id":"pyr-lo0","details":{"kind":"parent-child","to":"pyr-e3e"}}
 {"timestamp":"2026-04-05T17:50:07.418418+00:00","actor":"Seth","event_type":"dep_added","task_id":"pyr-lo0","details":{"kind":"blocks","to":"pyr-e3e"}}
+{"timestamp":"2026-04-05T22:32:41.459897+00:00","actor":"Seth","event_type":"dep_added","task_id":"pyr-e3e","details":{"kind":"blocks","to":"pyr-b68"}}
+{"timestamp":"2026-04-05T22:40:57.340903+00:00","actor":"Seth","event_type":"updated","task_id":"pyr-rcy","details":{"status":"active"}}
