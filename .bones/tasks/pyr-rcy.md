@@ -1,11 +1,13 @@
 ---
 id: pyr-rcy
 title: 'workspaceSymbol: return results on empty query'
-status: active
+status: closed
 type: bug
 priority: 1
 parent: pyr-lo0
 ---
+
+
 
 
 
@@ -35,11 +37,11 @@ Remove the empty-query guard in `_reportSymbolsForProgram` (line 132-134 of `wor
 
 ## Success Criteria
 
-- [ ] Empty-query workspace/symbol returns symbols from user code files
-- [ ] Empty-query workspace/symbol does NOT return typeshed symbols (isUserCode filter preserved)
-- [ ] Non-empty queries still filter correctly
-- [ ] Unit test in workspaceSymbol.test.ts covers all three cases
-- [ ] Full test suite passes
+- [x] Empty-query workspace/symbol returns symbols from user code files
+- [x] Empty-query workspace/symbol does NOT return typeshed symbols (isUserCode filter preserved)
+- [x] Non-empty queries still filter correctly
+- [x] Unit test in workspaceSymbol.test.ts covers all three cases
+- [x] Full test suite passes
 
 ## Key Considerations (Failure Catalog)
 
@@ -64,3 +66,7 @@ Remove the empty-query guard in `_reportSymbolsForProgram` (line 132-134 of `wor
 ## Anti-Patterns
 
 - Don't add a result limit or pagination logic — that's a client concern, not the provider's. The guard removal is the complete fix.
+
+## Log
+
+- [2026-04-05T22:53:22Z] [Seth] Closed. Removed 3-line empty-query guard. Added 6 tests (3 core + 3 adversarial). Full suite 2347/2347 green. Typecheck clean.

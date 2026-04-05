@@ -30,8 +30,8 @@ R1 and R2 from parent epic pyr-otr.
 ## Success Criteria
 - [ ] `textDocument/implementation` registered in capabilities and returns concrete implementations of Protocols/ABCs
 - [ ] `textDocument/implementation` works on method names (returns overriding methods in subclasses)
-- [ ] `workspace/symbol` with empty query returns symbols from user code files
-- [ ] Non-empty workspace/symbol queries still filter correctly
+- [x] `workspace/symbol` with empty query returns symbols from user code files
+- [x] Non-empty workspace/symbol queries still filter correctly
 - [ ] Fourslash tests for both features
 - [ ] Full test suite passes
 

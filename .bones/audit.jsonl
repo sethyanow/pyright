@@ -114,3 +114,5 @@
 {"timestamp":"2026-04-05T17:50:07.418418+00:00","actor":"Seth","event_type":"dep_added","task_id":"pyr-lo0","details":{"kind":"blocks","to":"pyr-e3e"}}
 {"timestamp":"2026-04-05T22:32:41.459897+00:00","actor":"Seth","event_type":"dep_added","task_id":"pyr-e3e","details":{"kind":"blocks","to":"pyr-b68"}}
 {"timestamp":"2026-04-05T22:40:57.340903+00:00","actor":"Seth","event_type":"updated","task_id":"pyr-rcy","details":{"status":"active"}}
+{"timestamp":"2026-04-05T22:53:17.224410+00:00","actor":"Seth","event_type":"closed","task_id":"pyr-rcy","details":{"notes":null}}
+{"timestamp":"2026-04-05T22:53:22.123891+00:00","actor":"Seth","event_type":"logged","task_id":"pyr-rcy","details":{"message":"Closed. Removed 3-line empty-query guard. Added 6 tests (3 core + 3 adversarial). Full suite 2347/2347 green. Typecheck clean."}}
