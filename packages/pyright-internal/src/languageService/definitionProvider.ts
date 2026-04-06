@@ -465,7 +465,7 @@ export class ImplementationProvider {
                 if (
                     classTypeResult &&
                     !ClassType.isSameGenericClass(classTypeResult.classType, targetClass) &&
-                    derivesFromClassRecursive(classTypeResult.classType, targetClass, /* ignoreUnknown */ false)
+                    derivesFromClassRecursive(classTypeResult.classType, targetClass, /* ignoreUnknown */ true)
                 ) {
                     const nameNode = statement.d.name;
                     results.push({
@@ -506,7 +506,7 @@ export class ImplementationProvider {
                 if (
                     classTypeResult &&
                     !ClassType.isSameGenericClass(classTypeResult.classType, targetClass) &&
-                    derivesFromClassRecursive(classTypeResult.classType, targetClass, /* ignoreUnknown */ false)
+                    derivesFromClassRecursive(classTypeResult.classType, targetClass, /* ignoreUnknown */ true)
                 ) {
                     // Check if this subclass defines (not just inherits) the method.
                     const memberInfo = lookUpClassMember(
