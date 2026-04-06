@@ -20,11 +20,16 @@ parent: pyr-otr
 ## Context
 Parent epic pyr-otr, Phase 1. No prior phase dependencies — this is the foundation.
 
-Establishes two things: (1) the "find subclasses/implementors" machinery that Phase 2 (type hierarchy) reuses for subtypes, and (2) working cross-workspace symbol search that every subsequent phase benefits from.
+Establishes three things: (1) the "find subclasses/implementors" machinery that Phase 2 (type hierarchy) reuses for subtypes, (2) working cross-workspace symbol search that every subsequent phase benefits from, and (3) the plugin + MCP adapter that every phase's demo and acceptance gates depend on.
 
-Both tasks are already scoped:
-- pyr-rcy: Remove empty-query guard in workspaceSymbolProvider.ts
-- pyr-e3e: Add ImplementationProvider following TypeDefinitionProvider pattern
+Completed tasks:
+- pyr-rcy: Remove empty-query guard in workspaceSymbolProvider.ts (CLOSED)
+- pyr-e3e: Add ImplementationProvider following TypeDefinitionProvider pattern (CLOSED)
+
+Remaining:
+- Plugin setup: Claude Code plugin with .lsp.json pointing at dev-built Pyright
+- MCP adapter: thin bridge exposing LSP capabilities to agents (not Claude-only)
+- pyr-kwu: Phase 1 acceptance (demo via live LSP tool)
 
 ## Requirements
 R1 and R2 from parent epic pyr-otr.
@@ -36,6 +41,9 @@ R1 and R2 from parent epic pyr-otr.
 - [x] Non-empty workspace/symbol queries still filter correctly
 - [x] Fourslash tests for both features
 - [x] Full test suite passes
+- [ ] Claude Code plugin installed with LSP pointing at dev-built Pyright
+- [ ] MCP adapter operational — agents can hit goToImplementation + workspaceSymbol through it
+- [ ] Demo: features work live via LSP tool in Claude Code
 
 ## Anti-Patterns
 - Don't return goToDefinition results for goToImplementation — they answer different questions. REASON: definition finds where something is declared; implementation finds concrete classes that fulfill a contract.

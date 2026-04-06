@@ -35,7 +35,7 @@ R7. `textDocument/selectionRange` — AST-aware expand/shrink selection.
 R8. `textDocument/foldingRange` — collapsible regions for functions, classes, imports, comments.
 R9. `codeAction` with `refactor.extract` — extract method and extract variable from selection.
 R10. `codeAction` with `refactor.rewrite` — move symbol to another file with import rewriting.
-R11. Thin facade layer (MCP and/or skill scripts) exposing all providers to agents via LSP as the universal abstraction.
+R11. Thin adapter layer (MCP + skill/scripts) exposing all providers to agents via LSP as the universal abstraction. Not Claude-only — supports any coding agent.
 R12. All existing tests pass after every provider addition — zero behavior change to existing features.
 
 ## Success Criteria
@@ -43,17 +43,13 @@ R12. All existing tests pass after every provider addition — zero behavior cha
 - [ ] Every LSP method in R1-R10 registered in server capabilities and returning correct results
 - [ ] Fourslash tests for each provider covering happy path + at least one edge case
 - [ ] Full test suite passes: `cd packages/pyright-internal && npm run test:norebuild`
-- [ ] Facade layer operational — agents can access all new features through LSP
+- [ ] Adapter layer operational — agents can access all new features through LSP
 - [ ] Each provider follows existing Pyright patterns (provider class in languageService/, wired in languageServerBase.ts)
 
 ## Anti-Patterns (FORBIDDEN)
 
-- **Don't build provider logic in the facade.** The facade is a protocol bridge — zero business logic. Intelligence lives in Pyright's LSP providers. REASON: facade must be swappable without losing functionality.
-- **Don't add to the TypeEvaluator interface for provider needs.** Providers consume the evaluator's existing public API. If you need evaluator data, find the existing method or use the checker/program API. REASON: interface bloat defeated the decomposition work.
+- **Don't build provider logic in the adapter layer.** The adapter is a protocol bridge — zero business logic. Intelligence lives in Pyright's LSP providers. REASON: adapter must be swappable without losing functionality.
 - **Don't build providers that only work on open files.** workspace/symbol, type hierarchy, and references must work across the entire program. REASON: agents don't "open" files — they query cold.
-- **Don't build the facade before the providers.** Each phase builds native LSP providers. The facade is the final phase. REASON: LSP is the abstraction; the facade is one of many possible clients.
-- **Don't skip the file-walking visitor pattern in semantic tokens.** Build it properly — inlay hints and code lens reuse it. REASON: prevents three separate ad-hoc implementations of the same walk.
-- **Don't implement refactoring without scope analysis.** Extract method must correctly identify captured variables, return values, and side effects. REASON: wrong scope analysis produces code that compiles but changes behavior.
 
 ## Approach
 
@@ -61,16 +57,17 @@ Build each LSP provider as a native Pyright feature, layered bottom-up so each p
 
 Each provider follows the existing pattern: a provider class in `packages/pyright-internal/src/languageService/`, wired into `languageServerBase.ts` (connection handler + capability registration). The test harness already advertises client support for all missing features (`languageServerTestUtils.ts`), so fourslash tests work immediately.
 
-The final phase wraps everything in a thin facade (MCP server and/or skill scripts) that translates agent tool calls into LSP requests. The facade has no logic — it's a protocol bridge. LSP is the universal abstraction that editors, agents, and any future client consume.
+A thin adapter layer (MCP + skill/scripts) grows incrementally alongside the providers. Phase 1 establishes the plugin (Claude Code LSP + MCP), and each subsequent phase adds its new capabilities to the adapter. The adapter is a protocol bridge — zero business logic. LSP is the universal abstraction. The MCP and skill/scripts are adapters for different agent tooling (not Claude-only). Wiring/polish happens at the end; the infrastructure exists from day one.
 
 ## Architecture
 
 ```
 Agent / Editor / CLI
         │
-   ┌────┴────┐
-   │ Facade  │  ← MCP / skill scripts (Phase 8, protocol bridge only)
-   └────┬────┘
+   ┌────┴──────────────────┐
+   │ Adapter (grows with   │  ← MCP + skill/scripts (established Phase 1,
+   │ each phase)           │     each phase adds capabilities)
+   └────┬──────────────────┘
         │ LSP protocol
    ┌────┴────────────────────────────┐
    │  languageServerBase.ts          │  ← connection handlers + capability registration
@@ -93,11 +90,13 @@ Agent / Editor / CLI
 
 ## Phases
 
-### Phase 1: Foundation — goToImplementation + workspaceSymbol fix
-**Scope:** R1, R2
+### Phase 1: Foundation — goToImplementation + workspaceSymbol fix + plugin/adapter setup
+**Scope:** R1, R2, R11 (initial)
 **Gate:**
 - `cd packages/pyright-internal && npx jest fourSlashRunner.test --forceExit` → implementation + workspace symbol tests pass
 - `npm run typecheck` → clean
+- Plugin installed: Claude Code LSP tool talks to dev-built Pyright
+- MCP adapter operational: thin bridge exposing LSP capabilities to agents
 **Demo:** Show me goToImplementation finding concrete classes for a Protocol, and workspaceSymbol returning results on empty query — both via the LSP tool here.
 
 ### Phase 2: Type Hierarchy
@@ -142,12 +141,12 @@ Agent / Editor / CLI
 - `npm run typecheck` → clean
 **Demo:** Show me extract method on a selection (correct captured variables, return type), and move symbol rewriting imports across files.
 
-### Phase 8: Facade
+### Phase 8: Adapter
 **Scope:** R11
 **Gate:**
-- Facade starts, connects to Pyright, agents can invoke each provider through it
+- Adapter starts, connects to Pyright, agents can invoke each provider through it
 - `npm run typecheck` → clean
-**Demo:** Show me an agent (or the LSP tool) using the facade to hit each new provider.
+**Demo:** Show me an agent (or the LSP tool) using the adapter to hit each new provider.
 
 ## Agent Failure Mode Catalog
 
@@ -195,10 +194,10 @@ Agent / Editor / CLI
 **Assumes:** Refactoring consumes these to determine what to extract, what's captured, what imports to rewrite
 **If wrong:** Refactoring reimplements discovery logic — significant rework
 
-### Phase 1-7 → Phase 8
-**Delivers:** All providers registered as native LSP handlers
-**Assumes:** Facade sends standard LSP requests and gets standard LSP responses
-**If wrong:** Facade can't work — providers must be native LSP first
+### Each Phase → Adapter
+**Delivers:** Each phase registers new LSP handlers and adds corresponding MCP/skill capabilities to the adapter
+**Assumes:** Adapter is established in Phase 1 and grows incrementally
+**If wrong:** Demo can't happen — adapter must exist for acceptance
 
 ## Design Rationale
 
@@ -218,7 +217,7 @@ Open-source Pyright implements 14 of 24+ LSP features. Pylance adds the rest but
 #### 1. Native Pyright LSP providers (selected)
 **Chosen because:** LSP is the universal abstraction. Every editor and agent framework speaks it. Building features natively means all consumers benefit. The type evaluator already has the information — only the service layer is missing. Existing provider patterns (DefinitionProvider, CallHierarchyProvider) provide clear templates.
 
-#### 2. Build everything in the MCP/facade layer
+#### 2. Build everything in the MCP/adapter layer
 **Why explored:** Faster to prototype — don't need to modify Pyright internals.
 **REJECTED BECAUSE:** Duplicates work the evaluator already does, couples agent tooling to a specific protocol, and other LSP clients (VS Code, Neovim) get nothing.
 **DO NOT REVISIT UNLESS:** Pyright's architecture makes a specific provider impossible to implement natively (hasn't happened yet).
@@ -229,7 +228,7 @@ Open-source Pyright implements 14 of 24+ LSP features. Pylance adds the rest but
 **DO NOT REVISIT UNLESS:** pylsp adds a Pyright backend plugin.
 
 ### Scope Boundaries
-**In scope:** All LSP providers listed in R1-R10, facade layer (R11), fourslash tests for each.
+**In scope:** All LSP providers listed in R1-R10, adapter layer (R11), fourslash tests for each.
 **Out of scope:** Upstream contribution to microsoft/pyright (personal fork). Jupyter notebook-specific features. AI-powered completions (IntelliCode-style). Formatting providers (black/ruff handle this).
 
 ### Open Questions
@@ -242,10 +241,10 @@ Open-source Pyright implements 14 of 24+ LSP features. Pylance adds the rest but
 | Question | Answer | Implication |
 |----------|--------|-------------|
 | What features in scope? | Full Pylance gap — all of them | 8 phases, comprehensive effort |
-| Priority order? | Most logical build order — what builds on what | Foundation → hierarchy → visitor → hints → lens → ranges → refactoring → facade |
+| Priority order? | Most logical build order — what builds on what | Foundation → hierarchy → visitor → hints → lens → ranges → refactoring → adapter |
 | Refactoring scope? | Both extract and move symbol | Phase 7 is the heaviest phase |
 | Acceptance format? | Show it off, no ceremony | Demo is live demonstration, not test output |
-| Facade timing? | Build unwired, wire at the end | Phase 8, all providers native LSP first |
+| Adapter timing? | Build incrementally, wire/polish at end | Phase 1 establishes plugin + MCP, each phase adds capabilities |
 | Why Pyright? | Only tool with the type intelligence AND open source | mypy can't, ty isn't trying, pylsp is duct tape, Pylance is locked |
 
 ### Dead-End Paths
