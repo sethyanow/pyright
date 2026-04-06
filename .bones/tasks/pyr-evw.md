@@ -8,12 +8,34 @@ depends_on: [pyr-mge]
 parent: pyr-otr
 ---
 
+## Context
 
-
-
+Phase 4 of pyr-otr. Depends on Phase 3's file-walking visitor pattern that resolves nodes through the evaluator. Reuses the visitor to emit hints at specific positions instead of classifying tokens.
 
 ## Requirements
 
-## Context
+R5 from parent epic: `textDocument/inlayHint` — show inferred return types, variable types, and parameter names at call sites.
 
 ## Success Criteria
+
+- [ ] `textDocument/inlayHint` registered in capabilities, returns InlayHint[]
+- [ ] Inferred return types shown on functions without return annotations
+- [ ] Inferred variable types shown on assignments without annotations
+- [ ] Parameter names shown at call sites
+- [ ] Fourslash tests covering: return type inference, variable type inference, parameter names
+- [ ] Full test suite passes
+- [ ] Adapter layer updated — inlay hints accessible through MCP + skill/scripts
+
+## Key Considerations
+
+- Reuses Phase 3's visitor pattern — emit hints at positions instead of classifying tokens
+- If Phase 3's visitor doesn't generalize cleanly, build own walker — duplication, not catastrophic
+
+## Gate
+
+- `cd packages/pyright-internal && npx jest fourSlashRunner.test --forceExit` → inlay hint tests pass
+- `npm run typecheck` → clean
+
+## Demo
+
+Show me inlay hints on a Python file — inferred return types, variable types, parameter names at call sites.
