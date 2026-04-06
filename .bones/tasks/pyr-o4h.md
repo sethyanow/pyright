@@ -13,6 +13,7 @@ parent: pyr-lo0
 
 
 
+
 ## Context
 
 Phase 1 needs a way for agents to use the new Pyright capabilities (goToImplementation, workspaceSymbol). The adapter layer is a Claude Code plugin rooted at the repo root, with an MCP server in `packages/pyright-mcp/` that wraps Pyright's LSP.
@@ -164,3 +165,7 @@ The existing `.mcp.json` at repo root contains project dev tools (ChunkHound, Se
 - MCP server build: `packages/pyright-mcp/` needs its own `tsconfig.json` (target ES2020, module NodeNext) and a build script (`tsc` to `dist/`) — no webpack needed for a simple server
 - Requires `npm run build:cli:dev` before MCP server can spawn Pyright
 - Smoke test lives at `packages/pyright-mcp/src/tests/mcp-server.test.ts` — uses Jest (consistent with pyright-internal), spawns the MCP server as a subprocess and sends tool calls
+
+## Log
+
+- [2026-04-06T18:30:36Z] [Seth] Debrief: MCP server implemented with LSP bridge via vscode-jsonrpc. Key discovery: Pyright requires workspaceFolders in init params (rootUri ignored). Zod v4 z.record needs 2 args. Stream error handlers needed to prevent ERR_STREAM_DESTROYED crashes. Reflections: skeleton accurate except .mcp.json conflict (SRE caught). User corrected unnecessary scope question about wrapper scripts.
