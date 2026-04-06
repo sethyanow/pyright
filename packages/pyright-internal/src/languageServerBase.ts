@@ -115,7 +115,12 @@ import { convertUriToLspUriString } from './common/uri/uriUtils';
 import { AnalyzerServiceExecutor } from './languageService/analyzerServiceExecutor';
 import { CallHierarchyProvider } from './languageService/callHierarchyProvider';
 import { CompletionItemData, CompletionProvider } from './languageService/completionProvider';
-import { DefinitionFilter, DefinitionProvider, TypeDefinitionProvider } from './languageService/definitionProvider';
+import {
+    DefinitionFilter,
+    DefinitionProvider,
+    ImplementationProvider,
+    TypeDefinitionProvider,
+} from './languageService/definitionProvider';
 import { DocumentHighlightProvider } from './languageService/documentHighlightProvider';
 import { CollectionResult } from './languageService/documentSymbolCollector';
 import { DocumentSymbolProvider } from './languageService/documentSymbolProvider';
@@ -522,6 +527,7 @@ export abstract class LanguageServerBase implements LanguageServerInterface, Dis
         this.connection.onDefinition(async (params, token) => this.onDefinition(params, token));
         this.connection.onDeclaration(async (params, token) => this.onDeclaration(params, token));
         this.connection.onTypeDefinition(async (params, token) => this.onTypeDefinition(params, token));
+        this.connection.onImplementation(async (params, token) => this.onImplementation(params, token));
 
         this.connection.onReferences(async (params, token, workDoneReporter, resultReporter) =>
             this.onReferences(params, token, workDoneReporter, resultReporter)
@@ -645,6 +651,7 @@ export abstract class LanguageServerBase implements LanguageServerInterface, Dis
                 definitionProvider: { workDoneProgress: true },
                 declarationProvider: { workDoneProgress: true },
                 typeDefinitionProvider: { workDoneProgress: true },
+                implementationProvider: { workDoneProgress: true },
                 referencesProvider: { workDoneProgress: true },
                 documentSymbolProvider: { workDoneProgress: true },
                 workspaceSymbolProvider: { workDoneProgress: true },
@@ -756,6 +763,17 @@ export abstract class LanguageServerBase implements LanguageServerInterface, Dis
         return this.getDefinitions(params, token, DefinitionFilter.All, (workspace, filePath, position, _, token) =>
             workspace.service.run((program) => {
                 return new TypeDefinitionProvider(program, filePath, position, token).getDefinitions();
+            }, token)
+        );
+    }
+
+    protected async onImplementation(
+        params: TextDocumentPositionParams,
+        token: CancellationToken
+    ): Promise<Definition | DefinitionLink[] | undefined | null> {
+        return this.getDefinitions(params, token, DefinitionFilter.All, (workspace, filePath, position, _, token) =>
+            workspace.service.run((program) => {
+                return new ImplementationProvider(program, filePath, position, token).getImplementations();
             }, token)
         );
     }

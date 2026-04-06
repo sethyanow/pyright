@@ -62,6 +62,7 @@ import { CompletionOptions, CompletionProvider } from '../../../languageService/
 import {
     DefinitionFilter,
     DefinitionProvider,
+    ImplementationProvider,
     TypeDefinitionProvider,
 } from '../../../languageService/definitionProvider';
 import { DocumentHighlightProvider } from '../../../languageService/documentHighlightProvider';
@@ -1468,6 +1469,40 @@ export class TestState {
                 position,
                 CancellationToken.None
             ).getDefinitions();
+            actual = this.fixupDefinitionsToMatchExpected(actual!);
+
+            assert.strictEqual(actual?.length ?? 0, expected.length, name);
+
+            for (const r of expected) {
+                assert.strictEqual(actual?.filter((d) => this._deepEqual(d, r)).length, 1, name);
+            }
+        }
+    }
+
+    verifyFindImplementations(map: {
+        [marker: string]: {
+            implementations: DocumentRange[];
+        };
+    }) {
+        this.analyze();
+
+        for (const marker of this.getMarkers()) {
+            const fileName = marker.fileName;
+            const name = this.getMarkerName(marker);
+
+            if (!(name in map)) {
+                continue;
+            }
+
+            const expected = map[name].implementations;
+
+            const position = this.convertOffsetToPosition(fileName, marker.position);
+            let actual = new ImplementationProvider(
+                this.program,
+                Uri.file(fileName, this.serviceProvider),
+                position,
+                CancellationToken.None
+            ).getImplementations();
             actual = this.fixupDefinitionsToMatchExpected(actual!);
 
             assert.strictEqual(actual?.length ?? 0, expected.length, name);

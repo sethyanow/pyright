@@ -339,6 +339,11 @@ declare namespace _ {
                 definitions: DocumentRange[];
             };
         }): void;
+        verifyFindImplementations(map: {
+            [marker: string]: {
+                implementations: DocumentRange[];
+            };
+        }): void;
         verifyRename(
             map: {
                 [marker: string]: {

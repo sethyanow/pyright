@@ -20,11 +20,12 @@ import {
     isUnresolvedAliasDeclaration,
 } from '../analyzer/declaration';
 import * as ParseTreeUtils from '../analyzer/parseTreeUtils';
+import { isUserCode } from '../analyzer/sourceFileInfoUtils';
 import { SourceMapper, isStubFile } from '../analyzer/sourceMapper';
 import { SynthesizedTypeInfo } from '../analyzer/symbol';
 import { TypeEvaluator } from '../analyzer/typeEvaluatorTypes';
-import { doForEachSubtype } from '../analyzer/typeUtils';
-import { OverloadedType, TypeCategory, isOverloaded } from '../analyzer/types';
+import { MemberAccessFlags, derivesFromClassRecursive, doForEachSubtype, lookUpClassMember } from '../analyzer/typeUtils';
+import { ClassType, OverloadedType, TypeCategory, isClass, isInstantiableClass, isOverloaded } from '../analyzer/types';
 import { throwIfCancellationRequested } from '../common/cancellationUtils';
 import { appendArray } from '../common/collectionUtils';
 import { isDefined } from '../common/core';
@@ -35,7 +36,7 @@ import { ServiceKeys } from '../common/serviceKeys';
 import { ServiceProvider } from '../common/serviceProvider';
 import { Position, rangesAreEqual } from '../common/textRange';
 import { Uri } from '../common/uri/uri';
-import { ParseNode, ParseNodeType } from '../parser/parseNodes';
+import { ClassNode, ParseNode, ParseNodeType, StatementNode } from '../parser/parseNodes';
 import { ParseFileResults } from '../parser/parser';
 
 export enum DefinitionFilter {
@@ -312,6 +313,235 @@ export class TypeDefinitionProvider extends DefinitionProviderBase {
         }
 
         return definitions;
+    }
+}
+
+export class ImplementationProvider {
+    private readonly _program: ProgramView;
+    private readonly _fileUri: Uri;
+    private readonly _token: CancellationToken;
+    private readonly _node: ParseNode | undefined;
+
+    constructor(program: ProgramView, fileUri: Uri, position: Position, token: CancellationToken) {
+        this._program = program;
+        this._fileUri = fileUri;
+        this._token = token;
+
+        const parseResults = program.getParseResults(fileUri);
+        if (parseResults) {
+            const offset = convertPositionToOffset(position, parseResults.tokenizerOutput.lines);
+            if (offset !== undefined) {
+                this._node = ParseTreeUtils.findNodeByOffset(parseResults.parserOutput.parseTree, offset);
+            }
+        }
+    }
+
+    getImplementations(): DocumentRange[] | undefined {
+        throwIfCancellationRequested(this._token);
+
+        if (!this._node || this._node.nodeType !== ParseNodeType.Name) {
+            return undefined;
+        }
+
+        const evaluator = this._program.evaluator;
+        if (!evaluator) {
+            return undefined;
+        }
+
+        // Determine if cursor is on a class name or a method name.
+        const parent = this._node.parent;
+        if (!parent) {
+            return undefined;
+        }
+
+        // Case 1: Cursor is on a class name (the name token of a ClassNode).
+        if (parent.nodeType === ParseNodeType.Class && parent.d.name === this._node) {
+            const classTypeResult = evaluator.getTypeOfClass(parent);
+            if (!classTypeResult) {
+                return undefined;
+            }
+            return this._findSubclassLocations(classTypeResult.classType, evaluator);
+        }
+
+        // Case 2: Cursor is on a method name (the name token of a FunctionNode inside a class).
+        if (parent.nodeType === ParseNodeType.Function && parent.d.name === this._node) {
+            const classNode = parent.parent?.parent;
+            if (classNode?.nodeType === ParseNodeType.Class) {
+                const classTypeResult = evaluator.getTypeOfClass(classNode);
+                if (!classTypeResult) {
+                    return undefined;
+                }
+                const methodName = this._node.d.value;
+                return this._findMethodOverrideLocations(classTypeResult.classType, methodName, evaluator);
+            }
+        }
+
+        // Case 3: Cursor is on a type annotation reference (e.g., `x: Drawable`).
+        // Resolve the type and check if it's a class.
+        const type = evaluator.getType(this._node);
+        if (type && isInstantiableClass(type)) {
+            return this._findSubclassLocations(type, evaluator);
+        }
+
+        return undefined;
+    }
+
+    private _findSubclassLocations(targetClass: ClassType, evaluator: TypeEvaluator): DocumentRange[] | undefined {
+        const results: DocumentRange[] = [];
+
+        for (const sourceFileInfo of this._program.getSourceFileInfoList()) {
+            throwIfCancellationRequested(this._token);
+
+            if (!isUserCode(sourceFileInfo) && !sourceFileInfo.isOpenByClient) {
+                continue;
+            }
+
+            const parseResults = this._program.getParseResults(sourceFileInfo.uri);
+            if (!parseResults) {
+                continue;
+            }
+
+            this._collectSubclassesFromStatements(
+                parseResults.parserOutput.parseTree.d.statements,
+                targetClass,
+                evaluator,
+                parseResults,
+                sourceFileInfo.uri,
+                results
+            );
+
+            this._program.handleMemoryHighUsage();
+        }
+
+        return results.length > 0 ? results : undefined;
+    }
+
+    private _findMethodOverrideLocations(
+        targetClass: ClassType,
+        methodName: string,
+        evaluator: TypeEvaluator
+    ): DocumentRange[] | undefined {
+        const results: DocumentRange[] = [];
+
+        for (const sourceFileInfo of this._program.getSourceFileInfoList()) {
+            throwIfCancellationRequested(this._token);
+
+            if (!isUserCode(sourceFileInfo) && !sourceFileInfo.isOpenByClient) {
+                continue;
+            }
+
+            const parseResults = this._program.getParseResults(sourceFileInfo.uri);
+            if (!parseResults) {
+                continue;
+            }
+
+            this._collectMethodOverridesFromStatements(
+                parseResults.parserOutput.parseTree.d.statements,
+                targetClass,
+                methodName,
+                evaluator,
+                parseResults,
+                sourceFileInfo.uri,
+                results
+            );
+
+            this._program.handleMemoryHighUsage();
+        }
+
+        return results.length > 0 ? results : undefined;
+    }
+
+    private _collectSubclassesFromStatements(
+        statements: StatementNode[],
+        targetClass: ClassType,
+        evaluator: TypeEvaluator,
+        parseResults: ParseFileResults,
+        fileUri: Uri,
+        results: DocumentRange[]
+    ) {
+        for (const statement of statements) {
+            if (statement.nodeType === ParseNodeType.Class) {
+                const classTypeResult = evaluator.getTypeOfClass(statement);
+                if (
+                    classTypeResult &&
+                    !ClassType.isSameGenericClass(classTypeResult.classType, targetClass) &&
+                    derivesFromClassRecursive(classTypeResult.classType, targetClass, /* ignoreUnknown */ false)
+                ) {
+                    const nameNode = statement.d.name;
+                    results.push({
+                        uri: fileUri,
+                        range: convertOffsetsToRange(
+                            nameNode.start,
+                            nameNode.start + nameNode.length,
+                            parseResults.tokenizerOutput.lines
+                        ),
+                    });
+                }
+
+                // Recurse into nested classes.
+                this._collectSubclassesFromStatements(
+                    statement.d.suite.d.statements,
+                    targetClass,
+                    evaluator,
+                    parseResults,
+                    fileUri,
+                    results
+                );
+            }
+        }
+    }
+
+    private _collectMethodOverridesFromStatements(
+        statements: StatementNode[],
+        targetClass: ClassType,
+        methodName: string,
+        evaluator: TypeEvaluator,
+        parseResults: ParseFileResults,
+        fileUri: Uri,
+        results: DocumentRange[]
+    ) {
+        for (const statement of statements) {
+            if (statement.nodeType === ParseNodeType.Class) {
+                const classTypeResult = evaluator.getTypeOfClass(statement);
+                if (
+                    classTypeResult &&
+                    !ClassType.isSameGenericClass(classTypeResult.classType, targetClass) &&
+                    derivesFromClassRecursive(classTypeResult.classType, targetClass, /* ignoreUnknown */ false)
+                ) {
+                    // Check if this subclass defines (not just inherits) the method.
+                    const memberInfo = lookUpClassMember(
+                        classTypeResult.classType,
+                        methodName,
+                        MemberAccessFlags.SkipBaseClasses
+                    );
+                    if (memberInfo) {
+                        for (const decl of memberInfo.symbol.getDeclarations()) {
+                            if (isFunctionDeclaration(decl) && decl.uri.equals(fileUri)) {
+                                results.push({
+                                    uri: fileUri,
+                                    range: convertOffsetsToRange(
+                                        decl.node.d.name.start,
+                                        decl.node.d.name.start + decl.node.d.name.length,
+                                        parseResults.tokenizerOutput.lines
+                                    ),
+                                });
+                            }
+                        }
+                    }
+                }
+
+                // Recurse into nested classes.
+                this._collectMethodOverridesFromStatements(
+                    statement.d.suite.d.statements,
+                    targetClass,
+                    methodName,
+                    evaluator,
+                    parseResults,
+                    fileUri,
+                    results
+                );
+            }
+        }
     }
 }
 

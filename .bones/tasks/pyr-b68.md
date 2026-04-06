@@ -12,6 +12,7 @@ owner: Seth
 
 
 
+
 ## Bug Report — Field Observation
 
 **Source:** ChunkHound MCP tool acceptance testing (chunkhound project)
@@ -133,3 +134,4 @@ This is the minimal contained fix — recursive call reuses the existing Name ha
 ## Log
 
 - [2026-04-05T23:40:55Z] [Seth] Adversarial stress test complete. All 9 markers pass (3 basic, 3 adversarial, 3 control). Q2 finding: hoverProvider.ts and findReferences likely have same keyword-position issue — out of scope for this bug fix.
+- [2026-04-05T23:44:28Z] [Seth] Debrief: Clean 2-line fix + return type annotation. Recursive call reuses Name handler. No workarounds. Adversarial: nested, decorated, method keyword positions all pass. Reflections: skeleton accuracy improved by SRE (bug report → spec). Q2 finding: hoverProvider likely has same issue.
