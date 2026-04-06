@@ -2,76 +2,92 @@
 name: pyright-lsp
 description: >-
   This skill should be used when querying the Pyright language server for Python
-  code intelligence. Use when the user asks to "find implementations", "search
-  symbols", "go to definition", "find references", "check types", or perform any
-  LSP operation on Python code. Provides the lsp() MCP tool and wrapper scripts
-  for non-MCP agents.
+  code intelligence — "find implementations of this class", "search for symbols",
+  "go to definition", "find references", "what type is this". Provides two access
+  paths: the MCP lsp() tool (preferred) and a TypeScript CLI for agents without
+  MCP access.
 ---
 
 # Pyright LSP
 
-Query the Pyright language server for Python code intelligence through the MCP
-`lsp()` tool. Supports any LSP method — workspace/symbol, textDocument/implementation,
-textDocument/definition, textDocument/references, and more.
+Query the Pyright language server for Python code intelligence. Two access paths:
 
-## Usage
+1. **MCP tool `lsp()`** — preferred, available when the pyright MCP server is running
+2. **CLI `lsp-client`** — standalone, spawns its own Pyright instance per invocation
 
-### MCP Tool: `lsp(method, params)`
-
-Send any LSP request to the running Pyright instance:
+## MCP Tool
 
 ```
-lsp({
-  method: "workspace/symbol",
-  params: { query: "ClassName" }
-})
+lsp({ method: "workspace/symbol", params: { query: "ClassName" } })
 ```
 
-### URI Format
+The MCP server maintains a persistent Pyright instance. Queries are fast after
+initial analysis.
 
-All `textDocument` methods require file URIs — not bare paths:
-
-```
-file:///absolute/path/to/file.py
-```
-
-Spaces and special characters must be percent-encoded.
-
-### Available LSP Methods
-
-| Method | Purpose | Key Params |
-|--------|---------|------------|
-| `workspace/symbol` | Search symbols across workspace | `{ query: "" }` (empty = all) |
-| `textDocument/implementation` | Find concrete implementations of a Protocol/ABC | `{ textDocument: { uri }, position: { line, character } }` |
-| `textDocument/definition` | Jump to definition | Same as above |
-| `textDocument/references` | Find all references | Same + `{ context: { includeDeclaration: true } }` |
-| `textDocument/hover` | Type info at position | `{ textDocument: { uri }, position: { line, character } }` |
-| `textDocument/documentSymbol` | List symbols in a file | `{ textDocument: { uri } }` |
-
-Positions are zero-based (line 0 = first line, character 0 = first column).
-
-### Analysis Timing
-
-After startup, Pyright performs background analysis. The first few queries may
-return partial results. Poll `workspace/symbol` with a known query to verify
-analysis is complete before relying on results.
-
-## Wrapper Scripts
-
-For agents that don't have MCP access, use the wrapper scripts directly:
+## CLI (non-MCP agents)
 
 ```bash
-# Search symbols
-$CLAUDE_PLUGIN_ROOT/skills/pyright/scripts/lsp.sh workspace/symbol '{"query": "MyClass"}'
-
-# Find implementations
-$CLAUDE_PLUGIN_ROOT/skills/pyright/scripts/lsp.sh textDocument/implementation \
-  '{"textDocument":{"uri":"file:///path/to/file.py"},"position":{"line":5,"character":10}}'
+node $CLAUDE_PLUGIN_ROOT/packages/pyright-mcp/dist/lsp-client.js <method> '<params_json>'
 ```
 
-## Error Handling
+Each invocation spawns a fresh Pyright, waits for analysis, runs the query,
+shuts down. Slower than MCP but works without any MCP infrastructure.
 
-- **Unsupported method**: Returns LSP MethodNotFound error (-32601)
-- **Invalid URI**: Pyright returns empty results (not an error)
-- **Pyright not built**: Returns "Pyright langserver failed to start" error
-- **Request timeout**: Returns timeout error after 30 seconds
+### Examples
+
+Find all symbols matching a name:
+```bash
+node $CLAUDE_PLUGIN_ROOT/packages/pyright-mcp/dist/lsp-client.js \
+  workspace/symbol '{"query": "MyClass"}'
+```
+
+Find all symbols (empty query):
+```bash
+node $CLAUDE_PLUGIN_ROOT/packages/pyright-mcp/dist/lsp-client.js \
+  workspace/symbol '{"query": ""}'
+```
+
+Find implementations of a class (ABC/base class → concrete subclasses):
+```bash
+node $CLAUDE_PLUGIN_ROOT/packages/pyright-mcp/dist/lsp-client.js \
+  textDocument/implementation \
+  '{"textDocument":{"uri":"file:///path/to/file.py"},"position":{"line":5,"character":6}}'
+```
+
+Go to definition:
+```bash
+node $CLAUDE_PLUGIN_ROOT/packages/pyright-mcp/dist/lsp-client.js \
+  textDocument/definition \
+  '{"textDocument":{"uri":"file:///path/to/file.py"},"position":{"line":10,"character":4}}'
+```
+
+## Key Details
+
+**URI format**: All `textDocument` methods require `file:///absolute/path` URIs. Spaces
+and special characters must be percent-encoded.
+
+**Positions are zero-based**: line 0 = first line, character 0 = first column.
+
+**Implementation finds explicit subclasses**, not structural Protocol subtypes. Use on
+ABC base classes, not Protocols.
+
+**Analysis timing**: Pyright runs background analysis after startup. The CLI handles
+this automatically (polls until results appear). The MCP server is ready after
+initialization, but the first query on a large workspace may see partial results.
+
+**Build prerequisite**: Requires `npm run build:cli:dev` (Pyright langserver bundle)
+and `cd packages/pyright-mcp && npm run build` (CLI wrapper). The SessionStart hook
+warns if the langserver bundle is missing.
+
+## Available Methods
+
+| Method | What it does |
+|--------|-------------|
+| `workspace/symbol` | Search symbols across workspace by name |
+| `textDocument/implementation` | Find concrete subclasses of a class |
+| `textDocument/definition` | Jump to where a symbol is defined |
+| `textDocument/references` | Find all usages of a symbol |
+| `textDocument/hover` | Get type information at a position |
+| `textDocument/documentSymbol` | List all symbols in a single file |
+
+Any LSP method Pyright supports works — these are the most useful for agents.
