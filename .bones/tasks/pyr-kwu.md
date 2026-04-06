@@ -4,9 +4,10 @@ title: 'Phase 1 Acceptance: Foundation — goToImplementation + workspaceSymbol 
 status: open
 type: task
 priority: 1
-depends_on: [pyr-o4h]
+depends_on: [pyr-o4h, pyr-tbs]
 parent: pyr-lo0
 ---
+
 
 
 ## Context
