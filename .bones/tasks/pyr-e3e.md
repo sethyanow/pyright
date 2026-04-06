@@ -1,13 +1,14 @@
 ---
 id: pyr-e3e
 title: Add goToImplementation provider
-status: active
+status: closed
 type: feature
 priority: 1
 owner: Seth
 depends_on: [pyr-b68]
 parent: pyr-lo0
 ---
+
 
 
 
@@ -55,12 +56,12 @@ Follow the existing TypeDefinitionProvider pattern in `definitionProvider.ts`:
 
 ## Success Criteria
 
-- [ ] `textDocument/implementation` returns concrete implementations of Protocols/ABCs
-- [ ] Works on class names (returns subclasses) and method names (returns overriding methods)
-- [ ] Registered in server capabilities (`implementationProvider: { workDoneProgress: true }`)
-- [ ] Returns empty (not error) when cursor is on concrete class with no subclasses
-- [ ] Fourslash tests for Protocol, ABC, method override, and concrete-class-returns-empty
-- [ ] All existing tests pass
+- [x] `textDocument/implementation` returns concrete implementations of Protocols/ABCs
+- [x] Works on class names (returns subclasses) and method names (returns overriding methods)
+- [x] Registered in server capabilities (`implementationProvider: { workDoneProgress: true }`)
+- [x] Returns empty (not error) when cursor is on concrete class with no subclasses
+- [x] Fourslash tests for Protocol, ABC, method override, and concrete-class-returns-empty
+- [x] All existing tests pass
 
 ## Key Considerations
 

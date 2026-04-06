@@ -28,12 +28,12 @@ Both tasks are already scoped:
 R1 and R2 from parent epic pyr-otr.
 
 ## Success Criteria
-- [ ] `textDocument/implementation` registered in capabilities and returns concrete implementations of Protocols/ABCs
-- [ ] `textDocument/implementation` works on method names (returns overriding methods in subclasses)
+- [x] `textDocument/implementation` registered in capabilities and returns concrete implementations of Protocols/ABCs
+- [x] `textDocument/implementation` works on method names (returns overriding methods in subclasses)
 - [x] `workspace/symbol` with empty query returns symbols from user code files
 - [x] Non-empty workspace/symbol queries still filter correctly
-- [ ] Fourslash tests for both features
-- [ ] Full test suite passes
+- [x] Fourslash tests for both features
+- [x] Full test suite passes
 
 ## Anti-Patterns
 - Don't return goToDefinition results for goToImplementation — they answer different questions. REASON: definition finds where something is declared; implementation finds concrete classes that fulfill a contract.
