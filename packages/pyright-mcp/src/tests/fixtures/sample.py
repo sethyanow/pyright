@@ -1,16 +1,17 @@
-from typing import Protocol
+from abc import ABC, abstractmethod
 
 
-class Greeter(Protocol):
+class Greeter(ABC):
+    @abstractmethod
     def greet(self, name: str) -> str: ...
 
 
-class EnglishGreeter:
+class EnglishGreeter(Greeter):
     def greet(self, name: str) -> str:
         return f"Hello, {name}!"
 
 
-class SpanishGreeter:
+class SpanishGreeter(Greeter):
     def greet(self, name: str) -> str:
         return f"Hola, {name}!"
 

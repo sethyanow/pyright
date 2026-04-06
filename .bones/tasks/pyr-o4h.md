@@ -1,12 +1,13 @@
 ---
 id: pyr-o4h
 title: Set up pyright-mcp plugin with LSP adapter
-status: closed
+status: open
 type: task
 priority: 1
 owner: Seth
 parent: pyr-lo0
 ---
+
 
 
 
@@ -96,7 +97,7 @@ The existing `.mcp.json` at repo root contains project dev tools (ChunkHound, Se
 - [x] MCP server starts, spawns Pyright, completes LSP initialize handshake
 - [x] `lsp("textDocument/implementation", ...)` returns implementations through MCP
 - [x] `lsp("workspace/symbol", {query: ""})` returns symbols through MCP
-- [x] Plugin installs in Claude Code — `/mcp` shows pyright server, tools available
+- [ ] Plugin installs in Claude Code — `/mcp` shows pyright server, tools available
 - [x] Skill describes capabilities with wrapper scripts for non-MCP agents
 - [x] Session start hook warns if dev build missing
 - [x] `lsp()` calls gate on init promise — call before init completes returns after init, not error

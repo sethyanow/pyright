@@ -44,8 +44,8 @@ R1 and R2 from parent epic pyr-otr.
 - [x] Non-empty workspace/symbol queries still filter correctly
 - [x] Fourslash tests for both features
 - [x] Full test suite passes
-- [x] Plugin installed with MCP adapter bridging to dev-built Pyright
-- [x] MCP `lsp()` tool operational — agents can hit goToImplementation + workspaceSymbol through it
+- [ ] Plugin installed with MCP adapter bridging to dev-built Pyright
+- [ ] MCP `lsp()` tool operational — agents can hit goToImplementation + workspaceSymbol through it
 - [ ] Demo: features work live via MCP `lsp()` tool
 
 ## Anti-Patterns

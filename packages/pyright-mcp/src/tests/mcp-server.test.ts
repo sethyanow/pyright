@@ -97,6 +97,35 @@ describe('pyright MCP server', () => {
         }
     }, 30_000);
 
+    it('returns implementations for an ABC via textDocument/implementation', async () => {
+        const sampleUri = `file://${path.resolve(FIXTURES_DIR, 'sample.py')}`;
+        // Greeter ABC is at line 3 (0-based), character 6
+        const result = await client.callTool({
+            name: 'lsp',
+            arguments: {
+                method: 'textDocument/implementation',
+                params: {
+                    textDocument: { uri: sampleUri },
+                    position: { line: 3, character: 6 },
+                },
+            },
+        });
+        expect(result.isError).not.toBe(true);
+        const content = result.content as Array<{ type: string; text: string }>;
+        const locations = JSON.parse(content[0].text);
+        expect(Array.isArray(locations)).toBe(true);
+        // Should find EnglishGreeter and SpanishGreeter
+        expect(locations.length).toBe(2);
+        const lines = locations
+            .map(
+                (loc: { range: { start: { line: number } } }) =>
+                    loc.range.start.line
+            )
+            .sort((a: number, b: number) => a - b);
+        // EnglishGreeter at line 8 (0-based), SpanishGreeter at line 13 (0-based)
+        expect(lines).toEqual([8, 13]);
+    }, 30_000);
+
     it('returns error for unsupported method', async () => {
         const result = await client.callTool({
             name: 'lsp',
