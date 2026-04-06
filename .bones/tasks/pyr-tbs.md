@@ -1,12 +1,13 @@
 ---
 id: pyr-tbs
 title: Fix ImplementationProvider false positives on large workspaces
-status: active
+status: closed
 type: bug
 priority: 1
 owner: Seth
 parent: pyr-lo0
 ---
+
 
 
 
@@ -36,9 +37,9 @@ R1. `textDocument/implementation` on `Greeter(ABC)` returns only `EnglishGreeter
 
 ## Success Criteria
 
-- [ ] Regression test: fourslash test with a multi-file workspace where an unrelated class has `Any` in its MRO — only the target's actual subclasses returned
-- [ ] Existing implementation fourslash tests still pass
-- [ ] CLI repro against full repo workspace returns only the 2 fixture subclasses
+- [x] Regression test: fourslash test with a multi-file workspace where an unrelated class has `Any` in its MRO — only the target's actual subclasses returned
+- [x] Existing implementation fourslash tests still pass
+- [x] CLI repro against full repo workspace returns only the 2 fixture subclasses
 
 ## Anti-Patterns
 
