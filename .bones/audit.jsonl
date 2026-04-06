@@ -135,3 +135,4 @@
 {"timestamp":"2026-04-06T14:53:18.849240+00:00","actor":"Seth","event_type":"dep_added","task_id":"pyr-lo0","details":{"kind":"parent-child","to":"pyr-o4h"}}
 {"timestamp":"2026-04-06T14:53:18.850400+00:00","actor":"Seth","event_type":"dep_added","task_id":"pyr-lo0","details":{"kind":"blocks","to":"pyr-o4h"}}
 {"timestamp":"2026-04-06T14:53:18.893566+00:00","actor":"Seth","event_type":"dep_added","task_id":"pyr-kwu","details":{"kind":"blocks","to":"pyr-o4h"}}
+{"timestamp":"2026-04-06T18:07:54.705990+00:00","actor":"Seth","event_type":"claimed","task_id":"pyr-o4h","details":{"actor":"Seth"}}
