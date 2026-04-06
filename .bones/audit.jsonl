@@ -145,3 +145,4 @@
 {"timestamp":"2026-04-06T19:06:15.939489+00:00","actor":"Seth","event_type":"dep_added","task_id":"pyr-lo0","details":{"kind":"blocks","to":"pyr-tbs"}}
 {"timestamp":"2026-04-06T21:26:26.037274+00:00","actor":"Seth","event_type":"claimed","task_id":"pyr-tbs","details":{"actor":"Seth"}}
 {"timestamp":"2026-04-06T21:40:26.635681+00:00","actor":"Seth","event_type":"closed","task_id":"pyr-tbs","details":{"notes":null}}
+{"timestamp":"2026-04-06T21:41:05.577327+00:00","actor":"Seth","event_type":"logged","task_id":"pyr-tbs","details":{"message":"Debrief: Root cause was ignoreUnknown:false in derivesFromClassRecursive, not ABC matching. 288→2 results. Fix: boolean flip at 2 call sites. Adversarial test confirmed real subclasses with additional Any bases still found through concrete MRO path. Reflections: skeleton diagnosis was wrong — repro + code reading revealed actual mechanism. No workarounds, no corrections."}}

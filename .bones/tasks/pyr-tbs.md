@@ -13,6 +13,7 @@ parent: pyr-lo0
 
 
 
+
 ## Context
 
 `ImplementationProvider._findSubclassLocations` at `definitionProvider.ts:468` calls `derivesFromClassRecursive(classTypeResult.classType, targetClass, /* ignoreUnknown */ false)`. The third argument `ignoreUnknown: false` causes `derivesFromClassRecursive` to conservatively return `true` for any class with `Any` or `Unknown` in its MRO (typeUtils.ts:2226-2228). Typeshed stubs contain many classes that inherit from `Any` (e.g., `NonCallableMock(Base, Any)` in mock.pyi, `SilentReporter(_Reporter)` where `_Reporter: TypeAlias = Any` in check.pyi).
@@ -64,3 +65,7 @@ R1. `textDocument/implementation` on `Greeter(ABC)` returns only `EnglishGreeter
 - Betrayal: `Any` might not resolve in the fourslash virtual filesystem the same way as in real analysis, making the test pass trivially
 - Consequence: False green — test doesn't catch regressions
 - Mitigation: TDD RED step must confirm the test FAILS before the fix. If it passes, the fixture doesn't reproduce the bug and needs adjustment.
+
+## Log
+
+- [2026-04-06T21:41:05Z] [Seth] Debrief: Root cause was ignoreUnknown:false in derivesFromClassRecursive, not ABC matching. 288→2 results. Fix: boolean flip at 2 call sites. Adversarial test confirmed real subclasses with additional Any bases still found through concrete MRO path. Reflections: skeleton diagnosis was wrong — repro + code reading revealed actual mechanism. No workarounds, no corrections.
