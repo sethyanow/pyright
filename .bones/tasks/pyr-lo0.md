@@ -4,9 +4,11 @@ title: 'Phase 1: Foundation — goToImplementation + workspaceSymbol fix'
 status: open
 type: epic
 priority: 1
-depends_on: [pyr-rcy, pyr-e3e]
+depends_on: [pyr-rcy, pyr-e3e, pyr-kwu]
 parent: pyr-otr
 ---
+
+
 
 
 

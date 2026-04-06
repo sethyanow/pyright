@@ -15,6 +15,7 @@ parent: pyr-lo0
 
 
 
+
 ## Context
 
 Pyright doesn't register `textDocument/implementation`. The LSP tool sends it, Pyright responds with "Unhandled method." Pylance has this — open-source Pyright doesn't.
@@ -80,3 +81,7 @@ Follow the existing TypeDefinitionProvider pattern in `definitionProvider.ts`:
 - Don't return goToDefinition results for goToImplementation — they answer different questions.
 - Don't extend `DefinitionProviderBase.getDefinitionsForNode()` — its approach resolves declarations for a name node. ImplementationProvider needs to resolve the TYPE then search for implementors. Use the base class for scaffolding (constructor, sourceMapper) but override the core logic entirely.
 - Don't use `findReferences` as the discovery mechanism — it finds text references, not type-hierarchy relationships. Walk source files and check `derivesFromClassRecursive` directly.
+
+## Log
+
+- [2026-04-06T00:14:53Z] [Seth] Debrief: Clean implementation, no workarounds. Three cursor contexts handled (class name, method name, type annotation ref). Adversarial battery passed: diamond inheritance, multi-file, empty ABC, non-class identifiers all GREEN. Reflections: Protocol structural subtyping is a known Phase 1 limitation (nominal only). Skeleton approach section corrected during SRE (don't extend DefinitionProviderBase). Workspace traversal pattern is reusable for Phase 2.
