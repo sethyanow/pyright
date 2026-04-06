@@ -31,9 +31,8 @@ Completed tasks:
 - pyr-e3e: Add ImplementationProvider following TypeDefinitionProvider pattern (CLOSED)
 
 Remaining:
-- Plugin setup: Claude Code plugin with .lsp.json pointing at dev-built Pyright
-- MCP adapter: thin bridge exposing LSP capabilities to agents (not Claude-only)
-- pyr-kwu: Phase 1 acceptance (demo via live LSP tool)
+- pyr-o4h: Plugin + MCP adapter — thin bridge exposing LSP capabilities to agents (not Claude-only)
+- pyr-kwu: Phase 1 acceptance (demo via MCP `lsp()` tool)
 
 ## Requirements
 R1 and R2 from parent epic pyr-otr.
@@ -45,9 +44,9 @@ R1 and R2 from parent epic pyr-otr.
 - [x] Non-empty workspace/symbol queries still filter correctly
 - [x] Fourslash tests for both features
 - [x] Full test suite passes
-- [ ] Claude Code plugin installed with LSP pointing at dev-built Pyright
-- [ ] MCP adapter operational — agents can hit goToImplementation + workspaceSymbol through it
-- [ ] Demo: features work live via LSP tool in Claude Code
+- [ ] Plugin installed with MCP adapter bridging to dev-built Pyright
+- [ ] MCP `lsp()` tool operational — agents can hit goToImplementation + workspaceSymbol through it
+- [ ] Demo: features work live via MCP `lsp()` tool
 
 ## Anti-Patterns
 - Don't return goToDefinition results for goToImplementation — they answer different questions. REASON: definition finds where something is declared; implementation finds concrete classes that fulfill a contract.
@@ -58,12 +57,4 @@ R1 and R2 from parent epic pyr-otr.
 - workspaceSymbol on a large workspace could be slow on empty query. This is acceptable — vtsls does it, and the client can paginate.
 
 ## Acceptance Requirements
-**Agent Documentation:** Update stale docs only.
-- [ ] CLAUDE.md: update LSP capabilities list if one exists, or "none expected"
-- [ ] Project docs: none expected
-
-**User Demo:**
-- Show goToImplementation finding concrete classes for a Protocol via the LSP tool
-- Show goToImplementation finding overriding methods
-- Show workspaceSymbol returning results on empty query via the LSP tool
-- Edge case: goToImplementation on a concrete class (should return empty or itself)
+See pyr-kwu for demo details. All demos go through the MCP `lsp()` tool.

@@ -39,4 +39,4 @@ R3 from parent epic: `textDocument/prepareTypeHierarchy`, `typeHierarchy/superty
 
 ## Demo
 
-Show me navigating supertypes and subtypes of a class through the type hierarchy — live via the LSP tool.
+Show me navigating supertypes and subtypes of a class through the type hierarchy via the MCP `lsp()` tool.

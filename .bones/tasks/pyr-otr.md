@@ -57,7 +57,7 @@ Build each LSP provider as a native Pyright feature, layered bottom-up so each p
 
 Each provider follows the existing pattern: a provider class in `packages/pyright-internal/src/languageService/`, wired into `languageServerBase.ts` (connection handler + capability registration). The test harness already advertises client support for all missing features (`languageServerTestUtils.ts`), so fourslash tests work immediately.
 
-A thin adapter layer (MCP + skill/scripts) grows incrementally alongside the providers. Phase 1 establishes the plugin (Claude Code LSP + MCP), and each subsequent phase adds its new capabilities to the adapter. The adapter is a protocol bridge — zero business logic. LSP is the universal abstraction. The MCP and skill/scripts are adapters for different agent tooling (not Claude-only). Wiring/polish happens at the end; the infrastructure exists from day one.
+A thin adapter layer (MCP + skill/scripts) grows incrementally alongside the providers. Phase 1 establishes the plugin (MCP bridge to dev-built Pyright), and each subsequent phase adds its new capabilities to the adapter. Full LSP registration comes later — the MCP is the dev-time interface while we add features beyond the standard LSP spec. The adapter is a protocol bridge — zero business logic. LSP is the universal abstraction. The MCP and skill/scripts are adapters for different agent tooling (not Claude-only). Wiring/polish happens at the end; the infrastructure exists from day one.
 
 ## Architecture
 
@@ -95,16 +95,15 @@ Agent / Editor / CLI
 **Gate:**
 - `cd packages/pyright-internal && npx jest fourSlashRunner.test --forceExit` → implementation + workspace symbol tests pass
 - `npm run typecheck` → clean
-- Plugin installed: Claude Code LSP tool talks to dev-built Pyright
-- MCP adapter operational: thin bridge exposing LSP capabilities to agents
-**Demo:** Show me goToImplementation finding concrete classes for a Protocol, and workspaceSymbol returning results on empty query — both via the LSP tool here.
+- Plugin installed: MCP adapter operational, thin bridge exposing LSP capabilities to agents
+**Demo:** Show me goToImplementation finding concrete classes for a Protocol, and workspaceSymbol returning results on empty query — both via the MCP `lsp()` tool.
 
 ### Phase 2: Type Hierarchy
 **Scope:** R3
 **Gate:**
 - `cd packages/pyright-internal && npx jest fourSlashRunner.test --forceExit` → type hierarchy tests pass
 - `npm run typecheck` → clean
-**Demo:** Show me navigating supertypes and subtypes of a class through the type hierarchy — if the LSP tool supports it by then, live; otherwise walk me through the fourslash test output.
+**Demo:** Show me navigating supertypes and subtypes of a class through the type hierarchy via the MCP `lsp()` tool.
 
 ### Phase 3: Semantic Tokens
 **Scope:** R4
@@ -241,7 +240,7 @@ Open-source Pyright implements 14 of 24+ LSP features. Pylance adds the rest but
 | Question | Answer | Implication |
 |----------|--------|-------------|
 | What features in scope? | Full Pylance gap — all of them | 8 phases, comprehensive effort |
-| Priority order? | Most logical build order — what builds on what | Foundation → hierarchy → visitor → hints → lens → ranges → refactoring → adapter |
+| Priority order? | Most logical build order — what builds on what | Foundation (+ adapter) → hierarchy → visitor → hints → lens → ranges → refactoring |
 | Refactoring scope? | Both extract and move symbol | Phase 7 is the heaviest phase |
 | Acceptance format? | Show it off, no ceremony | Demo is live demonstration, not test output |
 | Adapter timing? | Build incrementally, wire/polish at end | Phase 1 establishes plugin + MCP, each phase adds capabilities |
