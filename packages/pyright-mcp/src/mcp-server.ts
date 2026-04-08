@@ -111,12 +111,14 @@ export async function createMcpServer(langserverPath: string, workspaceRoot: str
     initPromise = startPyright();
 
     // Register lsp() tool
-    server.tool(
+    server.registerTool(
         'lsp',
-        'Send an LSP request to the Pyright language server',
         {
-            method: z.string().describe('LSP method name (e.g., "textDocument/implementation")'),
-            params: z.record(z.string(), z.any()).describe('LSP request parameters'),
+            description: 'Send an LSP request to the Pyright language server',
+            inputSchema: {
+                method: z.string().describe('LSP method name (e.g., "textDocument/implementation")'),
+                params: z.record(z.string(), z.any()).describe('LSP request parameters'),
+            },
         },
         async ({ method, params }) => {
             // Gate on init

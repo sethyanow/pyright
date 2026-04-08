@@ -1,12 +1,15 @@
 ---
 id: pyr-o4h
 title: Set up pyright-mcp plugin with LSP adapter
-status: open
+status: closed
 type: task
 priority: 1
 owner: Seth
 parent: pyr-lo0
+close_notes: 'Superseded by pyr-g5x: remaining criterion (plugin install) replaced by standalone plugin restructure'
 ---
+
+
 
 
 
@@ -170,3 +173,4 @@ The existing `.mcp.json` at repo root contains project dev tools (ChunkHound, Se
 ## Log
 
 - [2026-04-06T18:30:36Z] [Seth] Debrief: MCP server implemented with LSP bridge via vscode-jsonrpc. Key discovery: Pyright requires workspaceFolders in init params (rootUri ignored). Zod v4 z.record needs 2 args. Stream error handlers needed to prevent ERR_STREAM_DESTROYED crashes. Reflections: skeleton accurate except .mcp.json conflict (SRE caught). User corrected unnecessary scope question about wrapper scripts.
+- [2026-04-08T21:00:15Z] [Seth] Closing: 7/8 criteria met. Remaining criterion (plugin installs in Claude Code) superseded by pyr-g5x which restructures the plugin as standalone in packages/pyright-mcp/ with proper  syntax and entrypoint script. Debug log revealed $CLAUDE_PLUGIN_ROOT not expanded (missing curly braces), and registerTool API migration done this session.

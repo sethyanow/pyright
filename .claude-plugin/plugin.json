@@ -1,13 +1,11 @@
 {
-    "name": "pyright",
+    "name": "pyright-mcp",
     "version": "0.1.0",
     "description": "Pyright language server with full LSP provider coverage, exposed to agents via MCP",
     "mcpServers": {
         "pyright": {
             "command": "node",
-            "args": [
-                "$CLAUDE_PLUGIN_ROOT/packages/pyright-mcp/dist/mcp-server.js"
-            ]
+            "args": ["${CLAUDE_PLUGIN_ROOT}/packages/pyright-mcp/dist/mcp-server.js"]
         }
     }
 }

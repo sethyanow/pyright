@@ -146,3 +146,12 @@
 {"timestamp":"2026-04-06T21:26:26.037274+00:00","actor":"Seth","event_type":"claimed","task_id":"pyr-tbs","details":{"actor":"Seth"}}
 {"timestamp":"2026-04-06T21:40:26.635681+00:00","actor":"Seth","event_type":"closed","task_id":"pyr-tbs","details":{"notes":null}}
 {"timestamp":"2026-04-06T21:41:05.577327+00:00","actor":"Seth","event_type":"logged","task_id":"pyr-tbs","details":{"message":"Debrief: Root cause was ignoreUnknown:false in derivesFromClassRecursive, not ABC matching. 288→2 results. Fix: boolean flip at 2 call sites. Adversarial test confirmed real subclasses with additional Any bases still found through concrete MRO path. Reflections: skeleton diagnosis was wrong — repro + code reading revealed actual mechanism. No workarounds, no corrections."}}
+{"timestamp":"2026-04-08T20:49:58.984487+00:00","actor":"Seth","event_type":"created","task_id":"pyr-g5x","details":{}}
+{"timestamp":"2026-04-08T20:50:56.125543+00:00","actor":"Seth","event_type":"dep_added","task_id":"pyr-lo0","details":{"kind":"blocks","to":"pyr-g5x"}}
+{"timestamp":"2026-04-08T20:50:56.168050+00:00","actor":"Seth","event_type":"dep_added","task_id":"pyr-lo0","details":{"kind":"parent-child","to":"pyr-g5x"}}
+{"timestamp":"2026-04-08T20:50:56.168527+00:00","actor":"Seth","event_type":"dep_added","task_id":"pyr-lo0","details":{"kind":"blocks","to":"pyr-g5x"}}
+{"timestamp":"2026-04-08T20:58:41.217077+00:00","actor":"Seth","event_type":"dep_added","task_id":"pyr-kwu","details":{"kind":"blocks","to":"pyr-g5x"}}
+{"timestamp":"2026-04-08T21:00:15.773321+00:00","actor":"Seth","event_type":"logged","task_id":"pyr-o4h","details":{"message":"Closing: 7/8 criteria met. Remaining criterion (plugin installs in Claude Code) superseded by pyr-g5x which restructures the plugin as standalone in packages/pyright-mcp/ with proper  syntax and entrypoint script. Debug log revealed $CLAUDE_PLUGIN_ROOT not expanded (missing curly braces), and registerTool API migration done this session."}}
+{"timestamp":"2026-04-08T21:00:41.493790+00:00","actor":"Seth","event_type":"closed","task_id":"pyr-o4h","details":{"notes":"Superseded by pyr-g5x: remaining criterion (plugin install) replaced by standalone plugin restructure"}}
+{"timestamp":"2026-04-08T21:00:41.493848+00:00","actor":"Seth","event_type":"gate_bypass","task_id":"pyr-o4h","details":{"gate_type":"all_criteria_checked","param":null,"transition":"close"}}
+{"timestamp":"2026-04-08T21:06:48.910125+00:00","actor":"Seth","event_type":"claimed","task_id":"pyr-g5x","details":{"actor":"Seth"}}

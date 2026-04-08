@@ -1,0 +1,16 @@
+{
+    "name": "pyright-marketplace",
+    "owner": {
+        "name": "dev"
+    },
+    "plugins": [
+        {
+            "name": "pyright-mcp",
+            "version": "0.1.0",
+            "description": "Pyright language server with full LSP provider coverage, exposed to agents via MCP",
+            "category": "development",
+            "tags": ["python", "lsp", "type-checking"],
+            "source": "./"
+        }
+    ]
+}
