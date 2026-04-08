@@ -27,7 +27,7 @@ initial analysis.
 ## CLI (non-MCP agents)
 
 ```bash
-node $CLAUDE_PLUGIN_ROOT/packages/pyright-mcp/dist/lsp-client.js <method> '<params_json>'
+node ${CLAUDE_PLUGIN_ROOT}/dist/lsp-client.js <method> '<params_json>'
 ```
 
 Each invocation spawns a fresh Pyright, waits for analysis, runs the query,
@@ -37,26 +37,26 @@ shuts down. Slower than MCP but works without any MCP infrastructure.
 
 Find all symbols matching a name:
 ```bash
-node $CLAUDE_PLUGIN_ROOT/packages/pyright-mcp/dist/lsp-client.js \
+node ${CLAUDE_PLUGIN_ROOT}/dist/lsp-client.js \
   workspace/symbol '{"query": "MyClass"}'
 ```
 
 Find all symbols (empty query):
 ```bash
-node $CLAUDE_PLUGIN_ROOT/packages/pyright-mcp/dist/lsp-client.js \
+node ${CLAUDE_PLUGIN_ROOT}/dist/lsp-client.js \
   workspace/symbol '{"query": ""}'
 ```
 
 Find implementations of a class (ABC/base class → concrete subclasses):
 ```bash
-node $CLAUDE_PLUGIN_ROOT/packages/pyright-mcp/dist/lsp-client.js \
+node ${CLAUDE_PLUGIN_ROOT}/dist/lsp-client.js \
   textDocument/implementation \
   '{"textDocument":{"uri":"file:///path/to/file.py"},"position":{"line":5,"character":6}}'
 ```
 
 Go to definition:
 ```bash
-node $CLAUDE_PLUGIN_ROOT/packages/pyright-mcp/dist/lsp-client.js \
+node ${CLAUDE_PLUGIN_ROOT}/dist/lsp-client.js \
   textDocument/definition \
   '{"textDocument":{"uri":"file:///path/to/file.py"},"position":{"line":10,"character":4}}'
 ```

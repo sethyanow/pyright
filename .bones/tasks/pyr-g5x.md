@@ -1,12 +1,13 @@
 ---
 id: pyr-g5x
 title: Restructure pyright-mcp as standalone plugin with entrypoint script
-status: open
+status: active
 type: task
 priority: 1
 owner: Seth
 parent: pyr-lo0
 ---
+
 
 
 
@@ -66,9 +67,9 @@ Make `packages/pyright-mcp/` the plugin root. Move plugin components (`.claude-p
 
 9. **Clean up old locations** — remove `.claude-plugin/plugin.json`, `skills/`, `hooks/` from repo root (marketplace.json stays)
 
-8. **Rebuild** — `cd packages/pyright-mcp && npm run build`
+10. **Rebuild** — `cd packages/pyright-mcp && npm run build`
 
-9. **Reinstall plugin** — user reinstalls, verify `/mcp` shows the pyright server
+11. **Reinstall plugin** — user reinstalls, verify `/mcp` shows the pyright server
 
 ## Success Criteria
 
@@ -78,7 +79,7 @@ Make `packages/pyright-mcp/` the plugin root. Move plugin components (`.claude-p
 - [ ] MCP server starts and responds when run from the pyright repo (CWD fallback)
 - [ ] MCP server starts when `PYRIGHT_LANGSERVER_PATH` is set explicitly
 - [ ] Entrypoint fails with helpful message when langserver not found
-- [ ] `registerTool()` API used (not deprecated `server.tool()`)
+- [x] `registerTool()` API used (not deprecated `server.tool()`) — pre-satisfied, mcp-server.ts:114 already uses registerTool()
 - [ ] `${CLAUDE_PLUGIN_ROOT}` syntax (curly braces) in all plugin config
 - [ ] Old plugin files removed from repo root (`.claude-plugin/plugin.json`, `skills/`, `hooks/`)
 - [ ] Smoke tests pass: `cd packages/pyright-mcp && npm test`
@@ -98,6 +99,38 @@ Make `packages/pyright-mcp/` the plugin root. Move plugin components (`.claude-p
 - Plugin cache is stale after MCP server code changes: user must reinstall. The langserver is NOT affected (resolved at runtime).
 - MCP server dist not built: same as langserver — entrypoint script would fail to exec Node on a missing file. Hook should check both artifacts.
 - Windows: entrypoint is bash-only. Matches plugin-dev examples but won't work on Windows without WSL.
+
+## Failure Catalog
+
+**Input Hostility: start-server.sh**
+- Assumption: `PYRIGHT_LANGSERVER_PATH` is either unset or a valid path
+- Betrayal: Set to empty string (`PYRIGHT_LANGSERVER_PATH=""`). Bash `[ -n "$VAR" ]` passes for set-but-empty, `-f` fails. But `${VAR:-fallback}` treats empty as unset. Must use `${PYRIGHT_LANGSERVER_PATH:-}` and check non-empty, not just set.
+- Consequence: Script either uses empty path (fails at exec) or falls through to CWD-relative (correct but confusing)
+- Mitigation: Use `${PYRIGHT_LANGSERVER_PATH:-}` with explicit `-n` check. Both paths (env var and fallback) get `-f` validation before exec.
+
+**Input Hostility: start-server.sh (spaces in paths)**
+- Assumption: Paths don't contain spaces
+- Betrayal: macOS paths like `/Users/First Last/code/pyright`
+- Consequence: Unquoted variable expansion splits path, exec fails
+- Mitigation: Double-quote every variable expansion in the script. shellcheck enforcement.
+
+**Dependency Treachery: start-server.sh (node not in PATH)**
+- Assumption: `node` is available
+- Betrayal: User has nvm/fnm but shell profile hasn't loaded (e.g., non-interactive shell context)
+- Consequence: `exec node` fails with unhelpful "command not found"
+- Mitigation: Check `command -v node` before exec; print clear error pointing to node installation if missing.
+
+**Dependency Treachery: check-build.sh (plugin root changed)**
+- Assumption: `CLAUDE_PLUGIN_ROOT/packages/pyright/dist/` finds the langserver
+- Betrayal: `CLAUDE_PLUGIN_ROOT` is now `packages/pyright-mcp/`, so the path becomes `packages/pyright-mcp/packages/pyright/dist/` — does not exist
+- Consequence: Hook always warns "build not found" even when it's fine — warning fatigue
+- Mitigation: Use same resolution as entrypoint: check `PYRIGHT_LANGSERVER_PATH` env var first, fall back to CWD-relative `packages/pyright/dist/pyright-langserver.js`. Also check MCP server dist at `${CLAUDE_PLUGIN_ROOT}/dist/mcp-server.js`.
+
+## SRE Notes
+
+- **hooks.json brace fix needed:** Current hooks.json line 10 uses `$CLAUDE_PLUGIN_ROOT` (no braces). Must become `${CLAUDE_PLUGIN_ROOT}` when moved. Address in Step 8.
+- **Entrypoint must also verify MCP server dist:** Step 1 should check `${SCRIPT_DIR}/../dist/mcp-server.js` exists before exec'ing — not just langserver. Already noted in edge cases.
+- **lsp-client.ts CWD-relative path:** The fallback `packages/pyright/dist/pyright-langserver.js` is relative to CWD. When run from repo root, this resolves correctly. No CLAUDE_PLUGIN_ROOT needed since lsp-client is CLI-only.
 
 ## Key Considerations
 

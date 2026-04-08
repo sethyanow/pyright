@@ -10,7 +10,7 @@
             "description": "Pyright language server with full LSP provider coverage, exposed to agents via MCP",
             "category": "development",
             "tags": ["python", "lsp", "type-checking"],
-            "source": "./"
+            "source": "./packages/pyright-mcp"
         }
     ]
 }

@@ -110,7 +110,7 @@ if (require.main === module) {
     }
 
     const langserverPath = process.env.PYRIGHT_LANGSERVER_PATH
-        || `${process.env.CLAUDE_PLUGIN_ROOT || '.'}/packages/pyright/dist/pyright-langserver.js`;
+        || 'packages/pyright/dist/pyright-langserver.js';
 
     let params: Record<string, unknown>;
     try {

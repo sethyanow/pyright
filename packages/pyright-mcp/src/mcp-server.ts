@@ -203,7 +203,7 @@ export async function createMcpServer(langserverPath: string, workspaceRoot: str
 // When run directly as stdio MCP server
 if (require.main === module) {
     const langserverPath = process.env.PYRIGHT_LANGSERVER_PATH
-        || `${process.env.CLAUDE_PLUGIN_ROOT || '.'}/packages/pyright/dist/pyright-langserver.js`;
+        || 'packages/pyright/dist/pyright-langserver.js';
     const workspaceRoot = process.cwd();
 
     createMcpServer(langserverPath, workspaceRoot).then(async ({ server }) => {
