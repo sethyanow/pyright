@@ -1,12 +1,13 @@
 ---
 id: pyr-lo0
 title: 'Phase 1: Foundation — goToImplementation + workspaceSymbol fix'
-status: open
+status: closed
 type: epic
 priority: 1
 depends_on: [pyr-rcy, pyr-e3e, pyr-kwu, pyr-o4h, pyr-tbs, pyr-g5x]
 parent: pyr-otr
 ---
+
 
 
 
@@ -49,9 +50,9 @@ R1 and R2 from parent epic pyr-otr.
 - [x] Non-empty workspace/symbol queries still filter correctly
 - [x] Fourslash tests for both features
 - [x] Full test suite passes
-- [ ] Plugin installed with MCP adapter bridging to dev-built Pyright
-- [ ] MCP `lsp()` tool operational — agents can hit goToImplementation + workspaceSymbol through it
-- [ ] Demo: features work live via MCP `lsp()` tool
+- [x] Plugin installed with MCP adapter bridging to dev-built Pyright
+- [x] MCP `lsp()` tool operational — agents can hit goToImplementation + workspaceSymbol through it
+- [x] Demo: features work live via MCP `lsp()` tool
 
 ## Anti-Patterns
 - Don't return goToDefinition results for goToImplementation — they answer different questions. REASON: definition finds where something is declared; implementation finds concrete classes that fulfill a contract.
