@@ -156,3 +156,4 @@
 {"timestamp":"2026-04-08T21:00:41.493848+00:00","actor":"Seth","event_type":"gate_bypass","task_id":"pyr-o4h","details":{"gate_type":"all_criteria_checked","param":null,"transition":"close"}}
 {"timestamp":"2026-04-08T21:06:48.910125+00:00","actor":"Seth","event_type":"claimed","task_id":"pyr-g5x","details":{"actor":"Seth"}}
 {"timestamp":"2026-04-08T21:36:16.411102+00:00","actor":"Seth","event_type":"claimed","task_id":"pyr-g5x","details":{"actor":"Seth"}}
+{"timestamp":"2026-04-08T23:00:06.206928+00:00","actor":"Seth","event_type":"closed","task_id":"pyr-g5x","details":{"notes":null}}

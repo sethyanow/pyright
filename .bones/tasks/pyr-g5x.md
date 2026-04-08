@@ -1,12 +1,13 @@
 ---
 id: pyr-g5x
 title: Restructure pyright-mcp as standalone plugin with entrypoint script
-status: active
+status: closed
 type: task
 priority: 1
 owner: Seth
 parent: pyr-lo0
 ---
+
 
 
 
@@ -73,17 +74,17 @@ Make `packages/pyright-mcp/` the plugin root. Move plugin components (`.claude-p
 
 ## Success Criteria
 
-- [ ] `packages/pyright-mcp/` is self-contained plugin root (`.claude-plugin/`, `skills/`, `hooks/`, `bin/`, `dist/`, `node_modules/`)
-- [ ] Marketplace source points to `"./packages/pyright-mcp"` — only that directory gets cached
-- [ ] Entrypoint script resolves langserver: env var → CWD-relative → clear error
-- [ ] MCP server starts and responds when run from the pyright repo (CWD fallback)
-- [ ] MCP server starts when `PYRIGHT_LANGSERVER_PATH` is set explicitly
-- [ ] Entrypoint fails with helpful message when langserver not found
-- [x] `registerTool()` API used (not deprecated `server.tool()`) — pre-satisfied, mcp-server.ts:114 already uses registerTool()
-- [ ] `${CLAUDE_PLUGIN_ROOT}` syntax (curly braces) in all plugin config
-- [ ] Old plugin files removed from repo root (`.claude-plugin/plugin.json`, `skills/`, `hooks/`)
-- [ ] Smoke tests pass: `cd packages/pyright-mcp && npm test`
-- [ ] Plugin installs and `/mcp` shows pyright server with `lsp` tool
+- [x] `packages/pyright-mcp/` is self-contained plugin root — verified via ls: .claude-plugin/, skills/, hooks/, bin/, dist/, node_modules/ all present
+- [x] Marketplace source points to `"./packages/pyright-mcp"` — verified in marketplace.json
+- [x] Entrypoint script resolves langserver: env var → CWD-relative → clear error — tested all 3 paths
+- [x] MCP server starts and responds when run from the pyright repo (CWD fallback) — entrypoint started, MCP tool returned results
+- [x] MCP server starts when `PYRIGHT_LANGSERVER_PATH` is set explicitly — tested with absolute path, started successfully
+- [x] Entrypoint fails with helpful message when langserver not found — tested from /tmp, got clear error
+- [x] `registerTool()` API used (not deprecated `server.tool()`) — pre-satisfied, mcp-server.ts:114
+- [x] `${CLAUDE_PLUGIN_ROOT}` syntax (curly braces) in all plugin config — plugin.json and hooks.json both use braces
+- [x] Old plugin files removed from repo root — .claude-plugin/plugin.json, skills/, hooks/ all gone
+- [x] Smoke tests pass: 9/9 — `cd packages/pyright-mcp && npm test`
+- [x] Plugin installs and `/mcp` shows pyright server with `lsp` tool — all 6 LSP methods verified via MCP calls
 
 ## Anti-Patterns
 
