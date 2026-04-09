@@ -8,6 +8,8 @@ depends_on: [pyr-lo0]
 parent: pyr-otr
 ---
 
+
+
 ## Context
 
 Phase 2 of pyr-otr. Depends on Phase 1 (pyr-lo0) which delivers the subclass discovery machinery (`ImplementationProvider` pattern — walk source files, `derivesFromClassRecursive`). Phase 2 reuses this for the subtypes direction and adds the supertypes direction (walk MRO upward).
