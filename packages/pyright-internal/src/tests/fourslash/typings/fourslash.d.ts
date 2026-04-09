@@ -342,6 +342,16 @@ declare namespace _ {
                 items: FourSlashTypeHierarchyItem[];
             };
         }): void;
+        verifyTypeHierarchyRoundTripSupertypes(map: {
+            [marker: string]: {
+                items: FourSlashTypeHierarchyItem[];
+            };
+        }): void;
+        verifyTypeHierarchyRoundTripSubtypes(map: {
+            [marker: string]: {
+                items: FourSlashTypeHierarchyItem[];
+            };
+        }): void;
         verifyHighlightReferences(map: {
             [marker: string]: {
                 references: DocumentHighlight[];

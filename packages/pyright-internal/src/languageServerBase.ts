@@ -1142,7 +1142,7 @@ export abstract class LanguageServerBase implements LanguageServerInterface, Dis
         }
 
         return workspace.service.run((program) => {
-            const provider = new TypeHierarchyProvider(program, uri, params.item.range.start, token);
+            const provider = new TypeHierarchyProvider(program, uri, params.item.selectionRange.start, token);
             provider.onPrepare();
             return provider.getSupertypes();
         }, token);
@@ -1160,7 +1160,7 @@ export abstract class LanguageServerBase implements LanguageServerInterface, Dis
         }
 
         return workspace.service.run((program) => {
-            const provider = new TypeHierarchyProvider(program, uri, params.item.range.start, token);
+            const provider = new TypeHierarchyProvider(program, uri, params.item.selectionRange.start, token);
             provider.onPrepare();
             return provider.getSubtypes();
         }, token);

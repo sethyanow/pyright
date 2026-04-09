@@ -1469,6 +1469,116 @@ export class TestState {
         }
     }
 
+    // Round-trip tests simulate the LSP handler path: prepare returns a TypeHierarchyItem,
+    // then supertypes/subtypes creates a NEW provider using that item's range.start position
+    // (as languageServerBase.ts does). This catches wiring bugs where the handler passes
+    // the wrong position from the item.
+    verifyTypeHierarchyRoundTripSupertypes(map: {
+        [marker: string]: {
+            items: _.FourSlashTypeHierarchyItem[];
+        };
+    }) {
+        this.analyze();
+
+        for (const marker of this.getMarkers()) {
+            const fileName = marker.fileName;
+            const name = this.getMarkerName(marker);
+
+            if (!(name in map)) {
+                continue;
+            }
+
+            const expected = map[name].items;
+            const position = this.convertOffsetToPosition(fileName, marker.position);
+            const uri = Uri.file(fileName, this.serviceProvider);
+
+            // Step 1: Prepare — get the TypeHierarchyItem (as the client would)
+            const prepareProvider = new TypeHierarchyProvider(this.program, uri, position, CancellationToken.None);
+            const prepared = prepareProvider.onPrepare();
+            assert.ok(prepared && prepared.length > 0, `${name}: prepare returned no items`);
+
+            // Step 2: Simulate LSP handler — create NEW provider using item's selectionRange.start
+            // This is what languageServerBase.ts does in onTypeHierarchySupertypes.
+            // Using selectionRange.start (class name), NOT range.start (class keyword).
+            const item = prepared![0];
+            const roundTripProvider = new TypeHierarchyProvider(
+                this.program,
+                uri,
+                item.selectionRange.start,
+                CancellationToken.None
+            );
+            roundTripProvider.onPrepare();
+            const actual = roundTripProvider.getSupertypes();
+
+            assert.strictEqual(
+                actual?.length ?? 0,
+                expected.length,
+                `${name}: round-trip expected ${expected.length} supertypes, got ${actual?.length ?? 0}`
+            );
+
+            if (actual) {
+                for (const exp of expected) {
+                    assert.ok(
+                        actual.some((a) => a.name === exp.name),
+                        `${name}: expected supertype '${exp.name}' not found in round-trip`
+                    );
+                }
+            }
+        }
+    }
+
+    verifyTypeHierarchyRoundTripSubtypes(map: {
+        [marker: string]: {
+            items: _.FourSlashTypeHierarchyItem[];
+        };
+    }) {
+        this.analyze();
+
+        for (const marker of this.getMarkers()) {
+            const fileName = marker.fileName;
+            const name = this.getMarkerName(marker);
+
+            if (!(name in map)) {
+                continue;
+            }
+
+            const expected = map[name].items;
+            const position = this.convertOffsetToPosition(fileName, marker.position);
+            const uri = Uri.file(fileName, this.serviceProvider);
+
+            // Step 1: Prepare
+            const prepareProvider = new TypeHierarchyProvider(this.program, uri, position, CancellationToken.None);
+            const prepared = prepareProvider.onPrepare();
+            assert.ok(prepared && prepared.length > 0, `${name}: prepare returned no items`);
+
+            // Step 2: Simulate LSP handler round-trip using item's selectionRange.start
+            const item = prepared![0];
+            const roundTripProvider = new TypeHierarchyProvider(
+                this.program,
+                uri,
+                item.selectionRange.start,
+                CancellationToken.None
+            );
+            roundTripProvider.onPrepare();
+            const actual = roundTripProvider.getSubtypes();
+
+            assert.strictEqual(
+                actual?.length ?? 0,
+                expected.length,
+                `${name}: round-trip expected ${expected.length} subtypes, got ${actual?.length ?? 0}`
+            );
+
+            if (actual) {
+                for (const exp of expected) {
+                    assert.ok(
+                        actual.some((a) => a.name === exp.name),
+                        `${name}: expected subtype '${exp.name}' not found in round-trip`
+                    );
+                }
+            }
+        }
+    }
+
     getDocumentHighlightKind(m?: Marker): DocumentHighlightKind | undefined {
         const kind = m?.data ? ((m.data as any).kind as string) : undefined;
         switch (kind) {
