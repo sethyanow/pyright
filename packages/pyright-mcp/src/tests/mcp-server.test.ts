@@ -126,6 +126,74 @@ describe('pyright MCP server', () => {
         expect(lines).toEqual([8, 13]);
     }, 30_000);
 
+    it('returns decoded semantic tokens for textDocument/semanticTokens/full', async () => {
+        const sampleUri = `file://${path.resolve(FIXTURES_DIR, 'sample.py')}`;
+        const result = await client.callTool({
+            name: 'lsp',
+            arguments: {
+                method: 'textDocument/semanticTokens/full',
+                params: {
+                    textDocument: { uri: sampleUri },
+                },
+            },
+        });
+        expect(result.isError).not.toBe(true);
+        const content = result.content as Array<{ type: string; text: string }>;
+        const tokens = JSON.parse(content[0].text);
+        expect(Array.isArray(tokens)).toBe(true);
+        expect(tokens.length).toBeGreaterThan(0);
+        // Each token should be a decoded object with human-readable type names
+        for (const token of tokens) {
+            expect(token).toHaveProperty('line');
+            expect(token).toHaveProperty('character');
+            expect(token).toHaveProperty('length');
+            expect(token).toHaveProperty('tokenType');
+            expect(token).toHaveProperty('tokenModifiers');
+            expect(typeof token.line).toBe('number');
+            expect(typeof token.character).toBe('number');
+            expect(typeof token.length).toBe('number');
+            // tokenType should be a string name, not a number
+            expect(typeof token.tokenType).toBe('string');
+            expect(Array.isArray(token.tokenModifiers)).toBe(true);
+        }
+        // Should find class tokens (Greeter, EnglishGreeter, SpanishGreeter)
+        const classTokens = tokens.filter((t: { tokenType: string }) => t.tokenType === 'class');
+        expect(classTokens.length).toBeGreaterThanOrEqual(3);
+        // Should find function/method tokens
+        const funcTokens = tokens.filter(
+            (t: { tokenType: string }) => t.tokenType === 'function' || t.tokenType === 'method'
+        );
+        expect(funcTokens.length).toBeGreaterThanOrEqual(1);
+    }, 30_000);
+
+    it('returns decoded semantic tokens for textDocument/semanticTokens/range', async () => {
+        const sampleUri = `file://${path.resolve(FIXTURES_DIR, 'sample.py')}`;
+        // Request tokens only for the first class (lines 0-6, covering Greeter ABC)
+        const result = await client.callTool({
+            name: 'lsp',
+            arguments: {
+                method: 'textDocument/semanticTokens/range',
+                params: {
+                    textDocument: { uri: sampleUri },
+                    range: {
+                        start: { line: 0, character: 0 },
+                        end: { line: 6, character: 0 },
+                    },
+                },
+            },
+        });
+        expect(result.isError).not.toBe(true);
+        const content = result.content as Array<{ type: string; text: string }>;
+        const tokens = JSON.parse(content[0].text);
+        expect(Array.isArray(tokens)).toBe(true);
+        // Should have tokens but fewer than full file
+        expect(tokens.length).toBeGreaterThan(0);
+        // All tokens should be decoded objects
+        for (const token of tokens) {
+            expect(typeof token.tokenType).toBe('string');
+        }
+    }, 30_000);
+
     it('returns error for unsupported method', async () => {
         const result = await client.callTool({
             name: 'lsp',

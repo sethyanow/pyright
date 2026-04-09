@@ -9,6 +9,7 @@ import {
     RequestType,
 } from 'vscode-jsonrpc/node';
 import { z } from 'zod';
+import { decodeSemanticTokens, TokenLegend } from './decode-semantic-tokens';
 
 export async function createMcpServer(langserverPath: string, workspaceRoot: string) {
     const server = new McpServer({
@@ -20,6 +21,7 @@ export async function createMcpServer(langserverPath: string, workspaceRoot: str
     let lspConnection: MessageConnection | null = null;
     let initPromise: Promise<void> | null = null;
     let initError: string | null = null;
+    let tokenLegend: TokenLegend | null = null;
 
     // Spawn Pyright and run LSP initialize
     function startPyright(): Promise<void> {
@@ -82,6 +84,12 @@ export async function createMcpServer(langserverPath: string, workspaceRoot: str
                                 implementation: {
                                     dynamicRegistration: false,
                                 },
+                                semanticTokens: {
+                                    dynamicRegistration: false,
+                                    requests: { full: true, range: true },
+                                    tokenTypes: [],
+                                    tokenModifiers: [],
+                                },
                             },
                             workspace: {
                                 symbol: {
@@ -91,7 +99,13 @@ export async function createMcpServer(langserverPath: string, workspaceRoot: str
                             },
                         },
                     })
-                    .then(() => {
+                    .then((initResult: unknown) => {
+                        const result = initResult as Record<string, any> | undefined;
+                        // Capture token legend from server capabilities
+                        const legend = result?.capabilities?.semanticTokensProvider?.legend;
+                        if (legend) {
+                            tokenLegend = legend;
+                        }
                         // Send initialized notification
                         lspConnection!.sendNotification('initialized', {});
                         resolve();
@@ -152,6 +166,22 @@ export async function createMcpServer(langserverPath: string, workspaceRoot: str
                         setTimeout(() => reject(new Error(`LSP request timed out after 30s: ${method}`)), 30_000)
                     ),
                 ]);
+
+                // Decode semantic token responses into human-readable format
+                if (method.startsWith('textDocument/semanticTokens/') && tokenLegend) {
+                    const raw = result as { data?: number[] } | null;
+                    if (raw?.data && Array.isArray(raw.data)) {
+                        const decoded = decodeSemanticTokens(raw.data, tokenLegend);
+                        return {
+                            content: [{ type: 'text' as const, text: JSON.stringify(decoded, null, 2) }],
+                        };
+                    }
+                    // Empty or null result → empty array
+                    return {
+                        content: [{ type: 'text' as const, text: JSON.stringify([]) }],
+                    };
+                }
+
                 return {
                     content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }],
                 };

@@ -5,6 +5,7 @@ import {
     StreamMessageWriter,
     MessageConnection,
 } from 'vscode-jsonrpc/node';
+import { decodeSemanticTokens, TokenLegend } from './decode-semantic-tokens';
 
 /**
  * One-shot LSP query: spawns Pyright, initializes, sends one request, shuts down.
@@ -39,7 +40,7 @@ export async function queryLsp(
         const rootUri = `file://${workspaceRoot}`;
         const workspaceName = workspaceRoot.split('/').pop() || 'workspace';
 
-        await conn.sendRequest('initialize', {
+        const initResult: Record<string, any> = await conn.sendRequest('initialize', {
             processId: process.pid,
             rootUri,
             rootPath: workspaceRoot,
@@ -47,6 +48,12 @@ export async function queryLsp(
             capabilities: {
                 textDocument: {
                     implementation: { dynamicRegistration: false },
+                    semanticTokens: {
+                        dynamicRegistration: false,
+                        requests: { full: true, range: true },
+                        tokenTypes: [],
+                        tokenModifiers: [],
+                    },
                 },
                 workspace: {
                     symbol: { dynamicRegistration: false },
@@ -54,6 +61,8 @@ export async function queryLsp(
                 },
             },
         });
+        const legend: TokenLegend | undefined =
+            initResult?.capabilities?.semanticTokensProvider?.legend;
         conn.sendNotification('initialized', {});
 
         // For workspace queries, poll until analysis produces results
@@ -82,6 +91,15 @@ export async function queryLsp(
             ),
         ]);
 
+        // Decode semantic token responses into human-readable format
+        if (method.startsWith('textDocument/semanticTokens/') && legend) {
+            const raw = result as { data?: number[] } | null;
+            if (raw?.data && Array.isArray(raw.data)) {
+                return decodeSemanticTokens(raw.data, legend);
+            }
+            return [];
+        }
+
         return result;
     } finally {
         if (conn) {
@@ -93,6 +111,9 @@ export async function queryLsp(
             }
             conn.dispose();
         }
+        // Wait a tick for pending writes to drain before killing the process,
+        // otherwise StreamMessageWriter throws ERR_STREAM_DESTROYED
+        await new Promise((r) => setImmediate(r));
         proc.kill();
     }
 }

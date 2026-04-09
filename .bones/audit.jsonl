@@ -181,3 +181,8 @@
 {"timestamp":"2026-04-09T12:02:15.477957+00:00","actor":"Seth","event_type":"dep_added","task_id":"pyr-mge","details":{"kind":"parent-child","to":"pyr-tc8"}}
 {"timestamp":"2026-04-09T12:02:15.478415+00:00","actor":"Seth","event_type":"dep_added","task_id":"pyr-mge","details":{"kind":"blocks","to":"pyr-tc8"}}
 {"timestamp":"2026-04-09T12:12:21.440797+00:00","actor":"Seth","event_type":"updated","task_id":"pyr-tc8","details":{"status":"active"}}
+{"timestamp":"2026-04-09T12:26:54.695241+00:00","actor":"Seth","event_type":"closed","task_id":"pyr-tc8","details":{"notes":null}}
+{"timestamp":"2026-04-09T12:27:19.823225+00:00","actor":"Seth","event_type":"logged","task_id":"pyr-tc8","details":{"message":"Debrief: SemanticTokensProvider complete. ParseTreeWalker subclass walks all NameNodes, classifies via getDeclInfoForNameNode. Key finding: getEnclosingClass(stopAtFunction=true) required for Variable classification to avoid misclassifying local vars as properties. Handler wiring needed empty SemanticTokens fallback instead of null. Reflections: skeleton was accurate except getNodeIterator (caught in SRE). Type-dependent test passed immediately — evaluator-based classification is inherently type-dependent."}}
+{"timestamp":"2026-04-09T12:27:25.774650+00:00","actor":"Seth","event_type":"created","task_id":"pyr-glm","details":{}}
+{"timestamp":"2026-04-09T12:27:47.333663+00:00","actor":"Seth","event_type":"dep_added","task_id":"pyr-mge","details":{"kind":"blocks","to":"pyr-glm"}}
+{"timestamp":"2026-04-09T14:25:58.268953+00:00","actor":"Seth","event_type":"claimed","task_id":"pyr-glm","details":{"actor":"Seth"}}

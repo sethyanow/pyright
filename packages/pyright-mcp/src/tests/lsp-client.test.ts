@@ -36,6 +36,25 @@ describe('queryLsp', () => {
         expect(result).toBeNull();
     }, 30_000);
 
+    it('returns decoded semantic tokens for textDocument/semanticTokens/full', async () => {
+        const sampleUri = `file://${path.resolve(FIXTURES_DIR, 'sample.py')}`;
+        const result = await queryLsp(LANGSERVER_PATH, FIXTURES_DIR, 'textDocument/semanticTokens/full', {
+            textDocument: { uri: sampleUri },
+        });
+        expect(Array.isArray(result)).toBe(true);
+        const tokens = result as Array<{ line: number; character: number; length: number; tokenType: string; tokenModifiers: string[] }>;
+        expect(tokens.length).toBeGreaterThan(0);
+        // Each token should be a decoded object
+        for (const token of tokens) {
+            expect(typeof token.tokenType).toBe('string');
+            expect(typeof token.line).toBe('number');
+            expect(Array.isArray(token.tokenModifiers)).toBe(true);
+        }
+        // Should find class tokens
+        const classTokens = tokens.filter(t => t.tokenType === 'class');
+        expect(classTokens.length).toBeGreaterThanOrEqual(3);
+    }, 30_000);
+
     it('throws on unsupported method', async () => {
         await expect(
             queryLsp(LANGSERVER_PATH, FIXTURES_DIR, 'textDocument/nonexistent', {})
