@@ -6,6 +6,7 @@ import {
     MessageConnection,
 } from 'vscode-jsonrpc/node';
 import { decodeSemanticTokens, TokenLegend } from './decode-semantic-tokens';
+import { resolveLangserverPath } from './resolve-langserver-path';
 
 /**
  * One-shot LSP query: spawns Pyright, initializes, sends one request, shuts down.
@@ -130,8 +131,7 @@ if (require.main === module) {
         process.exit(1);
     }
 
-    const langserverPath = process.env.PYRIGHT_LANGSERVER_PATH
-        || 'packages/pyright/dist/pyright-langserver.js';
+    const langserverPath = resolveLangserverPath();
 
     let params: Record<string, unknown>;
     try {

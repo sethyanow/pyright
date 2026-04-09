@@ -10,6 +10,7 @@ import {
 } from 'vscode-jsonrpc/node';
 import { z } from 'zod';
 import { decodeSemanticTokens, TokenLegend } from './decode-semantic-tokens';
+import { resolveLangserverPath } from './resolve-langserver-path';
 
 export async function createMcpServer(langserverPath: string, workspaceRoot: string) {
     const server = new McpServer({
@@ -232,8 +233,7 @@ export async function createMcpServer(langserverPath: string, workspaceRoot: str
 
 // When run directly as stdio MCP server
 if (require.main === module) {
-    const langserverPath = process.env.PYRIGHT_LANGSERVER_PATH
-        || 'packages/pyright/dist/pyright-langserver.js';
+    const langserverPath = resolveLangserverPath();
     const workspaceRoot = process.cwd();
 
     createMcpServer(langserverPath, workspaceRoot).then(async ({ server }) => {
