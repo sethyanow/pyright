@@ -191,3 +191,7 @@
 {"timestamp":"2026-04-09T14:41:12.535235+00:00","actor":"Seth","event_type":"created","task_id":"pyr-db7","details":{}}
 {"timestamp":"2026-04-09T14:41:36.534841+00:00","actor":"Seth","event_type":"dep_added","task_id":"pyr-mge","details":{"kind":"parent-child","to":"pyr-db7"}}
 {"timestamp":"2026-04-09T14:41:36.535241+00:00","actor":"Seth","event_type":"dep_added","task_id":"pyr-mge","details":{"kind":"blocks","to":"pyr-db7"}}
+{"timestamp":"2026-04-09T16:56:14.223132+00:00","actor":"Seth","event_type":"created","task_id":"pyr-xgj","details":{}}
+{"timestamp":"2026-04-09T17:16:39.659574+00:00","actor":"Seth","event_type":"dep_added","task_id":"pyr-mge","details":{"kind":"parent-child","to":"pyr-xgj"}}
+{"timestamp":"2026-04-09T17:16:39.660001+00:00","actor":"Seth","event_type":"dep_added","task_id":"pyr-mge","details":{"kind":"blocks","to":"pyr-xgj"}}
+{"timestamp":"2026-04-09T17:23:43.079077+00:00","actor":"Seth","event_type":"dep_added","task_id":"pyr-db7","details":{"kind":"blocks","to":"pyr-xgj"}}

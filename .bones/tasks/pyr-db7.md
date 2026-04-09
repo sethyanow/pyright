@@ -4,8 +4,10 @@ title: 'Phase 3 Acceptance: Semantic Tokens'
 status: open
 type: task
 priority: 1
+depends_on: [pyr-xgj]
 parent: pyr-mge
 ---
+
 
 
 
