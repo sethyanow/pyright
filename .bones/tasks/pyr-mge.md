@@ -1,12 +1,15 @@
 ---
 id: pyr-mge
 title: 'Phase 3: Semantic Tokens'
-status: open
+status: closed
 type: epic
 priority: 1
 depends_on: [pyr-lfw, pyr-tc8, pyr-glm, pyr-db7, pyr-xgj]
 parent: pyr-otr
 ---
+
+
+
 
 
 

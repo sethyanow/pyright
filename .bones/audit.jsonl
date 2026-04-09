@@ -197,3 +197,16 @@
 {"timestamp":"2026-04-09T17:23:43.079077+00:00","actor":"Seth","event_type":"dep_added","task_id":"pyr-db7","details":{"kind":"blocks","to":"pyr-xgj"}}
 {"timestamp":"2026-04-09T17:32:52.689852+00:00","actor":"Seth","event_type":"claimed","task_id":"pyr-xgj","details":{"actor":"Seth"}}
 {"timestamp":"2026-04-09T17:40:58.983174+00:00","actor":"Seth","event_type":"updated","task_id":"pyr-xgj","details":{"status":"closed"}}
+{"timestamp":"2026-04-09T17:42:06.106175+00:00","actor":"Seth","event_type":"logged","task_id":"pyr-xgj","details":{"message":"Debrief: Webpack bundle + path fix complete. tsconfigResolveAliases incompatibility discovered (no paths in pyright-mcp tsconfig) — dropped import, used only cacheConfig + monorepoResourceNameMapper. Reflections: skeleton was accurate, only SRE gaps were webpack-cli devDep and the tsconfigResolveAliases issue. No corrections from user. resolveLangserverPath extracted as shared module with tests."}}
+{"timestamp":"2026-04-09T21:52:05.275158+00:00","actor":"Seth","event_type":"claimed","task_id":"pyr-db7","details":{"actor":"Seth"}}
+{"timestamp":"2026-04-09T21:59:11.936131+00:00","actor":"Seth","event_type":"closed","task_id":"pyr-db7","details":{"notes":null}}
+{"timestamp":"2026-04-09T21:59:23.469912+00:00","actor":"Seth","event_type":"closed","task_id":"pyr-mge","details":{"notes":null}}
+{"timestamp":"2026-04-09T22:06:51.109650+00:00","actor":"Seth","event_type":"reopened","task_id":"pyr-db7","details":{}}
+{"timestamp":"2026-04-09T22:06:53.845463+00:00","actor":"Seth","event_type":"reopened","task_id":"pyr-mge","details":{}}
+{"timestamp":"2026-04-09T22:08:24.955066+00:00","actor":"Seth","event_type":"updated","task_id":"pyr-db7","details":{"status":"active"}}
+{"timestamp":"2026-04-09T22:14:23.714224+00:00","actor":"Seth","event_type":"closed","task_id":"pyr-db7","details":{"notes":null}}
+{"timestamp":"2026-04-09T22:14:32.655767+00:00","actor":"Seth","event_type":"closed","task_id":"pyr-mge","details":{"notes":null}}
+{"timestamp":"2026-04-09T22:14:54.642424+00:00","actor":"Seth","event_type":"logged","task_id":"pyr-db7","details":{"message":"Acceptance complete. Demo: semanticTokens/full on sample.py returned 33 decoded tokens (class, method, parameter, function, decorator). Range request on lines 18-20 returned 9 tokens (subset). Fourslash tests (4 files) cover all token types including type-dependent classification. No stale docs found. Sub-epic pyr-mge closed, unblocking pyr-evw (Phase 4: Inlay Hints)."}}
+{"timestamp":"2026-04-09T22:18:07.002322+00:00","actor":"Seth","event_type":"created","task_id":"pyr-qzi","details":{}}
+{"timestamp":"2026-04-09T22:18:10.684797+00:00","actor":"Seth","event_type":"dep_added","task_id":"pyr-evw","details":{"kind":"parent-child","to":"pyr-qzi"}}
+{"timestamp":"2026-04-09T22:18:10.685221+00:00","actor":"Seth","event_type":"dep_added","task_id":"pyr-evw","details":{"kind":"blocks","to":"pyr-qzi"}}
