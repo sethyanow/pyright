@@ -172,3 +172,11 @@
 {"timestamp":"2026-04-09T01:17:04.552270+00:00","actor":"Seth","event_type":"created","task_id":"pyr-9m4","details":{}}
 {"timestamp":"2026-04-09T01:17:08.247715+00:00","actor":"Seth","event_type":"dep_added","task_id":"pyr-lfw","details":{"kind":"parent-child","to":"pyr-9m4"}}
 {"timestamp":"2026-04-09T01:17:08.248096+00:00","actor":"Seth","event_type":"dep_added","task_id":"pyr-lfw","details":{"kind":"blocks","to":"pyr-9m4"}}
+{"timestamp":"2026-04-09T03:19:20.278988+00:00","actor":"Seth","event_type":"claimed","task_id":"pyr-9m4","details":{"actor":"Seth"}}
+{"timestamp":"2026-04-09T11:58:41.874036+00:00","actor":"Seth","event_type":"closed","task_id":"pyr-9m4","details":{"notes":null}}
+{"timestamp":"2026-04-09T11:58:41.928646+00:00","actor":"Seth","event_type":"closed","task_id":"pyr-lfw","details":{"notes":null}}
+{"timestamp":"2026-04-09T12:00:24.232893+00:00","actor":"Seth","event_type":"logged","task_id":"pyr-9m4","details":{"message":"Acceptance demo completed. Bug found: languageServerBase.ts supertypes/subtypes handlers used range.start instead of selectionRange.start. Fixed with regression test (typeHierarchy.roundTrip.fourslash.ts). Full MCP round-trip verified live: prepare→supertypes→subtypes all working. User approved."}}
+{"timestamp":"2026-04-09T12:00:24.282710+00:00","actor":"Seth","event_type":"logged","task_id":"pyr-lfw","details":{"message":"Phase 2 closed. All 7 criteria met. Acceptance demo verified via MCP lsp() tool. Bug fix shipped (23d3a0a7b). Unblocks pyr-mge (Phase 3: Semantic Tokens)."}}
+{"timestamp":"2026-04-09T12:02:11.670778+00:00","actor":"Seth","event_type":"created","task_id":"pyr-tc8","details":{}}
+{"timestamp":"2026-04-09T12:02:15.477957+00:00","actor":"Seth","event_type":"dep_added","task_id":"pyr-mge","details":{"kind":"parent-child","to":"pyr-tc8"}}
+{"timestamp":"2026-04-09T12:02:15.478415+00:00","actor":"Seth","event_type":"dep_added","task_id":"pyr-mge","details":{"kind":"blocks","to":"pyr-tc8"}}

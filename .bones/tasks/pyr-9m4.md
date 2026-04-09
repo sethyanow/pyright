@@ -1,10 +1,14 @@
 ---
 id: pyr-9m4
 title: 'Phase 2 Acceptance: Type Hierarchy'
-status: open
+status: closed
 type: task
+owner: Seth
 parent: pyr-lfw
 ---
+
+
+
 
 ## Context
 
@@ -36,5 +40,9 @@ Use a real Python file with a class hierarchy (e.g., a class from the pyright co
 
 ## Success Criteria
 
-- [ ] Demo presented to user in conversation (not buried in task body)
-- [ ] User closes this task (acceptance is a user decision)
+- [x] Demo presented to user in conversation (not buried in task body)
+- [x] User closes this task (acceptance is a user decision)
+
+## Log
+
+- [2026-04-09T12:00:24Z] [Seth] Acceptance demo completed. Bug found: languageServerBase.ts supertypes/subtypes handlers used range.start instead of selectionRange.start. Fixed with regression test (typeHierarchy.roundTrip.fourslash.ts). Full MCP round-trip verified live: prepare→supertypes→subtypes all working. User approved.

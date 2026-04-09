@@ -1,12 +1,14 @@
 ---
 id: pyr-lfw
 title: 'Phase 2: Type Hierarchy'
-status: open
+status: closed
 type: epic
 priority: 1
 depends_on: [pyr-lo0, pyr-mal, pyr-9m4]
 parent: pyr-otr
 ---
+
+
 
 
 
@@ -46,3 +48,7 @@ R3 from parent epic: `textDocument/prepareTypeHierarchy`, `typeHierarchy/superty
 ## Demo
 
 Show me navigating supertypes and subtypes of a class through the type hierarchy via the MCP `lsp()` tool.
+
+## Log
+
+- [2026-04-09T12:00:24Z] [Seth] Phase 2 closed. All 7 criteria met. Acceptance demo verified via MCP lsp() tool. Bug fix shipped (23d3a0a7b). Unblocks pyr-mge (Phase 3: Semantic Tokens).
