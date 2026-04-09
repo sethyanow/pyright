@@ -186,3 +186,8 @@
 {"timestamp":"2026-04-09T12:27:25.774650+00:00","actor":"Seth","event_type":"created","task_id":"pyr-glm","details":{}}
 {"timestamp":"2026-04-09T12:27:47.333663+00:00","actor":"Seth","event_type":"dep_added","task_id":"pyr-mge","details":{"kind":"blocks","to":"pyr-glm"}}
 {"timestamp":"2026-04-09T14:25:58.268953+00:00","actor":"Seth","event_type":"claimed","task_id":"pyr-glm","details":{"actor":"Seth"}}
+{"timestamp":"2026-04-09T14:40:16.287019+00:00","actor":"Seth","event_type":"closed","task_id":"pyr-glm","details":{"notes":null}}
+{"timestamp":"2026-04-09T14:41:07.379760+00:00","actor":"Seth","event_type":"logged","task_id":"pyr-glm","details":{"message":"Debrief: Implemented semantic token decoding in MCP adapter and CLI. Shared decode-semantic-tokens.ts extracts delta-encoded arrays into readable objects. Legend captured from init response. Fixed ERR_STREAM_DESTROYED race in CLI cleanup. Reflections: Stale dist bundle was root blocker (built before SemanticTokensProvider commit). vscode-languageserver capability gating was a surprise — handlers exist but don't route without client capability. Both saved as reference memories."}}
+{"timestamp":"2026-04-09T14:41:12.535235+00:00","actor":"Seth","event_type":"created","task_id":"pyr-db7","details":{}}
+{"timestamp":"2026-04-09T14:41:36.534841+00:00","actor":"Seth","event_type":"dep_added","task_id":"pyr-mge","details":{"kind":"parent-child","to":"pyr-db7"}}
+{"timestamp":"2026-04-09T14:41:36.535241+00:00","actor":"Seth","event_type":"dep_added","task_id":"pyr-mge","details":{"kind":"blocks","to":"pyr-db7"}}

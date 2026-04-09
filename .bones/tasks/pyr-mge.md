@@ -4,9 +4,12 @@ title: 'Phase 3: Semantic Tokens'
 status: open
 type: epic
 priority: 1
-depends_on: [pyr-lfw, pyr-tc8]
+depends_on: [pyr-lfw, pyr-tc8, pyr-glm, pyr-db7]
 parent: pyr-otr
 ---
+
+
+
 
 
 
@@ -20,13 +23,13 @@ R4 from parent epic: `textDocument/semanticTokens/full` and `/range` — classif
 
 ## Success Criteria
 
-- [ ] `textDocument/semanticTokens/full` registered in capabilities, returns token classifications
-- [ ] `textDocument/semanticTokens/range` returns classifications for a given range
-- [ ] Tokens classified by resolved type, not syntax — a name that's a class in one context and a variable in another must be classified differently
-- [ ] Token types covered: class, function, parameter, typeParameter, variable, property, decorator, method, namespace
-- [ ] Fourslash tests covering: mixed symbol kinds in same file, type-dependent classification
-- [ ] Full test suite passes
-- [ ] Adapter layer updated — semantic tokens accessible through MCP + skill/scripts
+- [x] `textDocument/semanticTokens/full` registered in capabilities, returns token classifications
+- [x] `textDocument/semanticTokens/range` returns classifications for a given range
+- [x] Tokens classified by resolved type, not syntax — a name that's a class in one context and a variable in another must be classified differently
+- [x] Token types covered: class, function, parameter, typeParameter, variable, property, decorator, method, namespace
+- [x] Fourslash tests covering: mixed symbol kinds in same file, type-dependent classification
+- [x] Full test suite passes
+- [x] Adapter layer updated — semantic tokens accessible through MCP + skill/scripts
 
 ## Key Considerations
 

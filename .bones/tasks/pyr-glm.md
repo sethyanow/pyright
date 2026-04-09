@@ -1,12 +1,14 @@
 ---
 id: pyr-glm
 title: Add semantic tokens to MCP adapter layer
-status: active
+status: closed
 type: task
 priority: 1
 owner: Seth
 parent: pyr-mge
 ---
+
+
 
 
 ## Context
@@ -60,13 +62,13 @@ Same decoding for the CLI path — apply after receiving the raw result.
 
 ## Success Criteria
 
-- [ ] `textDocument/semanticTokens/full` accessible through MCP `lsp` tool, returning decoded tokens
-- [ ] `textDocument/semanticTokens/range` accessible through MCP `lsp` tool, returning decoded tokens
-- [ ] Token output decoded into readable format: `{ line, character, length, tokenType: "class"|"function"|..., tokenModifiers: [] }` — not raw delta-encoded integers
-- [ ] Client capabilities include `textDocument.semanticTokens` in both `mcp-server.ts` and `lsp-client.ts`
-- [ ] Legend captured from server's initialize response, not hardcoded
-- [ ] MCP tests: full tokens on sample.py returns decoded objects with correct type names; range tokens returns subset
-- [ ] CLI tests: `queryLsp` for semantic tokens returns decoded objects
+- [x] `textDocument/semanticTokens/full` accessible through MCP `lsp` tool, returning decoded tokens
+- [x] `textDocument/semanticTokens/range` accessible through MCP `lsp` tool, returning decoded tokens
+- [x] Token output decoded into readable format: `{ line, character, length, tokenType: "class"|"function"|..., tokenModifiers: [] }` — not raw delta-encoded integers
+- [x] Client capabilities include `textDocument.semanticTokens` in both `mcp-server.ts` and `lsp-client.ts`
+- [x] Legend captured from server's initialize response, not hardcoded
+- [x] MCP tests: full tokens on sample.py returns decoded objects with correct type names; range tokens returns subset
+- [x] CLI tests: `queryLsp` for semantic tokens returns decoded objects
 
 ## Edge Cases
 
@@ -105,3 +107,7 @@ Same decoding for the CLI path — apply after receiving the raw result.
 - **Business logic in the adapter** — the adapter decodes/formats but does not classify. Classification lives in SemanticTokensProvider.
 - **Hardcoded token legend** — must come from server's initialize response, not duplicated from pyright-internal source.
 - **Modifying the generic lsp tool's core logic** — decoding is post-processing on the result for specific methods, not a change to how requests are forwarded.
+
+## Log
+
+- [2026-04-09T14:41:07Z] [Seth] Debrief: Implemented semantic token decoding in MCP adapter and CLI. Shared decode-semantic-tokens.ts extracts delta-encoded arrays into readable objects. Legend captured from init response. Fixed ERR_STREAM_DESTROYED race in CLI cleanup. Reflections: Stale dist bundle was root blocker (built before SemanticTokensProvider commit). vscode-languageserver capability gating was a surprise — handlers exist but don't route without client capability. Both saved as reference memories.

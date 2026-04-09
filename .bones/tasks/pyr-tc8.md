@@ -1,11 +1,13 @@
 ---
 id: pyr-tc8
 title: Implement SemanticTokensProvider with full/range support
-status: active
+status: closed
 type: task
 priority: 1
 parent: pyr-mge
 ---
+
+
 
 
 ## Context
@@ -88,12 +90,12 @@ Register `semanticTokensProvider` capability with legend, wire `on` and `onRange
 
 ## Success Criteria
 
-- [ ] `textDocument/semanticTokens/full` registered in capabilities, returns token classifications
-- [ ] `textDocument/semanticTokens/range` returns classifications for a given range
-- [ ] Tokens classified by resolved type, not syntax — type-dependent classification test passes
-- [ ] Token types covered: class, function, parameter, typeParameter, variable, property, decorator, method, namespace, enum, enumMember
-- [ ] Fourslash tests covering: mixed symbol kinds, type-dependent classification
-- [ ] Full test suite passes
+- [x] `textDocument/semanticTokens/full` registered in capabilities, returns token classifications
+- [x] `textDocument/semanticTokens/range` returns classifications for a given range
+- [x] Tokens classified by resolved type, not syntax — type-dependent classification test passes
+- [x] Token types covered: class, function, parameter, typeParameter, variable, property, decorator, method, namespace, enum, enumMember
+- [x] Fourslash tests covering: mixed symbol kinds, type-dependent classification
+- [x] Full test suite passes
 
 ## Key Considerations
 
@@ -149,3 +151,7 @@ Register `semanticTokensProvider` capability with legend, wire `on` and `onRange
 
 - **Syntax-only classification** — matching keyword text instead of resolving through the evaluator. REJECTED per parent epic.
 - **Skipping alias resolution** — imported names must resolve through to their actual declaration type.
+
+## Log
+
+- [2026-04-09T12:27:19Z] [Seth] Debrief: SemanticTokensProvider complete. ParseTreeWalker subclass walks all NameNodes, classifies via getDeclInfoForNameNode. Key finding: getEnclosingClass(stopAtFunction=true) required for Variable classification to avoid misclassifying local vars as properties. Handler wiring needed empty SemanticTokens fallback instead of null. Reflections: skeleton was accurate except getNodeIterator (caught in SRE). Type-dependent test passed immediately — evaluator-based classification is inherently type-dependent.
