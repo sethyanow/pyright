@@ -22,12 +22,12 @@ R3 from parent epic: `textDocument/prepareTypeHierarchy`, `typeHierarchy/superty
 
 ## Success Criteria
 
-- [ ] `textDocument/prepareTypeHierarchy` registered in capabilities, returns TypeHierarchyItem for class at cursor
-- [ ] `typeHierarchy/supertypes` returns base classes walking up the MRO
-- [ ] `typeHierarchy/subtypes` returns subclasses across workspace
-- [ ] Works across files — not limited to open files
-- [ ] Fourslash tests covering: single inheritance, multiple inheritance, diamond, Protocol/ABC
-- [ ] Full test suite passes
+- [x] `textDocument/prepareTypeHierarchy` registered in capabilities, returns TypeHierarchyItem for class at cursor
+- [x] `typeHierarchy/supertypes` returns base classes walking up the MRO
+- [x] `typeHierarchy/subtypes` returns subclasses across workspace
+- [x] Works across files — not limited to open files
+- [x] Fourslash tests covering: single inheritance, multiple inheritance, diamond, Protocol/ABC
+- [x] Full test suite passes
 - [ ] Adapter layer updated — new capabilities accessible through MCP + skill/scripts
 
 ## Key Considerations

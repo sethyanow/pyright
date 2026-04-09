@@ -167,3 +167,4 @@
 {"timestamp":"2026-04-09T00:24:47.035729+00:00","actor":"Seth","event_type":"dep_added","task_id":"pyr-lfw","details":{"kind":"blocks","to":"pyr-mal"}}
 {"timestamp":"2026-04-09T00:25:58.369468+00:00","actor":"Seth","event_type":"logged","task_id":"pyr-mal","details":{"message":"Task scoped from pyr-lfw Phase 2. Codebase verified: connection.languages.typeHierarchy API available, CallHierarchyProvider pattern confirmed, ImplementationProvider workspace traversal pattern confirmed. Key decision: direct-only sub/supertypes since LSP clients recurse."}}
 {"timestamp":"2026-04-09T00:53:55.382358+00:00","actor":"Seth","event_type":"claimed","task_id":"pyr-mal","details":{"actor":"Seth"}}
+{"timestamp":"2026-04-09T01:15:11.801625+00:00","actor":"Seth","event_type":"closed","task_id":"pyr-mal","details":{"notes":null}}

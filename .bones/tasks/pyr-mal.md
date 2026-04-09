@@ -1,12 +1,13 @@
 ---
 id: pyr-mal
 title: Add TypeHierarchyProvider with prepare, supertypes, and subtypes
-status: active
+status: closed
 type: task
 priority: 1
 owner: Seth
 parent: pyr-lfw
 ---
+
 
 
 
@@ -126,13 +127,13 @@ Add capability, connection handlers, and handler methods.
 
 ## Success Criteria
 
-- [ ] `TypeHierarchyProvider` class in `typeHierarchyProvider.ts` with `onPrepare`, `getSupertypes`, `getSubtypes`
-- [ ] `typeHierarchyProvider: true` in server capabilities
-- [ ] Connection handlers wired for all three requests
-- [ ] Test harness helpers: `verifyTypeHierarchyPrepare`, `verifyTypeHierarchySupertypes`, `verifyTypeHierarchySubtypes`
-- [ ] Fourslash tests: prepare, single inheritance, multiple inheritance, diamond, Protocol/ABC, cross-file
-- [ ] `npm run typecheck` clean
-- [ ] `npm run test:norebuild` passes (full suite)
+- [x] `TypeHierarchyProvider` class in `typeHierarchyProvider.ts` with `onPrepare`, `getSupertypes`, `getSubtypes`
+- [x] `typeHierarchyProvider: true` in server capabilities
+- [x] Connection handlers wired for all three requests
+- [x] Test harness helpers: `verifyTypeHierarchyPrepare`, `verifyTypeHierarchySupertypes`, `verifyTypeHierarchySubtypes`
+- [x] Fourslash tests: prepare, single inheritance, multiple inheritance, diamond, Protocol/ABC, cross-file
+- [x] `npm run typecheck` clean
+- [x] `npm run test:norebuild` passes (full suite)
 
 ## Key Considerations (Failure Catalog)
 
