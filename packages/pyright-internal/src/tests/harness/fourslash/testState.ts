@@ -58,6 +58,7 @@ import { Uri } from '../../../common/uri/uri';
 import { UriEx, getFileSpec } from '../../../common/uri/uriUtils';
 import { convertToWorkspaceEdit } from '../../../common/workspaceEditUtils';
 import { CallHierarchyProvider } from '../../../languageService/callHierarchyProvider';
+import { TypeHierarchyProvider } from '../../../languageService/typeHierarchyProvider';
 import { CompletionOptions, CompletionProvider } from '../../../languageService/completionProvider';
 import {
     DefinitionFilter,
@@ -1331,6 +1332,137 @@ export class TestState {
                         expectedFilePath?.filter((e) =>
                             this._deepEqual(a.to.uri, Uri.file(e, this.serviceProvider).toString())
                         ).length >= 1
+                    );
+                }
+            }
+        }
+    }
+
+    verifyTypeHierarchyPrepare(map: {
+        [marker: string]: {
+            items: _.FourSlashTypeHierarchyItem[];
+        };
+    }) {
+        this.analyze();
+
+        for (const marker of this.getMarkers()) {
+            const fileName = marker.fileName;
+            const name = this.getMarkerName(marker);
+
+            if (!(name in map)) {
+                continue;
+            }
+
+            const expected = map[name].items;
+            const position = this.convertOffsetToPosition(fileName, marker.position);
+            const actual = new TypeHierarchyProvider(
+                this.program,
+                Uri.file(fileName, this.serviceProvider),
+                position,
+                CancellationToken.None
+            ).onPrepare();
+
+            assert.strictEqual(actual?.length ?? 0, expected.length, `${name}: expected ${expected.length} items`);
+
+            if (actual) {
+                for (let i = 0; i < actual.length; i++) {
+                    assert.strictEqual(actual[i].name, expected[i].name, `${name}[${i}]: name mismatch`);
+                    if (expected[i].filePath) {
+                        assert.strictEqual(
+                            actual[i].uri,
+                            Uri.file(expected[i].filePath!, this.serviceProvider).toString(),
+                            `${name}[${i}]: filePath mismatch`
+                        );
+                    }
+                    if (expected[i].range) {
+                        assert.ok(
+                            this._deepEqual(actual[i].selectionRange, expected[i].range),
+                            `${name}[${i}]: range mismatch`
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    verifyTypeHierarchySupertypes(map: {
+        [marker: string]: {
+            items: _.FourSlashTypeHierarchyItem[];
+        };
+    }) {
+        this.analyze();
+
+        for (const marker of this.getMarkers()) {
+            const fileName = marker.fileName;
+            const name = this.getMarkerName(marker);
+
+            if (!(name in map)) {
+                continue;
+            }
+
+            const expected = map[name].items;
+            const position = this.convertOffsetToPosition(fileName, marker.position);
+            const provider = new TypeHierarchyProvider(
+                this.program,
+                Uri.file(fileName, this.serviceProvider),
+                position,
+                CancellationToken.None
+            );
+
+            // Prepare first, then get supertypes
+            const prepared = provider.onPrepare();
+            assert.ok(prepared && prepared.length > 0, `${name}: prepare returned no items`);
+
+            const actual = provider.getSupertypes();
+            assert.strictEqual(actual?.length ?? 0, expected.length, `${name}: expected ${expected.length} supertypes`);
+
+            if (actual) {
+                for (const exp of expected) {
+                    assert.ok(
+                        actual.some((a) => a.name === exp.name),
+                        `${name}: expected supertype '${exp.name}' not found`
+                    );
+                }
+            }
+        }
+    }
+
+    verifyTypeHierarchySubtypes(map: {
+        [marker: string]: {
+            items: _.FourSlashTypeHierarchyItem[];
+        };
+    }) {
+        this.analyze();
+
+        for (const marker of this.getMarkers()) {
+            const fileName = marker.fileName;
+            const name = this.getMarkerName(marker);
+
+            if (!(name in map)) {
+                continue;
+            }
+
+            const expected = map[name].items;
+            const position = this.convertOffsetToPosition(fileName, marker.position);
+            const provider = new TypeHierarchyProvider(
+                this.program,
+                Uri.file(fileName, this.serviceProvider),
+                position,
+                CancellationToken.None
+            );
+
+            // Prepare first, then get subtypes
+            const prepared = provider.onPrepare();
+            assert.ok(prepared && prepared.length > 0, `${name}: prepare returned no items`);
+
+            const actual = provider.getSubtypes();
+            assert.strictEqual(actual?.length ?? 0, expected.length, `${name}: expected ${expected.length} subtypes`);
+
+            if (actual) {
+                for (const exp of expected) {
+                    assert.ok(
+                        actual.some((a) => a.name === exp.name),
+                        `${name}: expected subtype '${exp.name}' not found`
                     );
                 }
             }

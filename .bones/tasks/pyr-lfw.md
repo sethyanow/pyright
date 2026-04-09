@@ -4,9 +4,11 @@ title: 'Phase 2: Type Hierarchy'
 status: open
 type: epic
 priority: 1
-depends_on: [pyr-lo0]
+depends_on: [pyr-lo0, pyr-mal]
 parent: pyr-otr
 ---
+
+
 
 
 

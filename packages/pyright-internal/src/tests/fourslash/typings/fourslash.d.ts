@@ -69,6 +69,12 @@ declare namespace _ {
         range: PositionRange;
     }
 
+    interface FourSlashTypeHierarchyItem {
+        filePath?: string;
+        name: string;
+        range?: PositionRange;
+    }
+
     interface TextRange {
         start: number;
         length: number;
@@ -319,6 +325,21 @@ declare namespace _ {
         verifyShowCallHierarchyGetOutgoingCalls(map: {
             [marker: string]: {
                 items: FourSlashCallHierarchyItem[];
+            };
+        }): void;
+        verifyTypeHierarchyPrepare(map: {
+            [marker: string]: {
+                items: FourSlashTypeHierarchyItem[];
+            };
+        }): void;
+        verifyTypeHierarchySupertypes(map: {
+            [marker: string]: {
+                items: FourSlashTypeHierarchyItem[];
+            };
+        }): void;
+        verifyTypeHierarchySubtypes(map: {
+            [marker: string]: {
+                items: FourSlashTypeHierarchyItem[];
             };
         }): void;
         verifyHighlightReferences(map: {

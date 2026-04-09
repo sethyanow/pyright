@@ -162,3 +162,8 @@
 {"timestamp":"2026-04-08T23:53:07.099847+00:00","actor":"Seth","event_type":"logged","task_id":"pyr-kwu","details":{"message":"Acceptance gate passed. All 4 demos verified via MCP lsp() tool: (1) goToImplementation on ABC Greeter found EnglishGreeter + SpanishGreeter, (2) goToImplementation on method greet found both overrides, (3) goToImplementation on concrete EnglishGreeter returned null (correct per LSP spec), (4) workspaceSymbol with empty query returned symbols. User confirmed acceptance."}}
 {"timestamp":"2026-04-08T23:53:29.587470+00:00","actor":"Seth","event_type":"closed","task_id":"pyr-kwu","details":{"notes":null}}
 {"timestamp":"2026-04-08T23:53:29.634530+00:00","actor":"Seth","event_type":"closed","task_id":"pyr-lo0","details":{"notes":null}}
+{"timestamp":"2026-04-09T00:24:42.940640+00:00","actor":"Seth","event_type":"created","task_id":"pyr-mal","details":{}}
+{"timestamp":"2026-04-09T00:24:47.035326+00:00","actor":"Seth","event_type":"dep_added","task_id":"pyr-lfw","details":{"kind":"parent-child","to":"pyr-mal"}}
+{"timestamp":"2026-04-09T00:24:47.035729+00:00","actor":"Seth","event_type":"dep_added","task_id":"pyr-lfw","details":{"kind":"blocks","to":"pyr-mal"}}
+{"timestamp":"2026-04-09T00:25:58.369468+00:00","actor":"Seth","event_type":"logged","task_id":"pyr-mal","details":{"message":"Task scoped from pyr-lfw Phase 2. Codebase verified: connection.languages.typeHierarchy API available, CallHierarchyProvider pattern confirmed, ImplementationProvider workspace traversal pattern confirmed. Key decision: direct-only sub/supertypes since LSP clients recurse."}}
+{"timestamp":"2026-04-09T00:53:55.382358+00:00","actor":"Seth","event_type":"claimed","task_id":"pyr-mal","details":{"actor":"Seth"}}
