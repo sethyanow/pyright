@@ -58,6 +58,7 @@ import { Uri } from '../../../common/uri/uri';
 import { UriEx, getFileSpec } from '../../../common/uri/uriUtils';
 import { convertToWorkspaceEdit } from '../../../common/workspaceEditUtils';
 import { CallHierarchyProvider } from '../../../languageService/callHierarchyProvider';
+import { SemanticTokensProvider, tokenLegend } from '../../../languageService/semanticTokensProvider';
 import { TypeHierarchyProvider } from '../../../languageService/typeHierarchyProvider';
 import { CompletionOptions, CompletionProvider } from '../../../languageService/completionProvider';
 import {
@@ -1576,6 +1577,144 @@ export class TestState {
                     );
                 }
             }
+        }
+    }
+
+    verifySemanticTokens(map: { [marker: string]: string }) {
+        this.analyze();
+
+        const markers = this.getMarkers();
+        assert(markers.length > 0, 'No markers found');
+
+        // Use the first marker's file to get tokens
+        const fileName = markers[0].fileName;
+        const uri = Uri.file(fileName, this.serviceProvider);
+
+        const provider = new SemanticTokensProvider(this.program, uri, CancellationToken.None);
+        const result = provider.getTokens();
+        assert(result, 'SemanticTokensProvider returned no result');
+
+        // Decode the delta-encoded token array
+        // Each token is 5 numbers: deltaLine, deltaStartChar, length, tokenType, tokenModifiers
+        const data = result.data;
+        const decoded: { line: number; char: number; length: number; tokenType: string }[] = [];
+
+        let prevLine = 0;
+        let prevChar = 0;
+
+        for (let i = 0; i < data.length; i += 5) {
+            const deltaLine = data[i];
+            const deltaStartChar = data[i + 1];
+            const length = data[i + 2];
+            const tokenTypeIndex = data[i + 3];
+
+            const line = prevLine + deltaLine;
+            const char = deltaLine > 0 ? deltaStartChar : prevChar + deltaStartChar;
+
+            decoded.push({
+                line,
+                char,
+                length,
+                tokenType: tokenLegend.tokenTypes[tokenTypeIndex] ?? `unknown(${tokenTypeIndex})`,
+            });
+
+            prevLine = line;
+            prevChar = char;
+        }
+
+        // For each marker, find the token at that position and assert its type
+        for (const marker of markers) {
+            const name = this.getMarkerName(marker);
+
+            if (!(name in map)) {
+                continue;
+            }
+
+            const expectedType = map[name];
+            const position = this.convertOffsetToPosition(fileName, marker.position);
+
+            const token = decoded.find((t) => t.line === position.line && t.char === position.character);
+
+            assert(
+                token,
+                `${name}: no semantic token found at line ${position.line}, char ${position.character}. ` +
+                    `Decoded tokens: ${JSON.stringify(decoded.filter((t) => t.line === position.line))}`
+            );
+            assert.strictEqual(
+                token.tokenType,
+                expectedType,
+                `${name}: expected token type '${expectedType}' but got '${token.tokenType}' ` +
+                    `at line ${position.line}, char ${position.character}`
+            );
+        }
+    }
+
+    verifySemanticTokensRange(startMarker: string, endMarker: string, map: { [marker: string]: string }) {
+        this.analyze();
+
+        const start = this.getMarkerByName(startMarker);
+        const end = this.getMarkerByName(endMarker);
+        const fileName = start.fileName;
+        const uri = Uri.file(fileName, this.serviceProvider);
+
+        const startPos = this.convertOffsetToPosition(fileName, start.position);
+        const endPos = this.convertOffsetToPosition(fileName, end.position);
+        // Extend end to end of line to include the end marker's token
+        const range: PositionRange = {
+            start: { line: startPos.line, character: 0 },
+            end: { line: endPos.line + 1, character: 0 },
+        };
+
+        const provider = new SemanticTokensProvider(this.program, uri, CancellationToken.None, range);
+        const result = provider.getTokens();
+        assert(result, 'SemanticTokensProvider returned no result for range');
+
+        // Decode
+        const data = result.data;
+        const decoded: { line: number; char: number; length: number; tokenType: string }[] = [];
+        let prevLine = 0;
+        let prevChar = 0;
+
+        for (let i = 0; i < data.length; i += 5) {
+            const deltaLine = data[i];
+            const deltaStartChar = data[i + 1];
+            const length = data[i + 2];
+            const tokenTypeIndex = data[i + 3];
+
+            const line = prevLine + deltaLine;
+            const char = deltaLine > 0 ? deltaStartChar : prevChar + deltaStartChar;
+
+            decoded.push({
+                line,
+                char,
+                length,
+                tokenType: tokenLegend.tokenTypes[tokenTypeIndex] ?? `unknown(${tokenTypeIndex})`,
+            });
+
+            prevLine = line;
+            prevChar = char;
+        }
+
+        // Verify expected tokens are present
+        for (const markerName of Object.keys(map)) {
+            const marker = this.getMarkerByName(markerName);
+            const position = this.convertOffsetToPosition(fileName, marker.position);
+            const expectedType = map[markerName];
+
+            const token = decoded.find((t) => t.line === position.line && t.char === position.character);
+            assert(
+                token,
+                `${markerName}: no semantic token found at line ${position.line}, char ${position.character} in range result`
+            );
+            assert.strictEqual(token.tokenType, expectedType, `${markerName}: expected '${expectedType}' got '${token.tokenType}'`);
+        }
+
+        // Verify no tokens outside the range
+        for (const token of decoded) {
+            assert(
+                token.line >= range.start.line && token.line < range.end.line,
+                `Token at line ${token.line} is outside requested range [${range.start.line}, ${range.end.line})`
+            );
         }
     }
 

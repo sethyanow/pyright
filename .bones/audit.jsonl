@@ -180,3 +180,4 @@
 {"timestamp":"2026-04-09T12:02:11.670778+00:00","actor":"Seth","event_type":"created","task_id":"pyr-tc8","details":{}}
 {"timestamp":"2026-04-09T12:02:15.477957+00:00","actor":"Seth","event_type":"dep_added","task_id":"pyr-mge","details":{"kind":"parent-child","to":"pyr-tc8"}}
 {"timestamp":"2026-04-09T12:02:15.478415+00:00","actor":"Seth","event_type":"dep_added","task_id":"pyr-mge","details":{"kind":"blocks","to":"pyr-tc8"}}
+{"timestamp":"2026-04-09T12:12:21.440797+00:00","actor":"Seth","event_type":"updated","task_id":"pyr-tc8","details":{"status":"active"}}

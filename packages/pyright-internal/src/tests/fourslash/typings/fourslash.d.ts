@@ -352,6 +352,12 @@ declare namespace _ {
                 items: FourSlashTypeHierarchyItem[];
             };
         }): void;
+        verifySemanticTokens(map: { [marker: string]: string }): void;
+        verifySemanticTokensRange(
+            startMarker: string,
+            endMarker: string,
+            map: { [marker: string]: string }
+        ): void;
         verifyHighlightReferences(map: {
             [marker: string]: {
                 references: DocumentHighlight[];

@@ -66,6 +66,9 @@ import {
     RemoteWindow,
     RenameParams,
     ResultProgressReporter,
+    SemanticTokens,
+    SemanticTokensParams,
+    SemanticTokensRangeParams,
     SignatureHelp,
     SignatureHelpParams,
     SymbolInformation,
@@ -118,6 +121,7 @@ import { Uri } from './common/uri/uri';
 import { convertUriToLspUriString } from './common/uri/uriUtils';
 import { AnalyzerServiceExecutor } from './languageService/analyzerServiceExecutor';
 import { CallHierarchyProvider } from './languageService/callHierarchyProvider';
+import { SemanticTokensProvider, tokenLegend } from './languageService/semanticTokensProvider';
 import { TypeHierarchyProvider } from './languageService/typeHierarchyProvider';
 import { CompletionItemData, CompletionProvider } from './languageService/completionProvider';
 import {
@@ -565,6 +569,10 @@ export abstract class LanguageServerBase implements LanguageServerInterface, Dis
         typeHierarchy.onSupertypes(async (params, token) => this.onTypeHierarchySupertypes(params, token));
         typeHierarchy.onSubtypes(async (params, token) => this.onTypeHierarchySubtypes(params, token));
 
+        const semanticTokens = this.connection.languages.semanticTokens;
+        semanticTokens.on(async (params, token) => this.onSemanticTokensFull(params, token));
+        semanticTokens.onRange(async (params, token) => this.onSemanticTokensRange(params, token));
+
         this.connection.onDidOpenTextDocument(async (params) => this.onDidOpenTextDocument(params));
         this.connection.onDidChangeTextDocument(async (params) => this.onDidChangeTextDocument(params));
         this.connection.onDidCloseTextDocument(async (params) => this.onDidCloseTextDocument(params));
@@ -692,6 +700,11 @@ export abstract class LanguageServerBase implements LanguageServerInterface, Dis
                 },
                 callHierarchyProvider: true,
                 typeHierarchyProvider: true,
+                semanticTokensProvider: {
+                    legend: tokenLegend,
+                    full: true,
+                    range: true,
+                },
                 workspace: {
                     workspaceFolders: {
                         supported: true,
@@ -1164,6 +1177,40 @@ export abstract class LanguageServerBase implements LanguageServerInterface, Dis
             provider.onPrepare();
             return provider.getSubtypes();
         }, token);
+    }
+
+    protected async onSemanticTokensFull(
+        params: SemanticTokensParams,
+        token: CancellationToken
+    ): Promise<SemanticTokens> {
+        const emptyResult: SemanticTokens = { data: [] };
+        const uri = this.convertLspUriStringToUri(params.textDocument.uri);
+
+        const workspace = await this.getWorkspaceForFile(uri);
+        if (workspace.disableLanguageServices) {
+            return emptyResult;
+        }
+
+        return workspace.service.run((program) => {
+            return new SemanticTokensProvider(program, uri, token).getTokens() ?? emptyResult;
+        }, token) ?? emptyResult;
+    }
+
+    protected async onSemanticTokensRange(
+        params: SemanticTokensRangeParams,
+        token: CancellationToken
+    ): Promise<SemanticTokens> {
+        const emptyResult: SemanticTokens = { data: [] };
+        const uri = this.convertLspUriStringToUri(params.textDocument.uri);
+
+        const workspace = await this.getWorkspaceForFile(uri);
+        if (workspace.disableLanguageServices) {
+            return emptyResult;
+        }
+
+        return workspace.service.run((program) => {
+            return new SemanticTokensProvider(program, uri, token, params.range).getTokens() ?? emptyResult;
+        }, token) ?? emptyResult;
     }
 
     protected async onDidOpenTextDocument(params: DidOpenTextDocumentParams, ipythonMode = IPythonMode.None) {

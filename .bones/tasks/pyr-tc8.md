@@ -1,11 +1,12 @@
 ---
 id: pyr-tc8
 title: Implement SemanticTokensProvider with full/range support
-status: open
+status: active
 type: task
 priority: 1
 parent: pyr-mge
 ---
+
 
 ## Context
 
@@ -27,7 +28,7 @@ Token types required: class, function, parameter, typeParameter, variable, prope
 A `SemanticTokensProvider` class that:
 1. Takes `ProgramView`, `Uri`, optional `Range`, `CancellationToken`
 2. Gets `ParseFileResults` for the file
-3. Walks all `Name` nodes using `ParseTreeUtils.getNodeIterator` or a recursive walk
+3. Subclasses `ParseTreeWalker` from `analyzer/parseTreeWalker.ts`, overrides `visitName` (and `visitMemberAccess` for `obj.attr` member names). `ParseTreeWalker.walk()` visits nodes in document order via `getChildNodes()`.
 4. For each `Name` node, calls `evaluator.getDeclInfoForNameNode(node)` to resolve its declaration
 5. Maps `DeclarationType` + context to `SemanticTokenTypes`:
    - `DeclarationType.Class` / `SpecialBuiltInClass` → `SemanticTokenTypes.class`
@@ -90,18 +91,59 @@ Register `semanticTokensProvider` capability with legend, wire `on` and `onRange
 - [ ] `textDocument/semanticTokens/full` registered in capabilities, returns token classifications
 - [ ] `textDocument/semanticTokens/range` returns classifications for a given range
 - [ ] Tokens classified by resolved type, not syntax — type-dependent classification test passes
-- [ ] Token types covered: class, function, parameter, typeParameter, variable, property, decorator, method, namespace
+- [ ] Token types covered: class, function, parameter, typeParameter, variable, property, decorator, method, namespace, enum, enumMember
 - [ ] Fourslash tests covering: mixed symbol kinds, type-dependent classification
 - [ ] Full test suite passes
 
 ## Key Considerations
 
-- `ParseTreeUtils.findNodeByOffset` finds deepest node — for token walking, need to visit ALL Name nodes in order. Consider a recursive AST walker or use `ParseTreeUtils.getNodeIterator` if available.
-- `SemanticTokensBuilder.push()` requires tokens in document order (line, character) — walk must be ordered.
-- Decorator detection: check if Name node is inside a `Decorator` parent node, or if the resolved declaration points to a decorator usage.
-- Property vs variable: check if the Name node's enclosing scope is a Class definition.
-- Enum member detection: resolve the containing class type and check if it derives from `enum.Enum`.
+- **AST walker:** Use `ParseTreeWalker` from `analyzer/parseTreeWalker.ts` — subclass it, override `visitName` to process each `NameNode`. `ParseTreeWalker.walk()` recurses via `getChildNodes()` which returns children in source order, satisfying `SemanticTokensBuilder`'s document-order requirement.
+- **MemberAccess names:** `MemberAccessNode.d.member` is a `NameNode`. Override `visitMemberAccess` to return `false` (handle children manually) — process `d.member` as a potential property/method, recurse into `d.leftExpr` normally.
+- **Decorator detection:** When `visitName` fires, check `node.parent?.nodeType === ParseNodeType.Decorator` or check if the parent chain has a `DecoratorNode`. The decorator's `d.expr` can be a `NameNode` (simple decorator) or `MemberAccessNode`/`CallNode` (dotted/called decorator).
+- **Property vs variable:** Use `getEnclosingClass(node)` from `parseTreeUtils.ts` to check if the name is inside a class scope.
+- **Import names:** Names inside `ImportFromAs` and `ImportAs` nodes resolve via `getDeclInfoForNameNode` to `Alias` declarations. Skip import statement names — they get syntax highlighting already and resolving them through aliases adds noise without value. Only classify names at their usage sites.
+- **Enum member detection:** Resolve the containing class type and check if it derives from `enum.Enum`.
+- **`DeclarationType.Intrinsic`:** Maps to `variable` (built-in constants like `None`, `True`, `False`).
+- **Fourslash type declarations:** Add `verifySemanticTokens` to `packages/pyright-internal/src/tests/fourslash/typings/fourslash.d.ts`.
 - The visitor pattern built here is referenced by Phases 4 and 5 — design for reuse but don't over-abstract. If Phases 4/5 need different traversal, they'll build their own.
+
+## Failure Catalog
+
+**Encoding Boundaries: Offset→Position conversion**
+- Assumption: `SemanticTokensBuilder.push(line, char, length, ...)` receives correct 0-based line/character from name node offsets
+- Betrayal: `NameNode.start` is a byte offset, not a line/char pair. If we pass `node.start` directly as `char`, every token after line 0 gets wrong positions and the delta encoding produces garbage
+- Consequence: Editor renders semantic highlights on wrong characters — subtle visual corruption, not a crash
+- Mitigation: Use `convertOffsetToPosition(node.start, parseResults.tokenizerOutput.lines)` to get `{line, character}`. For `length`, use `node.d.value.length` (string length of the identifier text), not `node.length` (which includes surrounding whitespace/decorations in some node types)
+
+**Input Hostility: Empty `decls` array from `getDeclInfoForNameNode`**
+- Assumption: Every resolved `SymbolDeclInfo` has at least one declaration in `decls`
+- Betrayal: `getDeclInfoForNameNode` returns `SymbolDeclInfo` with `decls: []` for names in error recovery regions, or returns `undefined` for unresolvable names
+- Consequence: `decls[0]` is `undefined`, accessing `.type` throws
+- Mitigation: Check `declInfo === undefined || declInfo.decls.length === 0` → skip token. This is a structural guard, not error handling — unresolvable names legitimately have no semantic classification
+
+**Input Hostility: Multiple declarations (overloads, augmented assignments)**
+- Assumption: `decls[0]` is always the right declaration to classify
+- Betrayal: A name with overloaded functions has multiple `DeclarationType.Function` entries. An augmented assignment (`x = 1; x += 2`) has two Variable declarations
+- Consequence: Taking `decls[0]` produces correct classification for overloads (all are Function) but could theoretically produce wrong classification if declaration types differ across entries
+- Mitigation: Use `decls[0]` — this matches what other providers do (definitionProvider, hoverProvider). Multiple decls of the same name have the same classification category. If a name has mixed declaration types (extremely rare — e.g., conditional class-or-function assignment), `decls[0]` is the best guess
+
+**Encoding Boundaries: Delta encoding in test harness**
+- Assumption: Test harness correctly decodes `SemanticTokens.data` (groups of 5: deltaLine, deltaStartChar, length, tokenType, tokenModifiers)
+- Betrayal: `deltaStartChar` is relative to previous token on SAME line, but absolute (relative to line start) for first token on a new line. Off-by-one in accumulation produces cascading position errors — tests fail with "no token at marker"
+- Consequence: False test failures, debugging nightmare
+- Mitigation: Accumulator resets `prevChar = 0` when `deltaLine > 0`. This is the LSP spec behavior — document it in the decoder with a comment
+
+**Input Hostility: Parse-error files**
+- Assumption: `ParseFileResults` contains a complete, well-formed AST
+- Betrayal: Files with syntax errors produce partial ASTs. The walker visits whatever nodes exist. Some subtrees may be `ErrorNode` with child fragments
+- Consequence: Walker may encounter unexpected node shapes, or `getDeclInfoForNameNode` returns undefined more often
+- Mitigation: `ParseTreeWalker` already handles this — `getChildNodes` for `ErrorNode` returns `[node.d.child, ...node.d.decorators]`. Skipping unresolvable names (the empty-decls guard above) handles the rest
+
+**Resource Exhaustion: Large files**
+- Assumption: Walking every name node and calling `getDeclInfoForNameNode` completes in reasonable time
+- Betrayal: A 10,000-line file with thousands of names triggers evaluation for each. If the file hasn't been fully analyzed, this is O(n) evaluator calls
+- Consequence: Semantic tokens request blocks for seconds on first request for a large unevaluated file
+- Mitigation: The evaluator caches results — first call is expensive, subsequent calls are cache hits. The checker already walks every node for diagnostics, so by the time semantic tokens are requested, the evaluator cache is warm. For `/range` requests, we can skip walking nodes outside the range entirely (check `node.start` against range before calling `getDeclInfoForNameNode`)
 
 ## Anti-Patterns
 
