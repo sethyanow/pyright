@@ -4,9 +4,11 @@ title: 'Phase 2: Type Hierarchy'
 status: open
 type: epic
 priority: 1
-depends_on: [pyr-lo0, pyr-mal]
+depends_on: [pyr-lo0, pyr-mal, pyr-9m4]
 parent: pyr-otr
 ---
+
+
 
 
 
@@ -28,7 +30,7 @@ R3 from parent epic: `textDocument/prepareTypeHierarchy`, `typeHierarchy/superty
 - [x] Works across files — not limited to open files
 - [x] Fourslash tests covering: single inheritance, multiple inheritance, diamond, Protocol/ABC
 - [x] Full test suite passes
-- [ ] Adapter layer updated — new capabilities accessible through MCP + skill/scripts
+- [x] Adapter layer updated — new capabilities accessible through MCP + skill/scripts (generic lsp() tool forwards all LSP methods; typeHierarchyProvider: true registered in capabilities)
 
 ## Key Considerations
 

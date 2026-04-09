@@ -13,6 +13,7 @@ parent: pyr-lfw
 
 
 
+
 ## Context
 
 Phase 2 of pyr-otr (Add missing LSP providers). Phase 1 (pyr-lo0) delivered `ImplementationProvider` in `definitionProvider.ts` with workspace traversal using `derivesFromClassRecursive`. This task reuses that pattern for subtypes and adds the supertypes direction.
@@ -167,3 +168,4 @@ Add capability, connection handlers, and handler methods.
 ## Log
 
 - [2026-04-09T00:25:58Z] [Seth] Task scoped from pyr-lfw Phase 2. Codebase verified: connection.languages.typeHierarchy API available, CallHierarchyProvider pattern confirmed, ImplementationProvider workspace traversal pattern confirmed. Key decision: direct-only sub/supertypes since LSP clients recurse.
+- [2026-04-09T01:16:03Z] [Seth] Debrief: Clean implementation following CallHierarchy pattern. onPrepare stores classType for supertypes/subtypes reuse. Direct subclass check via shared.baseClasses + isSameGenericClass. Wired into languageServerBase.ts with 3 handlers. 8 fourslash tests (7 functional + 1 adversarial). Reflections: skeleton had wrong field name (shared.n → shared.baseClasses), caught in SRE. Implicit object in baseClasses is correct Python semantics. Nested inner class subtype detection limited by evaluation ordering. Next: adapter layer task (pyr-lfw criterion 7).
