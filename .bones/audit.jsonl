@@ -196,3 +196,4 @@
 {"timestamp":"2026-04-09T17:16:39.660001+00:00","actor":"Seth","event_type":"dep_added","task_id":"pyr-mge","details":{"kind":"blocks","to":"pyr-xgj"}}
 {"timestamp":"2026-04-09T17:23:43.079077+00:00","actor":"Seth","event_type":"dep_added","task_id":"pyr-db7","details":{"kind":"blocks","to":"pyr-xgj"}}
 {"timestamp":"2026-04-09T17:32:52.689852+00:00","actor":"Seth","event_type":"claimed","task_id":"pyr-xgj","details":{"actor":"Seth"}}
+{"timestamp":"2026-04-09T17:40:58.983174+00:00","actor":"Seth","event_type":"updated","task_id":"pyr-xgj","details":{"status":"closed"}}

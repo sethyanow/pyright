@@ -1,12 +1,13 @@
 ---
 id: pyr-xgj
 title: 'Make pyright-mcp self-contained: webpack bundle + co-located langserver'
-status: active
+status: closed
 type: task
 priority: 1
 owner: Seth
 parent: pyr-mge
 ---
+
 
 
 
@@ -60,13 +61,13 @@ Same pattern in lsp-client.ts lines 133-134.
 
 ## Success Criteria
 
-- [ ] `npm run build:mcp:dev` produces self-contained dist in `packages/pyright-mcp/dist/`
-- [ ] dist contains: `mcp-server.js`, `lsp-client.js`, `pyright-langserver.js`, `vendor.js`, `pyright-internal.js`, `typeshed-fallback/`
-- [ ] MCP server works when invoked from a directory outside the pyright repo (e.g., `cd /tmp && node /Volumes/code/pyright/packages/pyright-mcp/dist/mcp-server.js`)
-- [ ] lsp-client CLI works from outside the pyright repo
-- [ ] `PYRIGHT_LANGSERVER_PATH` env var override works (e.g., `PYRIGHT_LANGSERVER_PATH=/Volumes/code/pyright/packages/pyright/dist/pyright-langserver.js node packages/pyright-mcp/dist/mcp-server.js`)
-- [ ] Existing MCP tests still pass
-- [ ] `npm run typecheck` clean
+- [x] `npm run build:mcp:dev` produces self-contained dist in `packages/pyright-mcp/dist/`
+- [x] dist contains: `mcp-server.js`, `lsp-client.js`, `pyright-langserver.js`, `vendor.js`, `pyright-internal.js`, `typeshed-fallback/`
+- [x] MCP server works when invoked from a directory outside the pyright repo (e.g., `cd /tmp && node /Volumes/code/pyright/packages/pyright-mcp/dist/mcp-server.js`)
+- [x] lsp-client CLI works from outside the pyright repo
+- [x] `PYRIGHT_LANGSERVER_PATH` env var override works (e.g., `PYRIGHT_LANGSERVER_PATH=/Volumes/code/pyright/packages/pyright/dist/pyright-langserver.js node packages/pyright-mcp/dist/mcp-server.js`)
+- [x] Existing MCP tests still pass
+- [x] `npm run typecheck` clean
 
 ## Key Considerations (Failure Catalog)
 
