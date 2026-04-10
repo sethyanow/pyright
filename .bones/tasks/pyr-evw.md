@@ -20,12 +20,12 @@ R5 from parent epic: `textDocument/inlayHint` — show inferred return types, va
 
 ## Success Criteria
 
-- [ ] `textDocument/inlayHint` registered in capabilities, returns InlayHint[]
-- [ ] Inferred return types shown on functions without return annotations
-- [ ] Inferred variable types shown on assignments without annotations
-- [ ] Parameter names shown at call sites
-- [ ] Fourslash tests covering: return type inference, variable type inference, parameter names
-- [ ] Full test suite passes
+- [x] `textDocument/inlayHint` registered in capabilities, returns InlayHint[]
+- [x] Inferred return types shown on functions without return annotations
+- [x] Inferred variable types shown on assignments without annotations
+- [x] Parameter names shown at call sites
+- [x] Fourslash tests covering: return type inference, variable type inference, parameter names
+- [x] Full test suite passes
 - [ ] Adapter layer updated — inlay hints accessible through MCP + skill/scripts
 
 ## Key Considerations

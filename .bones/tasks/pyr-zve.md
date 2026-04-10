@@ -1,12 +1,13 @@
 ---
 id: pyr-zve
 title: Implement inlayHintProvider with return types, variable types, and parameter names
-status: active
+status: closed
 type: task
 priority: 1
 owner: Seth
 parent: pyr-evw
 ---
+
 
 
 
@@ -94,18 +95,18 @@ R5. Write fourslash tests covering all three hint types
 
 ## Success Criteria
 
-- [ ] `InlayHintProvider` class in `languageService/inlayHintProvider.ts`
-- [ ] Return type hints on functions without return annotations
-- [ ] Variable type hints on assignments without type annotations
-- [ ] Parameter name hints at call sites (positional args only)
-- [ ] `inlayHintProvider: true` in server capabilities
-- [ ] `onInlayHint` handler wired in `languageServerBase.ts`
-- [ ] `verifyInlayHints` in fourslash harness
-- [ ] Fourslash tests for all three hint types
-- [ ] Parameter name hints work on constructor calls (ClassType → `__init__` params)
-- [ ] No hints on `@overload` decorated functions or `__init__` return types
-- [ ] Full test suite passes
-- [ ] `npm run typecheck` clean
+- [x] `InlayHintProvider` class in `languageService/inlayHintProvider.ts`
+- [x] Return type hints on functions without return annotations
+- [x] Variable type hints on assignments without type annotations
+- [x] Parameter name hints at call sites (positional args only)
+- [x] `inlayHintProvider: true` in server capabilities
+- [x] `onInlayHint` handler wired in `languageServerBase.ts`
+- [x] `verifyInlayHints` in fourslash harness
+- [x] Fourslash tests for all three hint types
+- [x] Parameter name hints work on constructor calls (ClassType → `__init__` params)
+- [x] No hints on `@overload` decorated functions or `__init__` return types
+- [x] Full test suite passes
+- [x] `npm run typecheck` clean
 
 ## Edge Cases
 

@@ -213,3 +213,4 @@
 {"timestamp":"2026-04-10T03:49:23.885905+00:00","actor":"Seth","event_type":"dep_added","task_id":"pyr-evw","details":{"kind":"parent-child","to":"pyr-zve"}}
 {"timestamp":"2026-04-10T03:49:23.886570+00:00","actor":"Seth","event_type":"dep_added","task_id":"pyr-evw","details":{"kind":"blocks","to":"pyr-zve"}}
 {"timestamp":"2026-04-10T04:12:44.536922+00:00","actor":"Seth","event_type":"claimed","task_id":"pyr-zve","details":{"actor":"Seth"}}
+{"timestamp":"2026-04-10T04:35:18.333711+00:00","actor":"Seth","event_type":"closed","task_id":"pyr-zve","details":{"notes":null}}
