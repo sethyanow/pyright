@@ -1,12 +1,13 @@
 ---
 id: pyr-7ds
 title: Add inlay hint capability to MCP adapter
-status: active
+status: closed
 type: task
 priority: 1
 owner: Seth
 parent: pyr-evw
 ---
+
 
 
 ## Context
