@@ -25,6 +25,8 @@ import {
     TypeHierarchySupertypesParams,
     CodeAction,
     CodeActionParams,
+    CodeLens,
+    CodeLensParams,
     Command,
     CompletionItem,
     CompletionList,
@@ -123,6 +125,7 @@ import { Uri } from './common/uri/uri';
 import { convertUriToLspUriString } from './common/uri/uriUtils';
 import { AnalyzerServiceExecutor } from './languageService/analyzerServiceExecutor';
 import { CallHierarchyProvider } from './languageService/callHierarchyProvider';
+import { CodeLensProvider } from './languageService/codeLensProvider';
 import { InlayHintProvider } from './languageService/inlayHintProvider';
 import { SemanticTokensProvider, tokenLegend } from './languageService/semanticTokensProvider';
 import { TypeHierarchyProvider } from './languageService/typeHierarchyProvider';
@@ -578,6 +581,9 @@ export abstract class LanguageServerBase implements LanguageServerInterface, Dis
 
         this.connection.languages.inlayHint.on(async (params, token) => this.onInlayHint(params, token));
 
+        this.connection.onCodeLens(async (params, token) => this.onCodeLens(params, token));
+        this.connection.onCodeLensResolve(async (params, token) => this.onCodeLensResolve(params, token));
+
         this.connection.onDidOpenTextDocument(async (params) => this.onDidOpenTextDocument(params));
         this.connection.onDidChangeTextDocument(async (params) => this.onDidChangeTextDocument(params));
         this.connection.onDidCloseTextDocument(async (params) => this.onDidCloseTextDocument(params));
@@ -711,6 +717,9 @@ export abstract class LanguageServerBase implements LanguageServerInterface, Dis
                     range: true,
                 },
                 inlayHintProvider: true,
+                codeLensProvider: {
+                    resolveProvider: true,
+                },
                 workspace: {
                     workspaceFolders: {
                         supported: true,
@@ -1230,6 +1239,37 @@ export abstract class LanguageServerBase implements LanguageServerInterface, Dis
         return workspace.service.run((program) => {
             return new InlayHintProvider(program, uri, token).getHints();
         }, token) ?? null;
+    }
+
+    protected async onCodeLens(params: CodeLensParams, token: CancellationToken): Promise<CodeLens[] | null> {
+        const uri = this.convertLspUriStringToUri(params.textDocument.uri);
+
+        const workspace = await this.getWorkspaceForFile(uri);
+        if (workspace.disableLanguageServices) {
+            return null;
+        }
+
+        return workspace.service.run((program) => {
+            return new CodeLensProvider(program, uri, token).getCodeLenses();
+        }, token) ?? null;
+    }
+
+    protected async onCodeLensResolve(lens: CodeLens, token: CancellationToken): Promise<CodeLens> {
+        const data = lens.data;
+        if (!data?.uri) {
+            return lens;
+        }
+
+        const uri = this.convertLspUriStringToUri(data.uri);
+
+        const workspace = await this.getWorkspaceForFile(uri);
+        if (workspace.disableLanguageServices) {
+            return lens;
+        }
+
+        return workspace.service.run((program) => {
+            return new CodeLensProvider(program, uri, token).resolveCodeLens(lens);
+        }, token) ?? lens;
     }
 
     protected async onDidOpenTextDocument(params: DidOpenTextDocumentParams, ipythonMode = IPythonMode.None) {

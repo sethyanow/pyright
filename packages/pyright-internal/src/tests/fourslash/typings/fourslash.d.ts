@@ -364,6 +364,12 @@ declare namespace _ {
                 kind: 'type' | 'parameter';
             };
         }): void;
+        verifyCodeLens(map: {
+            [marker: string]: {
+                title: string;
+                kind: 'references' | 'implementations';
+            };
+        }): void;
         verifyHighlightReferences(map: {
             [marker: string]: {
                 references: DocumentHighlight[];

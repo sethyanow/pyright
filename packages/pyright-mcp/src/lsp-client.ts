@@ -59,6 +59,9 @@ export async function queryLsp(
                     inlayHint: {
                         dynamicRegistration: false,
                     },
+                    codeLens: {
+                        dynamicRegistration: false,
+                    },
                 },
                 workspace: {
                     symbol: { dynamicRegistration: false },

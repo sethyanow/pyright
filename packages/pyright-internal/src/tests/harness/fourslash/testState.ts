@@ -60,6 +60,7 @@ import { Uri } from '../../../common/uri/uri';
 import { UriEx, getFileSpec } from '../../../common/uri/uriUtils';
 import { convertToWorkspaceEdit } from '../../../common/workspaceEditUtils';
 import { CallHierarchyProvider } from '../../../languageService/callHierarchyProvider';
+import { CodeLensProvider } from '../../../languageService/codeLensProvider';
 import { InlayHintProvider } from '../../../languageService/inlayHintProvider';
 import { SemanticTokensProvider, tokenLegend } from '../../../languageService/semanticTokensProvider';
 import { TypeHierarchyProvider } from '../../../languageService/typeHierarchyProvider';
@@ -1758,6 +1759,47 @@ export class TestState {
                 hint.kind,
                 expectedKind,
                 `${markerName}: expected kind '${expected.kind}' but got '${hint.kind === InlayHintKind.Type ? 'type' : 'parameter'}'`
+            );
+        }
+    }
+
+    verifyCodeLens(map: { [marker: string]: { title: string; kind: 'references' | 'implementations' } }) {
+        this.analyze();
+
+        const markers = this.getMarkers();
+        assert(markers.length > 0, 'No markers found');
+
+        const fileName = markers[0].fileName;
+        const uri = Uri.file(fileName, this.serviceProvider);
+
+        const provider = new CodeLensProvider(this.program, uri, CancellationToken.None);
+        const lenses = provider.getCodeLenses();
+
+        for (const markerName of Object.keys(map)) {
+            const marker = this.getMarkerByName(markerName);
+            const position = this.convertOffsetToPosition(fileName, marker.position);
+            const expected = map[markerName];
+
+            // Find lenses matching this position and kind
+            const lens = lenses.find(
+                (l) =>
+                    l.range.start.line === position.line &&
+                    l.range.start.character === position.character &&
+                    l.data?.kind === expected.kind
+            );
+
+            assert(
+                lens,
+                `${markerName}: no code lens (kind=${expected.kind}) found at line ${position.line}, char ${position.character}. ` +
+                    `Available lenses: ${JSON.stringify(lenses.map((l) => ({ range: l.range.start, data: l.data })))}`
+            );
+
+            const resolved = provider.resolveCodeLens(lens);
+            assert(resolved.command, `${markerName}: resolved lens has no command`);
+            assert.strictEqual(
+                resolved.command.title,
+                expected.title,
+                `${markerName}: expected title '${expected.title}' but got '${resolved.command.title}'`
             );
         }
     }

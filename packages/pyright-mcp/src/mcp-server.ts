@@ -96,6 +96,9 @@ export async function createMcpServer(langserverPath: string, workspaceRoot: str
                                 inlayHint: {
                                     dynamicRegistration: false,
                                 },
+                                codeLens: {
+                                    dynamicRegistration: false,
+                                },
                             },
                             workspace: {
                                 symbol: {
