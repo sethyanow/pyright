@@ -1,19 +1,12 @@
 ---
 id: pyr-db7
 title: 'Phase 3 Acceptance: Semantic Tokens'
-status: closed
+status: open
 type: task
 priority: 1
-owner: Seth
 depends_on: [pyr-xgj]
 parent: pyr-mge
 ---
-
-
-
-
-
-
 
 
 
@@ -41,11 +34,7 @@ Update stale docs only — no new summaries or tutorials needed. Check if any ex
 
 ## Success Criteria
 
-- [x] Demo executed showing all token types (class, function, parameter, typeParameter, variable, property, decorator, method, namespace)
-- [x] Range request demonstrated returning subset
-- [x] Type-dependent classification demonstrated
-- [x] No stale docs claiming semantic tokens are missing
-
-## Log
-
-- [2026-04-09T22:14:54Z] [Seth] Acceptance complete. Demo: semanticTokens/full on sample.py returned 33 decoded tokens (class, method, parameter, function, decorator). Range request on lines 18-20 returned 9 tokens (subset). Fourslash tests (4 files) cover all token types including type-dependent classification. No stale docs found. Sub-epic pyr-mge closed, unblocking pyr-evw (Phase 4: Inlay Hints).
+- [ ] Demo executed showing all token types (class, function, parameter, typeParameter, variable, property, decorator, method, namespace)
+- [ ] Range request demonstrated returning subset
+- [ ] Type-dependent classification demonstrated
+- [ ] No stale docs claiming semantic tokens are missing
