@@ -234,3 +234,7 @@
 {"timestamp":"2026-04-10T17:03:31.600518+00:00","actor":"Seth","event_type":"logged","task_id":"pyr-9uz","details":{"message":"Acceptance PASSED on re-try. Both lsp-client CLI and MCP lsp() tool return all three hint types: return type (kind 1) on multiply, variable type (kind 1) on result/product, parameter names (kind 2) on both call sites. didOpen fix (pyr-qqb) resolved the prior failure."}}
 {"timestamp":"2026-04-10T17:03:46.892253+00:00","actor":"Seth","event_type":"updated","task_id":"pyr-9uz","details":{"status":"closed"}}
 {"timestamp":"2026-04-10T17:04:09.156054+00:00","actor":"Seth","event_type":"updated","task_id":"pyr-evw","details":{"status":"closed"}}
+{"timestamp":"2026-04-10T17:05:06.418649+00:00","actor":"Seth","event_type":"logged","task_id":"pyr-evw","details":{"message":"Phase 4 closed. All children (pyr-zve, pyr-7ds, pyr-qqb, pyr-9uz) closed. 7/7 criteria met. Acceptance demo showed all three hint types via both CLI and MCP. Next: Phase 5 (pyr-yh8, Code Lens) is unblocked."}}
+{"timestamp":"2026-04-10T17:10:01.361764+00:00","actor":"Seth","event_type":"created","task_id":"pyr-onu","details":{}}
+{"timestamp":"2026-04-10T17:10:05.810771+00:00","actor":"Seth","event_type":"dep_added","task_id":"pyr-yh8","details":{"kind":"parent-child","to":"pyr-onu"}}
+{"timestamp":"2026-04-10T17:10:05.811160+00:00","actor":"Seth","event_type":"dep_added","task_id":"pyr-yh8","details":{"kind":"blocks","to":"pyr-onu"}}

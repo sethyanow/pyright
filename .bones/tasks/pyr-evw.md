@@ -15,6 +15,7 @@ parent: pyr-otr
 
 
 
+
 ## Context
 
 Phase 4 of pyr-otr. Depends on Phase 3's file-walking visitor pattern that resolves nodes through the evaluator. Reuses the visitor to emit hints at specific positions instead of classifying tokens.
@@ -46,3 +47,7 @@ R5 from parent epic: `textDocument/inlayHint` — show inferred return types, va
 ## Demo
 
 Show me inlay hints on a Python file — inferred return types, variable types, parameter names at call sites.
+
+## Log
+
+- [2026-04-10T17:05:06Z] [Seth] Phase 4 closed. All children (pyr-zve, pyr-7ds, pyr-qqb, pyr-9uz) closed. 7/7 criteria met. Acceptance demo showed all three hint types via both CLI and MCP. Next: Phase 5 (pyr-yh8, Code Lens) is unblocked.
