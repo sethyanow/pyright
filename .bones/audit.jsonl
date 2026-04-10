@@ -224,3 +224,7 @@
 {"timestamp":"2026-04-10T12:29:29.863943+00:00","actor":"Seth","event_type":"created","task_id":"pyr-9uz","details":{}}
 {"timestamp":"2026-04-10T12:29:34.191652+00:00","actor":"Seth","event_type":"dep_added","task_id":"pyr-evw","details":{"kind":"parent-child","to":"pyr-9uz"}}
 {"timestamp":"2026-04-10T12:29:34.192068+00:00","actor":"Seth","event_type":"dep_added","task_id":"pyr-evw","details":{"kind":"blocks","to":"pyr-9uz"}}
+{"timestamp":"2026-04-10T12:47:25.499127+00:00","actor":"Seth","event_type":"claimed","task_id":"pyr-9uz","details":{"actor":"Seth"}}
+{"timestamp":"2026-04-10T15:27:46.645976+00:00","actor":"Seth","event_type":"created","task_id":"pyr-qqb","details":{}}
+{"timestamp":"2026-04-10T15:28:40.934043+00:00","actor":"Seth","event_type":"dep_added","task_id":"pyr-9uz","details":{"kind":"blocks","to":"pyr-qqb"}}
+{"timestamp":"2026-04-10T15:29:58.260925+00:00","actor":"Seth","event_type":"logged","task_id":"pyr-9uz","details":{"message":"Acceptance FAILED. Return type hints (kind 1 on function defs) don't appear in MCP/CLI demo — adapter doesn't send didOpen so Pyright never fully type-checks the file. Provider logic is correct (fourslash 4/4 pass). Created pyr-qqb to fix adapter warmup. Acceptance blocked until pyr-qqb lands and re-demo shows all three hint types."}}

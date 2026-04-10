@@ -1,11 +1,16 @@
 ---
 id: pyr-9uz
 title: 'Phase 4 Acceptance: Inlay Hints'
-status: open
+status: active
 type: task
 priority: 1
+owner: Seth
+depends_on: [pyr-qqb]
 parent: pyr-evw
 ---
+
+
+
 
 
 
@@ -32,3 +37,7 @@ Update stale docs only — no new summaries or tutorials.
 
 - [ ] User demo presented in conversation
 - [ ] User closes this task
+
+## Log
+
+- [2026-04-10T15:29:58Z] [Seth] Acceptance FAILED. Return type hints (kind 1 on function defs) don't appear in MCP/CLI demo — adapter doesn't send didOpen so Pyright never fully type-checks the file. Provider logic is correct (fourslash 4/4 pass). Created pyr-qqb to fix adapter warmup. Acceptance blocked until pyr-qqb lands and re-demo shows all three hint types.
