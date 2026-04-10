@@ -1,11 +1,13 @@
 ---
 id: pyr-oaf
 title: 'Semantic tokens: classify module references as namespace'
-status: open
+status: active
 type: bug
 priority: 1
+owner: Seth
 parent: pyr-mge
 ---
+
 
 
 

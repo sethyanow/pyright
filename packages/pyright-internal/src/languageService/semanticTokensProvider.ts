@@ -17,7 +17,7 @@ import { DeclarationType } from '../analyzer/declaration';
 import * as ParseTreeUtils from '../analyzer/parseTreeUtils';
 import { ParseTreeWalker } from '../analyzer/parseTreeWalker';
 import { TypeEvaluator } from '../analyzer/typeEvaluatorTypes';
-import { ClassType, isClass } from '../analyzer/types';
+import { ClassType, isClass, isModule } from '../analyzer/types';
 import { throwIfCancellationRequested } from '../common/cancellationUtils';
 import { ProgramView } from '../common/extensibility';
 import { convertOffsetToPosition } from '../common/positionUtils';
@@ -144,8 +144,15 @@ class SemanticTokenWalker extends ParseTreeWalker {
 
         let decl = declInfo.decls[0];
 
-        // Resolve alias declarations to their actual target
+        // Module references (e.g. `os` in `os.path.join`) should be classified
+        // as namespace. Check the type before alias resolution since modules
+        // don't have a DeclarationType — they're always reached through aliases.
         if (decl.type === DeclarationType.Alias) {
+            const type = this._evaluator.getType(node);
+            if (type && isModule(type)) {
+                return SemanticTokenTypes.namespace;
+            }
+
             const resolved = this._evaluator.resolveAliasDeclaration(decl, /* resolveLocalNames */ true);
             if (resolved) {
                 decl = resolved;

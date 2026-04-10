@@ -203,3 +203,4 @@
 {"timestamp":"2026-04-10T02:35:01.933996+00:00","actor":"Seth","event_type":"dep_added","task_id":"pyr-mge","details":{"kind":"parent-child","to":"pyr-oaf"}}
 {"timestamp":"2026-04-10T02:35:01.934733+00:00","actor":"Seth","event_type":"dep_added","task_id":"pyr-mge","details":{"kind":"blocks","to":"pyr-oaf"}}
 {"timestamp":"2026-04-10T02:35:35.114213+00:00","actor":"Seth","event_type":"dep_added","task_id":"pyr-db7","details":{"kind":"blocks","to":"pyr-oaf"}}
+{"timestamp":"2026-04-10T02:36:29.547292+00:00","actor":"Seth","event_type":"claimed","task_id":"pyr-oaf","details":{"actor":"Seth"}}
