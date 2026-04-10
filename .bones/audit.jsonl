@@ -214,3 +214,7 @@
 {"timestamp":"2026-04-10T03:49:23.886570+00:00","actor":"Seth","event_type":"dep_added","task_id":"pyr-evw","details":{"kind":"blocks","to":"pyr-zve"}}
 {"timestamp":"2026-04-10T04:12:44.536922+00:00","actor":"Seth","event_type":"claimed","task_id":"pyr-zve","details":{"actor":"Seth"}}
 {"timestamp":"2026-04-10T04:35:18.333711+00:00","actor":"Seth","event_type":"closed","task_id":"pyr-zve","details":{"notes":null}}
+{"timestamp":"2026-04-10T04:36:12.871261+00:00","actor":"Seth","event_type":"logged","task_id":"pyr-zve","details":{"message":"Completed. Created inlayHintProvider.ts with 3 hint types (return type, variable type, parameter name). Wired in languageServerBase.ts. 4 fourslash tests (3 functional + 1 adversarial). Key discovery: FunctionType.isInstanceMethod() returns true for regular functions — used methodClass/strippedFirstParamType for self/cls detection instead. Constructor calls resolved via lookUpClassMember + getEffectiveTypeOfSymbol. All 2379 tests pass, typecheck clean."}}
+{"timestamp":"2026-04-10T04:37:27.382323+00:00","actor":"Seth","event_type":"created","task_id":"pyr-7ds","details":{}}
+{"timestamp":"2026-04-10T04:37:33.987102+00:00","actor":"Seth","event_type":"dep_added","task_id":"pyr-evw","details":{"kind":"parent-child","to":"pyr-7ds"}}
+{"timestamp":"2026-04-10T04:37:33.987572+00:00","actor":"Seth","event_type":"dep_added","task_id":"pyr-evw","details":{"kind":"blocks","to":"pyr-7ds"}}

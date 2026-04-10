@@ -12,6 +12,7 @@ parent: pyr-evw
 
 
 
+
 ## Context
 
 Phase 4 of pyr-otr (R5). Follows the same provider pattern as Phase 3's semantic tokens: provider class in `languageService/`, wired into `languageServerBase.ts`, tested via fourslash.
@@ -141,3 +142,7 @@ R5. Write fourslash tests covering all three hint types
 - Do NOT emit hints for annotated functions/variables — only where type is inferred
 - Do NOT emit parameter name hints for keyword arguments — they're already named
 - Do NOT add hints for `self`/`cls` parameters
+
+## Log
+
+- [2026-04-10T04:36:12Z] [Seth] Completed. Created inlayHintProvider.ts with 3 hint types (return type, variable type, parameter name). Wired in languageServerBase.ts. 4 fourslash tests (3 functional + 1 adversarial). Key discovery: FunctionType.isInstanceMethod() returns true for regular functions — used methodClass/strippedFirstParamType for self/cls detection instead. Constructor calls resolved via lookUpClassMember + getEffectiveTypeOfSymbol. All 2379 tests pass, typecheck clean.
