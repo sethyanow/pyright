@@ -18,3 +18,11 @@ class SpanishGreeter(Greeter):
 
 def say_hello(greeter: Greeter, name: str) -> str:
     return greeter.greet(name)
+
+
+# Unannotated code for inlay hint testing
+def add(x, y):
+    return x + y
+
+
+result = add(1, 2)

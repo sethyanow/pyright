@@ -55,6 +55,9 @@ export async function queryLsp(
                         tokenTypes: [],
                         tokenModifiers: [],
                     },
+                    inlayHint: {
+                        dynamicRegistration: false,
+                    },
                 },
                 workspace: {
                     symbol: { dynamicRegistration: false },

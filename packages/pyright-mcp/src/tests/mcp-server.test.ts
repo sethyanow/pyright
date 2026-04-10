@@ -194,6 +194,43 @@ describe('pyright MCP server', () => {
         }
     }, 30_000);
 
+    it('returns inlay hints for unannotated code via textDocument/inlayHint', async () => {
+        const sampleUri = `file://${path.resolve(FIXTURES_DIR, 'sample.py')}`;
+        // Request hints for the unannotated section (lines 22-26: add function + result variable)
+        const result = await client.callTool({
+            name: 'lsp',
+            arguments: {
+                method: 'textDocument/inlayHint',
+                params: {
+                    textDocument: { uri: sampleUri },
+                    range: {
+                        start: { line: 22, character: 0 },
+                        end: { line: 27, character: 0 },
+                    },
+                },
+            },
+        });
+        expect(result.isError).not.toBe(true);
+        const content = result.content as Array<{ type: string; text: string }>;
+        const hints = JSON.parse(content[0].text);
+        expect(Array.isArray(hints)).toBe(true);
+        expect(hints.length).toBeGreaterThan(0);
+        // Each hint should have position, label, and kind
+        for (const hint of hints) {
+            expect(hint).toHaveProperty('position');
+            expect(hint.position).toHaveProperty('line');
+            expect(hint.position).toHaveProperty('character');
+            expect(hint).toHaveProperty('label');
+            expect(hint).toHaveProperty('kind');
+        }
+        // Should have Type hints (kind 1) for return type or variable type
+        const typeHints = hints.filter((h: { kind: number }) => h.kind === 1);
+        expect(typeHints.length).toBeGreaterThanOrEqual(1);
+        // Should have Parameter hints (kind 2) for call site parameter names
+        const paramHints = hints.filter((h: { kind: number }) => h.kind === 2);
+        expect(paramHints.length).toBeGreaterThanOrEqual(1);
+    }, 30_000);
+
     it('returns error for unsupported method', async () => {
         const result = await client.callTool({
             name: 'lsp',

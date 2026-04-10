@@ -28,7 +28,7 @@ R5 from parent epic: `textDocument/inlayHint` — show inferred return types, va
 - [x] Parameter names shown at call sites
 - [x] Fourslash tests covering: return type inference, variable type inference, parameter names
 - [x] Full test suite passes
-- [ ] Adapter layer updated — inlay hints accessible through MCP + skill/scripts
+- [x] Adapter layer updated — inlay hints accessible through MCP + skill/scripts
 
 ## Key Considerations
 

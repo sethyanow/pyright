@@ -218,3 +218,4 @@
 {"timestamp":"2026-04-10T04:37:27.382323+00:00","actor":"Seth","event_type":"created","task_id":"pyr-7ds","details":{}}
 {"timestamp":"2026-04-10T04:37:33.987102+00:00","actor":"Seth","event_type":"dep_added","task_id":"pyr-evw","details":{"kind":"parent-child","to":"pyr-7ds"}}
 {"timestamp":"2026-04-10T04:37:33.987572+00:00","actor":"Seth","event_type":"dep_added","task_id":"pyr-evw","details":{"kind":"blocks","to":"pyr-7ds"}}
+{"timestamp":"2026-04-10T04:47:46.685741+00:00","actor":"Seth","event_type":"claimed","task_id":"pyr-7ds","details":{"actor":"Seth"}}
