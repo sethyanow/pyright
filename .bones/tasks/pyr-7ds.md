@@ -10,6 +10,7 @@ parent: pyr-evw
 
 
 
+
 ## Context
 
 Phase 4 adapter wiring. The MCP adapter (`packages/pyright-mcp/src/mcp-server.ts`) exposes a generic `lsp()` tool that sends any LSP request to Pyright. The adapter must declare `inlayHint` in its client capabilities during initialization, or Pyright won't register the `inlayHintProvider` capability (LSP client capability gating).
@@ -88,3 +89,7 @@ R3. Verify `textDocument/inlayHint` works through the `lsp-client.ts` CLI path
 
 - Do NOT add a separate MCP tool for inlay hints — the generic `lsp()` tool handles it
 - Do NOT add client-side hint decoding — hints are JSON-friendly unlike semantic tokens
+
+## Log
+
+- [2026-04-10T12:29:23Z] [Seth] Completed. Added inlayHint capability to both mcp-server.ts and lsp-client.ts. Integration tests pass in both paths. Key finding: raw JSON-RPC passthrough works without capability declarations — added for LSP spec compliance. User corrected rabbit-hole into vscode-languageserver internals. All 7 success criteria met.
