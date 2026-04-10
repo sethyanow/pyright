@@ -20,13 +20,13 @@ R6 from parent epic: `textDocument/codeLens` — show reference counts and imple
 
 ## Success Criteria
 
-- [ ] `textDocument/codeLens` registered in capabilities, returns CodeLens[]
-- [ ] Reference counts shown on classes and functions
-- [ ] Implementation counts shown on Protocols/ABCs/base classes
-- [ ] Counts are live — adding a reference updates the count
-- [ ] Fourslash tests covering: reference counts, implementation counts, count updates
-- [ ] Full test suite passes
-- [ ] Adapter layer updated — code lens accessible through MCP + skill/scripts
+- [x] `textDocument/codeLens` registered in capabilities, returns CodeLens[]
+- [x] Reference counts shown on classes and functions
+- [x] Implementation counts shown on Protocols/ABCs/base classes
+- [x] Counts are live — adding a reference updates the count
+- [x] Fourslash tests covering: reference counts, implementation counts, count updates
+- [x] Full test suite passes
+- [x] Adapter layer updated — code lens accessible through MCP + skill/scripts
 
 ## Key Considerations
 

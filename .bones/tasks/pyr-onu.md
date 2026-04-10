@@ -1,12 +1,13 @@
 ---
 id: pyr-onu
 title: Implement Code Lens provider with reference and implementation counts
-status: active
+status: closed
 type: task
 priority: 1
 owner: Seth
 parent: pyr-yh8
 ---
+
 
 
 
@@ -95,14 +96,14 @@ Create `src/tests/fourslash/codeLens.adversarial.fourslash.ts`. Multi-file fixtu
 
 ## Success Criteria
 
-- [ ] `codeLensProvider.ts` created with `getCodeLenses()` and `resolveCodeLens()`
-- [ ] `textDocument/codeLens` and `codeLens/resolve` wired in languageServerBase.ts with capability registration
-- [ ] Fourslash test: reference counts on class and function definitions
-- [ ] Fourslash test: implementation counts on Protocol/ABC
-- [ ] Fourslash test: cross-file reference counts are correct (adversarial — live workspace query, not single-file)
-- [ ] `npm run typecheck` clean
-- [ ] Full test suite passes
-- [ ] Adapter updated with codeLens client capability in both lsp-client.ts and mcp-server.ts
+- [x] `codeLensProvider.ts` created with `getCodeLenses()` and `resolveCodeLens()`
+- [x] `textDocument/codeLens` and `codeLens/resolve` wired in languageServerBase.ts with capability registration
+- [x] Fourslash test: reference counts on class and function definitions
+- [x] Fourslash test: implementation counts on Protocol/ABC
+- [x] Fourslash test: cross-file reference counts are correct (adversarial — live workspace query, not single-file)
+- [x] `npm run typecheck` clean
+- [x] Full test suite passes
+- [x] Adapter updated with codeLens client capability in both lsp-client.ts and mcp-server.ts
 
 ## Key Considerations
 
