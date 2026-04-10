@@ -13,6 +13,7 @@ parent: pyr-mge
 
 
 
+
 ## Context
 
 Phase 3 acceptance shakedown found that pyright-mcp doesn't work from other codebases. The MCP server has two problems:
@@ -103,3 +104,7 @@ Same pattern in lsp-client.ts lines 133-134.
 - Don't duplicate the webpack shared lib — import from `build/lib/webpack` like the other packages
 - Don't hardcode any absolute paths in source — only `__dirname`-relative and env var override
 - Don't add pyright-internal as a dependency — the MCP server doesn't import it, it spawns the langserver as a child process
+
+## Log
+
+- [2026-04-09T17:42:06Z] [Seth] Debrief: Webpack bundle + path fix complete. tsconfigResolveAliases incompatibility discovered (no paths in pyright-mcp tsconfig) — dropped import, used only cacheConfig + monorepoResourceNameMapper. Reflections: skeleton was accurate, only SRE gaps were webpack-cli devDep and the tsconfigResolveAliases issue. No corrections from user. resolveLangserverPath extracted as shared module with tests.
