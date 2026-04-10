@@ -11,6 +11,7 @@ parent: pyr-evw
 
 
 
+
 ## Context
 
 Both `lsp-client.ts` and `mcp-server.ts` warm up by polling `workspace/symbol` until results appear. This proves files are parsed and bound, but does NOT trigger full type checking. Document-level providers (`textDocument/inlayHint`, `textDocument/semanticTokens/*`, etc.) that call `evaluator.getType()` get `Unknown` for symbols Pyright hasn't fully evaluated yet.
@@ -103,3 +104,7 @@ Process dies after the query. No cleanup required.
 - Betrayal: Pyright logs error on duplicate opens (`languageServerBase.ts:1240`) — functional but noisy
 - Consequence: Pyright logs fill with redundant open errors
 - Mitigation: Track opened URIs in `Set<string>`. Check before sending. Cheap and prevents log noise.
+
+## Log
+
+- [2026-04-10T16:16:20Z] [Seth] Debrief: Root cause was missing didOpen — Pyright only parses/binds without it, type evaluator skips return type inference. Fix: send didOpen before textDocument/* queries in both lsp-client.ts and mcp-server.ts. 500ms delay needed in mcp-server for background analysis. Reflections: Main surprise was 0-indexed line numbers — wasted cycles debugging a correct fix because test assertion used 1-indexed line 28 instead of 0-indexed line 27. Skeleton was accurate on root cause but specified wrong line number. New memory: LSP 0-indexed positions reference.
