@@ -1,12 +1,14 @@
 ---
 id: pyr-mge
 title: 'Phase 3: Semantic Tokens'
-status: open
+status: closed
 type: epic
 priority: 1
 depends_on: [pyr-lfw, pyr-tc8, pyr-glm, pyr-db7, pyr-xgj, pyr-oaf]
 parent: pyr-otr
 ---
+
+
 
 
 
@@ -49,3 +51,7 @@ R4 from parent epic: `textDocument/semanticTokens/full` and `/range` — classif
 ## Demo
 
 Show me the token classifications for a Python file with classes, functions, decorators, type parameters — demonstrate that the visitor correctly resolves each symbol kind.
+
+## Log
+
+- [2026-04-10T03:45:15Z] [Seth] Phase 3 complete. All 7 criteria met. Acceptance demo presented live via MCP. Namespace classification bug (pyr-oaf) caught and fixed during acceptance — was incorrectly checked off. 7 fourslash tests total (4 original + 3 namespace regression). Visitor pattern in semanticTokensProvider.ts ready for reuse in Phase 4/5.

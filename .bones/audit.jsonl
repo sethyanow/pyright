@@ -205,3 +205,10 @@
 {"timestamp":"2026-04-10T02:35:35.114213+00:00","actor":"Seth","event_type":"dep_added","task_id":"pyr-db7","details":{"kind":"blocks","to":"pyr-oaf"}}
 {"timestamp":"2026-04-10T02:36:29.547292+00:00","actor":"Seth","event_type":"claimed","task_id":"pyr-oaf","details":{"actor":"Seth"}}
 {"timestamp":"2026-04-10T03:27:19.179741+00:00","actor":"Seth","event_type":"closed","task_id":"pyr-oaf","details":{"notes":null}}
+{"timestamp":"2026-04-10T03:44:31.074397+00:00","actor":"Seth","event_type":"closed","task_id":"pyr-db7","details":{"notes":null}}
+{"timestamp":"2026-04-10T03:44:31.128839+00:00","actor":"Seth","event_type":"closed","task_id":"pyr-mge","details":{"notes":null}}
+{"timestamp":"2026-04-10T03:45:15.037863+00:00","actor":"Seth","event_type":"logged","task_id":"pyr-db7","details":{"message":"Acceptance passed. Demo showed all 10 token types via MCP lsp tool on demo_tokens.py. Namespace gap caught by SRE, fixed in pyr-oaf (4-line isModule check). Range request and type-dependent classification verified. Stale docs noted (README/installation.md list semantic tokens as Pylance-only) but not modified — upstream docs on personal fork."}}
+{"timestamp":"2026-04-10T03:45:15.228409+00:00","actor":"Seth","event_type":"logged","task_id":"pyr-mge","details":{"message":"Phase 3 complete. All 7 criteria met. Acceptance demo presented live via MCP. Namespace classification bug (pyr-oaf) caught and fixed during acceptance — was incorrectly checked off. 7 fourslash tests total (4 original + 3 namespace regression). Visitor pattern in semanticTokensProvider.ts ready for reuse in Phase 4/5."}}
+{"timestamp":"2026-04-10T03:48:41.026087+00:00","actor":"Seth","event_type":"created","task_id":"pyr-zve","details":{}}
+{"timestamp":"2026-04-10T03:49:23.885905+00:00","actor":"Seth","event_type":"dep_added","task_id":"pyr-evw","details":{"kind":"parent-child","to":"pyr-zve"}}
+{"timestamp":"2026-04-10T03:49:23.886570+00:00","actor":"Seth","event_type":"dep_added","task_id":"pyr-evw","details":{"kind":"blocks","to":"pyr-zve"}}
