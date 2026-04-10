@@ -12,6 +12,7 @@ parent: pyr-yh8
 
 
 
+
 ## Context
 
 Phase 5 of pyr-otr, first task under pyr-yh8 (Code Lens sub-epic). No codeLens code exists anywhere in pyright-internal — greenfield. The LSP protocol has a two-phase model: `textDocument/codeLens` returns CodeLens[] with ranges (fast), `codeLens/resolve` fills in the command (expensive, called per-lens as user scrolls).
@@ -144,3 +145,7 @@ Create `src/tests/fourslash/codeLens.adversarial.fourslash.ts`. Multi-file fixtu
 - **Don't hardcode or cache counts.** Every resolve call must query ReferencesProvider/ImplementationProvider fresh. The adversarial test enforces this.
 - **Don't walk the AST manually for symbol enumeration.** Use `SymbolIndexer.indexSymbols()` or `DocumentSymbolProvider.getSymbols()` — they already handle the symbol hierarchy. Note: `getHierarchicalSymbols()` is protected.
 - **Don't put resolve logic in getCodeLenses.** The two-phase model exists for performance — getCodeLenses returns ranges fast, resolve fills in counts lazily.
+
+## Log
+
+- [2026-04-10T17:45:21Z] [Seth] Debrief: Clean implementation — SRE caught 3 wrong constructor signatures (DocumentSymbolProvider, ReferencesProvider, handler API). All 4 fourslash tests GREEN on first try. Used old-style connection.onCodeLens() API, not connection.languages.codeLens. Reflections: No surprises during implementation. SRE was critical — skeleton inaccuracies would have been compile errors. All sub-epic criteria met.
