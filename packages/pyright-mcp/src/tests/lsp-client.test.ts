@@ -55,31 +55,32 @@ describe('queryLsp', () => {
         expect(classTokens.length).toBeGreaterThanOrEqual(3);
     }, 30_000);
 
-    it('returns inlay hints for unannotated code via textDocument/inlayHint', async () => {
+    it('returns inlay hints including return type on multiply def', async () => {
         const sampleUri = `file://${path.resolve(FIXTURES_DIR, 'sample.py')}`;
         const result = await queryLsp(LANGSERVER_PATH, FIXTURES_DIR, 'textDocument/inlayHint', {
             textDocument: { uri: sampleUri },
             range: {
                 start: { line: 22, character: 0 },
-                end: { line: 27, character: 0 },
+                end: { line: 34, character: 0 },
             },
         });
         expect(Array.isArray(result)).toBe(true);
-        const hints = result as Array<{ position: { line: number; character: number }; label: string; kind: number }>;
+        const hints = result as Array<{
+            position: { line: number; character: number };
+            label: string;
+            kind: number;
+        }>;
         expect(hints.length).toBeGreaterThan(0);
-        // Each hint should have position, label, and kind
-        for (const hint of hints) {
-            expect(hint).toHaveProperty('position');
-            expect(hint.position).toHaveProperty('line');
-            expect(hint.position).toHaveProperty('character');
-            expect(hint).toHaveProperty('label');
-            expect(hint).toHaveProperty('kind');
-        }
-        // Should have Type hints (kind 1) for return type or variable type
-        const typeHints = hints.filter(h => h.kind === 1);
-        expect(typeHints.length).toBeGreaterThanOrEqual(1);
-        // Should have Parameter hints (kind 2) for call site parameter names
-        const paramHints = hints.filter(h => h.kind === 2);
+
+        // Must have a return type hint (kind 1) on the multiply function def (line 27, 0-indexed)
+        const multiplyReturnHint = hints.find(
+            (h) => h.kind === 1 && h.position.line === 27
+        );
+        expect(multiplyReturnHint).toBeDefined();
+        expect(multiplyReturnHint!.label).toContain('int');
+
+        // Should also have parameter hints (kind 2) at call sites
+        const paramHints = hints.filter((h) => h.kind === 2);
         expect(paramHints.length).toBeGreaterThanOrEqual(1);
     }, 30_000);
 

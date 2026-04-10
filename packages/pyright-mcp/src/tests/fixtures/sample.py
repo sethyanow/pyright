@@ -25,4 +25,9 @@ def add(x, y):
     return x + y
 
 
+def multiply(x: int, y: int):
+    return x * y
+
+
 result = add(1, 2)
+product = multiply(3, 4)

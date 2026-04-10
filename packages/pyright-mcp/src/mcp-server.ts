@@ -1,6 +1,7 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { spawn, ChildProcess } from 'child_process';
+import { readFileSync } from 'fs';
 import {
     createMessageConnection,
     StreamMessageReader,
@@ -23,6 +24,7 @@ export async function createMcpServer(langserverPath: string, workspaceRoot: str
     let initPromise: Promise<void> | null = null;
     let initError: string | null = null;
     let tokenLegend: TokenLegend | null = null;
+    const openedUris = new Set<string>();
 
     // Spawn Pyright and run LSP initialize
     function startPyright(): Promise<void> {
@@ -163,6 +165,31 @@ export async function createMcpServer(langserverPath: string, workspaceRoot: str
             }
 
             try {
+                // For document queries, send didOpen to trigger full type checking.
+                // Without this, Pyright only parses/binds — the type evaluator won't
+                // infer return types until the file is opened for editing.
+                let justOpened = false;
+                if (
+                    method.startsWith('textDocument/') &&
+                    !method.startsWith('textDocument/did')
+                ) {
+                    const uri = (params as { textDocument?: { uri?: string } }).textDocument?.uri;
+                    if (uri && uri.startsWith('file://') && !openedUris.has(uri)) {
+                        const filePath = decodeURIComponent(new URL(uri).pathname);
+                        const text = readFileSync(filePath, 'utf-8');
+                        lspConnection.sendNotification('textDocument/didOpen', {
+                            textDocument: { uri, languageId: 'python', version: 1, text },
+                        });
+                        openedUris.add(uri);
+                        justOpened = true;
+                    }
+                }
+
+                // If we just opened a file, wait for Pyright to analyze it
+                if (justOpened) {
+                    await new Promise((r) => setTimeout(r, 500));
+                }
+
                 const requestType = new RequestType<Record<string, unknown>, unknown, void>(method);
                 const result = await Promise.race([
                     lspConnection.sendRequest(requestType, params as Record<string, unknown>),

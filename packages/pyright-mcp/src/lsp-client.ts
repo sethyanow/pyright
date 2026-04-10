@@ -1,4 +1,5 @@
 import { spawn } from 'child_process';
+import { readFileSync } from 'fs';
 import {
     createMessageConnection,
     StreamMessageReader,
@@ -81,7 +82,25 @@ export async function queryLsp(
             return [];
         }
 
-        // For document queries, wait for analysis first
+        // For document queries, send didOpen to trigger full type checking.
+        // Without this, Pyright only parses/binds the file — the type evaluator
+        // won't infer return types until the file is opened for editing.
+        const isDocumentQuery =
+            method.startsWith('textDocument/') &&
+            !method.startsWith('textDocument/did');
+
+        if (isDocumentQuery) {
+            const uri = (params as { textDocument?: { uri?: string } }).textDocument?.uri;
+            if (uri && uri.startsWith('file://')) {
+                const filePath = decodeURIComponent(new URL(uri).pathname);
+                const text = readFileSync(filePath, 'utf-8');
+                conn.sendNotification('textDocument/didOpen', {
+                    textDocument: { uri, languageId: 'python', version: 1, text },
+                });
+            }
+        }
+
+        // Wait for background analysis to complete
         for (let i = 0; i < 50; i++) {
             const probe = await conn.sendRequest('workspace/symbol', { query: '' });
             if (Array.isArray(probe) && probe.length > 0) break;
