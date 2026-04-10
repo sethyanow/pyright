@@ -1,12 +1,13 @@
 ---
 id: pyr-qqb
 title: 'Adapter warmup: send didOpen before document-level queries'
-status: active
+status: closed
 type: bug
 priority: 1
 owner: Seth
 parent: pyr-evw
 ---
+
 
 
 
