@@ -1,12 +1,15 @@
 ---
 id: pyr-db7
 title: 'Phase 3 Acceptance: Semantic Tokens'
-status: open
+status: active
 type: task
 priority: 1
-depends_on: [pyr-xgj]
+owner: Seth
+depends_on: [pyr-xgj, pyr-oaf]
 parent: pyr-mge
 ---
+
+
 
 
 
