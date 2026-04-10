@@ -1,12 +1,13 @@
 ---
 id: pyr-evw
 title: 'Phase 4: Inlay Hints'
-status: open
+status: closed
 type: epic
 priority: 1
 depends_on: [pyr-mge, pyr-zve, pyr-7ds, pyr-9uz]
 parent: pyr-otr
 ---
+
 
 
 

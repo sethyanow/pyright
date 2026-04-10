@@ -1,13 +1,15 @@
 ---
 id: pyr-9uz
 title: 'Phase 4 Acceptance: Inlay Hints'
-status: active
+status: closed
 type: task
 priority: 1
 owner: Seth
 depends_on: [pyr-qqb]
 parent: pyr-evw
 ---
+
+
 
 
 
@@ -41,3 +43,4 @@ Update stale docs only — no new summaries or tutorials.
 ## Log
 
 - [2026-04-10T15:29:58Z] [Seth] Acceptance FAILED. Return type hints (kind 1 on function defs) don't appear in MCP/CLI demo — adapter doesn't send didOpen so Pyright never fully type-checks the file. Provider logic is correct (fourslash 4/4 pass). Created pyr-qqb to fix adapter warmup. Acceptance blocked until pyr-qqb lands and re-demo shows all three hint types.
+- [2026-04-10T17:03:31Z] [Seth] Acceptance PASSED on re-try. Both lsp-client CLI and MCP lsp() tool return all three hint types: return type (kind 1) on multiply, variable type (kind 1) on result/product, parameter names (kind 2) on both call sites. didOpen fix (pyr-qqb) resolved the prior failure.
