@@ -1,12 +1,13 @@
 ---
 id: pyr-oaf
 title: 'Semantic tokens: classify module references as namespace'
-status: active
+status: closed
 type: bug
 priority: 1
 owner: Seth
 parent: pyr-mge
 ---
+
 
 
 
@@ -32,8 +33,8 @@ R3. Import names remain excluded (existing `_isImportName` guard).
 
 ## Success Criteria
 
-- [ ] `os` in `os.path.join("a", "b")` classified as `namespace` token
-- [ ] Import names (`import os`) still excluded from tokens
-- [ ] Fourslash test covering module-as-namespace classification
-- [ ] Existing semantic token tests still pass
-- [ ] `npm run typecheck` clean
+- [x] `os` in `os.path.join("a", "b")` classified as `namespace` token
+- [x] Import names (`import os`) still excluded from tokens
+- [x] Fourslash test covering module-as-namespace classification
+- [x] Existing semantic token tests still pass
+- [x] `npm run typecheck` clean
