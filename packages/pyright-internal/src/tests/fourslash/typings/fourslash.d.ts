@@ -358,6 +358,12 @@ declare namespace _ {
             endMarker: string,
             map: { [marker: string]: string }
         ): void;
+        verifyInlayHints(map: {
+            [marker: string]: {
+                label: string;
+                kind: 'type' | 'parameter';
+            };
+        }): void;
         verifyHighlightReferences(map: {
             [marker: string]: {
                 references: DocumentHighlight[];

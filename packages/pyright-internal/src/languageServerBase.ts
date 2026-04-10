@@ -55,6 +55,8 @@ import {
     DocumentSymbolParams,
     ExecuteCommandParams,
     HoverParams,
+    InlayHint,
+    InlayHintParams,
     InitializeParams,
     InitializeResult,
     LSPObject,
@@ -121,6 +123,7 @@ import { Uri } from './common/uri/uri';
 import { convertUriToLspUriString } from './common/uri/uriUtils';
 import { AnalyzerServiceExecutor } from './languageService/analyzerServiceExecutor';
 import { CallHierarchyProvider } from './languageService/callHierarchyProvider';
+import { InlayHintProvider } from './languageService/inlayHintProvider';
 import { SemanticTokensProvider, tokenLegend } from './languageService/semanticTokensProvider';
 import { TypeHierarchyProvider } from './languageService/typeHierarchyProvider';
 import { CompletionItemData, CompletionProvider } from './languageService/completionProvider';
@@ -573,6 +576,8 @@ export abstract class LanguageServerBase implements LanguageServerInterface, Dis
         semanticTokens.on(async (params, token) => this.onSemanticTokensFull(params, token));
         semanticTokens.onRange(async (params, token) => this.onSemanticTokensRange(params, token));
 
+        this.connection.languages.inlayHint.on(async (params, token) => this.onInlayHint(params, token));
+
         this.connection.onDidOpenTextDocument(async (params) => this.onDidOpenTextDocument(params));
         this.connection.onDidChangeTextDocument(async (params) => this.onDidChangeTextDocument(params));
         this.connection.onDidCloseTextDocument(async (params) => this.onDidCloseTextDocument(params));
@@ -705,6 +710,7 @@ export abstract class LanguageServerBase implements LanguageServerInterface, Dis
                     full: true,
                     range: true,
                 },
+                inlayHintProvider: true,
                 workspace: {
                     workspaceFolders: {
                         supported: true,
@@ -1211,6 +1217,19 @@ export abstract class LanguageServerBase implements LanguageServerInterface, Dis
         return workspace.service.run((program) => {
             return new SemanticTokensProvider(program, uri, token, params.range).getTokens() ?? emptyResult;
         }, token) ?? emptyResult;
+    }
+
+    protected async onInlayHint(params: InlayHintParams, token: CancellationToken): Promise<InlayHint[] | null> {
+        const uri = this.convertLspUriStringToUri(params.textDocument.uri);
+
+        const workspace = await this.getWorkspaceForFile(uri);
+        if (workspace.disableLanguageServices) {
+            return null;
+        }
+
+        return workspace.service.run((program) => {
+            return new InlayHintProvider(program, uri, token).getHints();
+        }, token) ?? null;
     }
 
     protected async onDidOpenTextDocument(params: DidOpenTextDocumentParams, ipythonMode = IPythonMode.None) {

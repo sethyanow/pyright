@@ -19,6 +19,8 @@ import {
     DocumentHighlight,
     DocumentHighlightKind,
     ExecuteCommandParams,
+    InlayHint,
+    InlayHintKind,
     Location,
     MarkupContent,
     MarkupKind,
@@ -58,6 +60,7 @@ import { Uri } from '../../../common/uri/uri';
 import { UriEx, getFileSpec } from '../../../common/uri/uriUtils';
 import { convertToWorkspaceEdit } from '../../../common/workspaceEditUtils';
 import { CallHierarchyProvider } from '../../../languageService/callHierarchyProvider';
+import { InlayHintProvider } from '../../../languageService/inlayHintProvider';
 import { SemanticTokensProvider, tokenLegend } from '../../../languageService/semanticTokensProvider';
 import { TypeHierarchyProvider } from '../../../languageService/typeHierarchyProvider';
 import { CompletionOptions, CompletionProvider } from '../../../languageService/completionProvider';
@@ -1714,6 +1717,47 @@ export class TestState {
             assert(
                 token.line >= range.start.line && token.line < range.end.line,
                 `Token at line ${token.line} is outside requested range [${range.start.line}, ${range.end.line})`
+            );
+        }
+    }
+
+    verifyInlayHints(map: { [marker: string]: { label: string; kind: 'type' | 'parameter' } }) {
+        this.analyze();
+
+        const markers = this.getMarkers();
+        assert(markers.length > 0, 'No markers found');
+
+        const fileName = markers[0].fileName;
+        const uri = Uri.file(fileName, this.serviceProvider);
+
+        const provider = new InlayHintProvider(this.program, uri, CancellationToken.None);
+        const hints = provider.getHints();
+
+        for (const markerName of Object.keys(map)) {
+            const marker = this.getMarkerByName(markerName);
+            const position = this.convertOffsetToPosition(fileName, marker.position);
+            const expected = map[markerName];
+
+            const expectedKind = expected.kind === 'type' ? InlayHintKind.Type : InlayHintKind.Parameter;
+
+            const hint = hints.find(
+                (h: InlayHint) => h.position.line === position.line && h.position.character === position.character
+            );
+
+            assert(
+                hint,
+                `${markerName}: no inlay hint found at line ${position.line}, char ${position.character}. ` +
+                    `Available hints: ${JSON.stringify(hints.map((h: InlayHint) => ({ pos: h.position, label: h.label })))}`
+            );
+            assert.strictEqual(
+                hint.label,
+                expected.label,
+                `${markerName}: expected label '${expected.label}' but got '${hint.label}'`
+            );
+            assert.strictEqual(
+                hint.kind,
+                expectedKind,
+                `${markerName}: expected kind '${expected.kind}' but got '${hint.kind === InlayHintKind.Type ? 'type' : 'parameter'}'`
             );
         }
     }
