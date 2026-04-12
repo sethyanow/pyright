@@ -4,9 +4,10 @@ title: 'Phase 6: Range Providers'
 status: open
 type: epic
 priority: 1
-depends_on: [pyr-yh8]
+depends_on: [pyr-yh8, pyr-tcv]
 parent: pyr-otr
 ---
+
 
 ## Context
 

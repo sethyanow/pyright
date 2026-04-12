@@ -249,3 +249,20 @@
 {"timestamp":"2026-04-12T08:36:02.577454+00:00","actor":"Seth","event_type":"claimed","task_id":"pyr-ean","details":{"actor":"Seth"}}
 {"timestamp":"2026-04-12T08:53:13.838211+00:00","actor":"Seth","event_type":"logged","task_id":"pyr-ean","details":{"message":"Implementation complete. BFS string pre-filter added to _findSubclassLocations, _findMethodOverrideLocations, and TypeHierarchyProvider.getSubtypes. All success criteria verified. Adversarial test battery passed (deep chain, diamond, substring collision, empty, unicode). 2387 tests pass, typecheck clean."}}
 {"timestamp":"2026-04-12T08:53:17.999920+00:00","actor":"Seth","event_type":"closed","task_id":"pyr-ean","details":{"notes":null}}
+{"timestamp":"2026-04-12T19:17:06.571585+00:00","actor":"Seth","event_type":"created","task_id":"pyr-tcv","details":{}}
+{"timestamp":"2026-04-12T19:18:17.422614+00:00","actor":"Seth","event_type":"dep_added","task_id":"pyr-otr","details":{"kind":"parent-child","to":"pyr-tcv"}}
+{"timestamp":"2026-04-12T19:18:17.423410+00:00","actor":"Seth","event_type":"dep_added","task_id":"pyr-otr","details":{"kind":"blocks","to":"pyr-tcv"}}
+{"timestamp":"2026-04-12T19:18:17.630461+00:00","actor":"Seth","event_type":"dep_added","task_id":"pyr-tcv","details":{"kind":"blocks","to":"pyr-yh8"}}
+{"timestamp":"2026-04-12T19:18:17.831691+00:00","actor":"Seth","event_type":"dep_added","task_id":"pyr-rfu","details":{"kind":"blocks","to":"pyr-tcv"}}
+{"timestamp":"2026-04-12T19:18:23.622520+00:00","actor":"Seth","event_type":"created","task_id":"pyr-084","details":{}}
+{"timestamp":"2026-04-12T19:18:28.211084+00:00","actor":"Seth","event_type":"created","task_id":"pyr-ilj","details":{}}
+{"timestamp":"2026-04-12T19:18:37.466412+00:00","actor":"Seth","event_type":"dep_added","task_id":"pyr-tcv","details":{"kind":"parent-child","to":"pyr-084"}}
+{"timestamp":"2026-04-12T19:18:37.466830+00:00","actor":"Seth","event_type":"dep_added","task_id":"pyr-tcv","details":{"kind":"blocks","to":"pyr-084"}}
+{"timestamp":"2026-04-12T19:18:37.534680+00:00","actor":"Seth","event_type":"dep_added","task_id":"pyr-tcv","details":{"kind":"parent-child","to":"pyr-ilj"}}
+{"timestamp":"2026-04-12T19:18:37.535295+00:00","actor":"Seth","event_type":"dep_added","task_id":"pyr-tcv","details":{"kind":"blocks","to":"pyr-ilj"}}
+{"timestamp":"2026-04-12T19:18:37.606680+00:00","actor":"Seth","event_type":"dep_added","task_id":"pyr-ilj","details":{"kind":"blocks","to":"pyr-084"}}
+{"timestamp":"2026-04-12T19:19:29.613925+00:00","actor":"Seth","event_type":"created","task_id":"pyr-anf","details":{}}
+{"timestamp":"2026-04-12T19:19:34.107159+00:00","actor":"Seth","event_type":"dep_added","task_id":"pyr-084","details":{"kind":"parent-child","to":"pyr-anf"}}
+{"timestamp":"2026-04-12T19:19:34.107567+00:00","actor":"Seth","event_type":"dep_added","task_id":"pyr-084","details":{"kind":"blocks","to":"pyr-anf"}}
+{"timestamp":"2026-04-12T19:20:29.505576+00:00","actor":"Seth","event_type":"logged","task_id":"pyr-21b","details":{"message":"Phase 5 demo completed: cold-cache codeLens resolve working after user's BFS string pre-filter fix. Demo showed reference counts, implementation counts (including transitive subclasses), and zero-reference detection on /tmp files. Phase 5.5 epic (pyr-tcv) created during this session to close the agent DX gap — proxy + enrichment hooks for passive intelligence."}}
+{"timestamp":"2026-04-12T19:20:29.715837+00:00","actor":"Seth","event_type":"logged","task_id":"pyr-tcv","details":{"message":"Epic created from brainstorming session. Key decisions: Node.js proxy replaces shell script, shared Pyright via Unix socket + PID, teardown on any disconnect, enrichment via PostToolUse hooks on Read (not diagnostic injection), file-intelligence format merges code lens + semantic + inlay into one block. Trial pattern for user's other LSP projects."}}

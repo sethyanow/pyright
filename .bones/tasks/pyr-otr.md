@@ -4,8 +4,10 @@ title: Add missing LSP providers to Pyright
 status: open
 type: epic
 priority: 1
-depends_on: [pyr-lo0, pyr-lfw, pyr-mge, pyr-evw, pyr-yh8, pyr-rfu, pyr-nft, pyr-n3v]
+depends_on: [pyr-lo0, pyr-lfw, pyr-mge, pyr-evw, pyr-yh8, pyr-rfu, pyr-nft, pyr-n3v, pyr-tcv]
 ---
+
+
 
 
 
