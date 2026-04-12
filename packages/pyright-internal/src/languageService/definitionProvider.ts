@@ -389,8 +389,6 @@ export class ImplementationProvider {
     private _findSubclassLocations(targetClass: ClassType, evaluator: TypeEvaluator): DocumentRange[] | undefined {
         const results: DocumentRange[] = [];
 
-        // Phase 1: Bind all user-code files (populates import graph via getParseResults).
-        const boundFiles: { uri: Uri; parseResults: ParseFileResults }[] = [];
         for (const sourceFileInfo of this._program.getSourceFileInfoList()) {
             throwIfCancellationRequested(this._token);
 
@@ -403,28 +401,12 @@ export class ImplementationProvider {
                 continue;
             }
 
-            boundFiles.push({ uri: sourceFileInfo.uri, parseResults });
-        }
-
-        // Phase 2: Compute the set of files that could contain subclasses.
-        // A class can only inherit from targetClass if its file transitively
-        // imports the module where targetClass is defined.
-        const reachable = this._getTransitiveImporters(targetClass.shared.fileUri);
-
-        // Phase 3: Only type-evaluate classes in reachable files.
-        for (const { uri, parseResults } of boundFiles) {
-            throwIfCancellationRequested(this._token);
-
-            if (!reachable.has(uri.key)) {
-                continue;
-            }
-
             this._collectSubclassesFromStatements(
                 parseResults.parserOutput.parseTree.d.statements,
                 targetClass,
                 evaluator,
                 parseResults,
-                uri,
+                sourceFileInfo.uri,
                 results
             );
 
@@ -441,8 +423,6 @@ export class ImplementationProvider {
     ): DocumentRange[] | undefined {
         const results: DocumentRange[] = [];
 
-        // Phase 1: Bind all user-code files (populates import graph).
-        const boundFiles: { uri: Uri; parseResults: ParseFileResults }[] = [];
         for (const sourceFileInfo of this._program.getSourceFileInfoList()) {
             throwIfCancellationRequested(this._token);
 
@@ -455,28 +435,13 @@ export class ImplementationProvider {
                 continue;
             }
 
-            boundFiles.push({ uri: sourceFileInfo.uri, parseResults });
-        }
-
-        // Phase 2: Only files that transitively import the target's module
-        // can contain method overrides.
-        const reachable = this._getTransitiveImporters(targetClass.shared.fileUri);
-
-        // Phase 3: Only type-evaluate classes in reachable files.
-        for (const { uri, parseResults } of boundFiles) {
-            throwIfCancellationRequested(this._token);
-
-            if (!reachable.has(uri.key)) {
-                continue;
-            }
-
             this._collectMethodOverridesFromStatements(
                 parseResults.parserOutput.parseTree.d.statements,
                 targetClass,
                 methodName,
                 evaluator,
                 parseResults,
-                uri,
+                sourceFileInfo.uri,
                 results
             );
 
@@ -484,36 +449,6 @@ export class ImplementationProvider {
         }
 
         return results.length > 0 ? results : undefined;
-    }
-
-    // Returns the set of file URI keys for all files that transitively import
-    // the given file. A class can only be a subclass of a target if its module
-    // transitively imports the target's module — this is an invariant of
-    // Python's import system, not a heuristic.
-    private _getTransitiveImporters(fileUri: Uri): Set<string> {
-        const reachable = new Set<string>();
-
-        const targetFileInfo = this._program.getSourceFileInfo(fileUri);
-        if (!targetFileInfo) {
-            return reachable;
-        }
-
-        // Include the target file itself (subclasses may be co-located).
-        reachable.add(targetFileInfo.uri.key);
-
-        // BFS through importedBy to find all transitive importers.
-        const queue = [targetFileInfo];
-        while (queue.length > 0) {
-            const current = queue.shift()!;
-            for (const importer of current.importedBy) {
-                if (!reachable.has(importer.uri.key)) {
-                    reachable.add(importer.uri.key);
-                    queue.push(importer);
-                }
-            }
-        }
-
-        return reachable;
     }
 
     private _collectSubclassesFromStatements(

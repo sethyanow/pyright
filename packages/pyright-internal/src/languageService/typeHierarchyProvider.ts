@@ -146,8 +146,6 @@ export class TypeHierarchyProvider {
         const items: TypeHierarchyItem[] = [];
         const targetClass = this._classType;
 
-        // Phase 1: Bind all user-code files (populates import graph).
-        const boundFiles: { uri: Uri; parseResults: ParseFileResults }[] = [];
         for (const sourceFileInfo of this._program.getSourceFileInfoList()) {
             throwIfCancellationRequested(this._token);
 
@@ -157,21 +155,6 @@ export class TypeHierarchyProvider {
 
             const parseResults = this._program.getParseResults(sourceFileInfo.uri);
             if (!parseResults) {
-                continue;
-            }
-
-            boundFiles.push({ uri: sourceFileInfo.uri, parseResults });
-        }
-
-        // Phase 2: Only files that transitively import the target's module
-        // can contain subclasses.
-        const reachable = this._getTransitiveImporters(targetClass.shared.fileUri);
-
-        // Phase 3: Only type-evaluate classes in reachable files.
-        for (const { uri, parseResults } of boundFiles) {
-            throwIfCancellationRequested(this._token);
-
-            if (!reachable.has(uri.key)) {
                 continue;
             }
 
@@ -254,29 +237,5 @@ export class TypeHierarchyProvider {
                 parseResults.tokenizerOutput.lines
             ),
         };
-    }
-
-    private _getTransitiveImporters(fileUri: Uri): Set<string> {
-        const reachable = new Set<string>();
-
-        const targetFileInfo = this._program.getSourceFileInfo(fileUri);
-        if (!targetFileInfo) {
-            return reachable;
-        }
-
-        reachable.add(targetFileInfo.uri.key);
-
-        const queue = [targetFileInfo];
-        while (queue.length > 0) {
-            const current = queue.shift()!;
-            for (const importer of current.importedBy) {
-                if (!reachable.has(importer.uri.key)) {
-                    reachable.add(importer.uri.key);
-                    queue.push(importer);
-                }
-            }
-        }
-
-        return reachable;
     }
 }
