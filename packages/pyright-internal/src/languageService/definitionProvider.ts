@@ -388,29 +388,70 @@ export class ImplementationProvider {
 
     private _findSubclassLocations(targetClass: ClassType, evaluator: TypeEvaluator): DocumentRange[] | undefined {
         const results: DocumentRange[] = [];
+        const classNamesToSearch = new Set<string>([targetClass.shared.name]);
+        const processedFileKeys = new Set<string>();
 
-        for (const sourceFileInfo of this._program.getSourceFileInfoList()) {
-            throwIfCancellationRequested(this._token);
+        // BFS: keep searching until no new class names are discovered
+        let foundNewNames = true;
+        while (foundNewNames) {
+            foundNewNames = false;
+            const discoveredClassNames = new Set<string>();
 
-            if (!isUserCode(sourceFileInfo) && !sourceFileInfo.isOpenByClient) {
-                continue;
+            for (const sourceFileInfo of this._program.getSourceFileInfoList()) {
+                throwIfCancellationRequested(this._token);
+
+                if (!isUserCode(sourceFileInfo) && !sourceFileInfo.isOpenByClient) {
+                    continue;
+                }
+
+                const fileKey = sourceFileInfo.uri.key;
+                if (processedFileKeys.has(fileKey)) {
+                    continue;
+                }
+
+                // String pre-filter: skip files that don't mention any class name we're searching for.
+                // This avoids binding files that cannot possibly contain subclasses.
+                const contents = sourceFileInfo.contents;
+                if (contents) {
+                    let mentionsAnyClassName = false;
+                    for (const name of classNamesToSearch) {
+                        if (contents.includes(name)) {
+                            mentionsAnyClassName = true;
+                            break;
+                        }
+                    }
+                    if (!mentionsAnyClassName) {
+                        continue;
+                    }
+                }
+
+                processedFileKeys.add(fileKey);
+
+                const parseResults = this._program.getParseResults(sourceFileInfo.uri);
+                if (!parseResults) {
+                    continue;
+                }
+
+                this._collectSubclassesFromStatements(
+                    parseResults.parserOutput.parseTree.d.statements,
+                    targetClass,
+                    evaluator,
+                    parseResults,
+                    sourceFileInfo.uri,
+                    results,
+                    discoveredClassNames
+                );
+
+                this._program.handleMemoryHighUsage();
             }
 
-            const parseResults = this._program.getParseResults(sourceFileInfo.uri);
-            if (!parseResults) {
-                continue;
+            // Add newly discovered class names to search set for next iteration
+            for (const name of discoveredClassNames) {
+                if (!classNamesToSearch.has(name)) {
+                    classNamesToSearch.add(name);
+                    foundNewNames = true;
+                }
             }
-
-            this._collectSubclassesFromStatements(
-                parseResults.parserOutput.parseTree.d.statements,
-                targetClass,
-                evaluator,
-                parseResults,
-                sourceFileInfo.uri,
-                results
-            );
-
-            this._program.handleMemoryHighUsage();
         }
 
         return results.length > 0 ? results : undefined;
@@ -422,30 +463,71 @@ export class ImplementationProvider {
         evaluator: TypeEvaluator
     ): DocumentRange[] | undefined {
         const results: DocumentRange[] = [];
+        const classNamesToSearch = new Set<string>([targetClass.shared.name]);
+        const processedFileKeys = new Set<string>();
 
-        for (const sourceFileInfo of this._program.getSourceFileInfoList()) {
-            throwIfCancellationRequested(this._token);
+        // BFS: keep searching until no new class names are discovered
+        let foundNewNames = true;
+        while (foundNewNames) {
+            foundNewNames = false;
+            const discoveredClassNames = new Set<string>();
 
-            if (!isUserCode(sourceFileInfo) && !sourceFileInfo.isOpenByClient) {
-                continue;
+            for (const sourceFileInfo of this._program.getSourceFileInfoList()) {
+                throwIfCancellationRequested(this._token);
+
+                if (!isUserCode(sourceFileInfo) && !sourceFileInfo.isOpenByClient) {
+                    continue;
+                }
+
+                const fileKey = sourceFileInfo.uri.key;
+                if (processedFileKeys.has(fileKey)) {
+                    continue;
+                }
+
+                // String pre-filter: skip files that don't mention any class name we're searching for.
+                // This avoids binding files that cannot possibly contain subclasses.
+                const contents = sourceFileInfo.contents;
+                if (contents) {
+                    let mentionsAnyClassName = false;
+                    for (const name of classNamesToSearch) {
+                        if (contents.includes(name)) {
+                            mentionsAnyClassName = true;
+                            break;
+                        }
+                    }
+                    if (!mentionsAnyClassName) {
+                        continue;
+                    }
+                }
+
+                processedFileKeys.add(fileKey);
+
+                const parseResults = this._program.getParseResults(sourceFileInfo.uri);
+                if (!parseResults) {
+                    continue;
+                }
+
+                this._collectMethodOverridesFromStatements(
+                    parseResults.parserOutput.parseTree.d.statements,
+                    targetClass,
+                    methodName,
+                    evaluator,
+                    parseResults,
+                    sourceFileInfo.uri,
+                    results,
+                    discoveredClassNames
+                );
+
+                this._program.handleMemoryHighUsage();
             }
 
-            const parseResults = this._program.getParseResults(sourceFileInfo.uri);
-            if (!parseResults) {
-                continue;
+            // Add newly discovered class names to search set for next iteration
+            for (const name of discoveredClassNames) {
+                if (!classNamesToSearch.has(name)) {
+                    classNamesToSearch.add(name);
+                    foundNewNames = true;
+                }
             }
-
-            this._collectMethodOverridesFromStatements(
-                parseResults.parserOutput.parseTree.d.statements,
-                targetClass,
-                methodName,
-                evaluator,
-                parseResults,
-                sourceFileInfo.uri,
-                results
-            );
-
-            this._program.handleMemoryHighUsage();
         }
 
         return results.length > 0 ? results : undefined;
@@ -457,7 +539,8 @@ export class ImplementationProvider {
         evaluator: TypeEvaluator,
         parseResults: ParseFileResults,
         fileUri: Uri,
-        results: DocumentRange[]
+        results: DocumentRange[],
+        discoveredClassNames?: Set<string>
     ) {
         for (const statement of statements) {
             if (statement.nodeType === ParseNodeType.Class) {
@@ -476,6 +559,9 @@ export class ImplementationProvider {
                             parseResults.tokenizerOutput.lines
                         ),
                     });
+
+                    // Track discovered class name for BFS
+                    discoveredClassNames?.add(nameNode.d.value);
                 }
 
                 // Recurse into nested classes.
@@ -485,7 +571,8 @@ export class ImplementationProvider {
                     evaluator,
                     parseResults,
                     fileUri,
-                    results
+                    results,
+                    discoveredClassNames
                 );
             }
         }
@@ -498,7 +585,8 @@ export class ImplementationProvider {
         evaluator: TypeEvaluator,
         parseResults: ParseFileResults,
         fileUri: Uri,
-        results: DocumentRange[]
+        results: DocumentRange[],
+        discoveredClassNames?: Set<string>
     ) {
         for (const statement of statements) {
             if (statement.nodeType === ParseNodeType.Class) {
@@ -508,6 +596,9 @@ export class ImplementationProvider {
                     !ClassType.isSameGenericClass(classTypeResult.classType, targetClass) &&
                     derivesFromClassRecursive(classTypeResult.classType, targetClass, /* ignoreUnknown */ true)
                 ) {
+                    // Track discovered class name for BFS (regardless of whether it defines the method)
+                    discoveredClassNames?.add(statement.d.name.d.value);
+
                     // Check if this subclass defines (not just inherits) the method.
                     const memberInfo = lookUpClassMember(
                         classTypeResult.classType,
@@ -538,7 +629,8 @@ export class ImplementationProvider {
                     evaluator,
                     parseResults,
                     fileUri,
-                    results
+                    results,
+                    discoveredClassNames
                 );
             }
         }

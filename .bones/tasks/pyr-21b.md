@@ -4,8 +4,10 @@ title: 'Phase 5 Acceptance: Code Lens'
 status: open
 type: task
 priority: 1
+depends_on: [pyr-ean]
 parent: pyr-yh8
 ---
+
 
 
 

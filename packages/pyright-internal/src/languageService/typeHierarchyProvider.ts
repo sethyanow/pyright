@@ -145,11 +145,20 @@ export class TypeHierarchyProvider {
 
         const items: TypeHierarchyItem[] = [];
         const targetClass = this._classType;
+        const targetClassName = targetClass.shared.name;
 
         for (const sourceFileInfo of this._program.getSourceFileInfoList()) {
             throwIfCancellationRequested(this._token);
 
             if (!isUserCode(sourceFileInfo) && !sourceFileInfo.isOpenByClient) {
+                continue;
+            }
+
+            // String pre-filter: skip files that don't mention the target class name.
+            // This avoids binding files that cannot possibly contain direct subclasses.
+            // (For TypeHierarchy, transitivity is handled by caller recursively calling getSubtypes.)
+            const contents = sourceFileInfo.contents;
+            if (contents && !contents.includes(targetClassName)) {
                 continue;
             }
 
