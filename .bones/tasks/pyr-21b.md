@@ -1,12 +1,14 @@
 ---
 id: pyr-21b
 title: 'Phase 5 Acceptance: Code Lens'
-status: open
+status: closed
 type: task
 priority: 1
 depends_on: [pyr-ean]
 parent: pyr-yh8
 ---
+
+
 
 
 
@@ -28,9 +30,10 @@ Update stale docs only — no new summaries or tutorials.
 
 ## Success Criteria
 
-- [ ] Demo presented to user showing code lens counts
-- [ ] User closes this task
+- [x] Demo presented to user showing code lens counts
+- [x] User closes this task
 
 ## Log
 
 - [2026-04-12T19:20:29Z] [Seth] Phase 5 demo completed: cold-cache codeLens resolve working after user's BFS string pre-filter fix. Demo showed reference counts, implementation counts (including transitive subclasses), and zero-reference detection on /tmp files. Phase 5.5 epic (pyr-tcv) created during this session to close the agent DX gap — proxy + enrichment hooks for passive intelligence.
+- [2026-04-13T10:58:23Z] [Seth] Demo accepted: cold-cache codeLens resolve works on /tmp files after BFS string pre-filter fix. Showed reference counts, implementation counts (transitive), zero-reference detection. Phase 5.5 epic scoped during acceptance session — proxy + enrichment hooks for passive agent intelligence.
