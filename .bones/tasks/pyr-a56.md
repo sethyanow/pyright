@@ -1,11 +1,12 @@
 ---
 id: pyr-a56
 title: Decompose typeEvaluator.ts
-status: open
+status: closed
 type: epic
 priority: 2
 depends_on: [pyr-wru, pyr-kqo, pyr-5hl, pyr-yay, pyr-1lc, pyr-p1w, pyr-8b1]
 ---
+
 
 
 

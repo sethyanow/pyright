@@ -4,7 +4,18 @@
     "description": "Pyright language server with full LSP provider coverage, exposed to agents via MCP",
     "mcpServers": {
         "pyright": {
-            "command": "${CLAUDE_PLUGIN_ROOT}/bin/start-server.sh"
+            "command": "${CLAUDE_PLUGIN_ROOT}/bin/start-server.sh",
+            "args": ["--mcp"]
+        }
+    },
+    "lspServers": {
+        "pyright-dev": {
+            "command": "${CLAUDE_PLUGIN_ROOT}/bin/start-server.sh",
+            "args": ["--lsp"],
+            "extensionToLanguage": {
+                ".py": "python",
+                ".pyi": "python"
+            }
         }
     }
 }

@@ -269,3 +269,6 @@
 {"timestamp":"2026-04-13T10:58:23.926176+00:00","actor":"Seth","event_type":"logged","task_id":"pyr-21b","details":{"message":"Demo accepted: cold-cache codeLens resolve works on /tmp files after BFS string pre-filter fix. Showed reference counts, implementation counts (transitive), zero-reference detection. Phase 5.5 epic scoped during acceptance session — proxy + enrichment hooks for passive agent intelligence."}}
 {"timestamp":"2026-04-13T10:58:37.028323+00:00","actor":"Seth","event_type":"closed","task_id":"pyr-21b","details":{"notes":null}}
 {"timestamp":"2026-04-13T10:58:42.642361+00:00","actor":"Seth","event_type":"closed","task_id":"pyr-yh8","details":{"notes":null}}
+{"timestamp":"2026-04-13T13:05:35.251125+00:00","actor":"Seth","event_type":"closed","task_id":"pyr-a56","details":{"notes":null}}
+{"timestamp":"2026-04-13T13:05:35.251849+00:00","actor":"Seth","event_type":"gate_bypass","task_id":"pyr-a56","details":{"gate_type":"all_criteria_checked","param":null,"transition":"close"}}
+{"timestamp":"2026-04-13T13:15:24.502303+00:00","actor":"Seth","event_type":"updated","task_id":"pyr-anf","details":{"status":"active"}}

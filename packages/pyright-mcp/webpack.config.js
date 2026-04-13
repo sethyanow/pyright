@@ -12,6 +12,7 @@ module.exports = (_, { mode }) => {
         entry: {
             'mcp-server': './src/mcp-server.ts',
             'lsp-client': './src/lsp-client.ts',
+            proxy: './src/proxy.ts',
         },
         target: 'node',
         output: {

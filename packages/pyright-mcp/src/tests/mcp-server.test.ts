@@ -1,7 +1,14 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
+import { spawn, ChildProcess } from 'child_process';
 import path from 'path';
-import { createMcpServer } from '../mcp-server';
+import {
+    createMessageConnection,
+    StreamMessageReader,
+    StreamMessageWriter,
+    MessageConnection,
+} from 'vscode-jsonrpc/node';
+import { createMcpServer, type TokenLegend } from '../mcp-server';
 
 const LANGSERVER_PATH = path.resolve(
     __dirname,
@@ -10,15 +17,80 @@ const LANGSERVER_PATH = path.resolve(
 
 const FIXTURES_DIR = path.resolve(__dirname, 'fixtures');
 
+/**
+ * Spawn Pyright langserver, create a MessageConnection, and run LSP initialize.
+ * Returns the connection and the child process (caller owns cleanup).
+ */
+async function spawnAndInitPyright(
+    langserverPath: string,
+    workspaceRoot: string
+): Promise<{ connection: MessageConnection; process: ChildProcess; tokenLegend?: TokenLegend }> {
+    const pyrightProcess = spawn('node', [langserverPath, '--stdio'], {
+        cwd: workspaceRoot,
+        stdio: ['pipe', 'pipe', 'pipe'],
+    });
+
+    pyrightProcess.stdin!.on('error', () => {});
+    pyrightProcess.stdout!.on('error', () => {});
+    pyrightProcess.stderr!.on('error', () => {});
+    pyrightProcess.stderr!.resume();
+
+    const connection = createMessageConnection(
+        new StreamMessageReader(pyrightProcess.stdout!),
+        new StreamMessageWriter(pyrightProcess.stdin!)
+    );
+    connection.listen();
+
+    const rootUri = `file://${workspaceRoot}`;
+    const workspaceName = workspaceRoot.split('/').pop() || 'workspace';
+
+    const initResult: Record<string, any> = await connection.sendRequest('initialize', {
+        processId: process.pid,
+        rootUri,
+        rootPath: workspaceRoot,
+        workspaceFolders: [{ uri: rootUri, name: workspaceName }],
+        capabilities: {
+            textDocument: {
+                implementation: { dynamicRegistration: false },
+                semanticTokens: {
+                    dynamicRegistration: false,
+                    requests: { full: true, range: true },
+                    tokenTypes: [],
+                    tokenModifiers: [],
+                },
+                inlayHint: { dynamicRegistration: false },
+                codeLens: { dynamicRegistration: false },
+            },
+            workspace: {
+                symbol: { dynamicRegistration: false },
+                workspaceFolders: true,
+            },
+        },
+    });
+    connection.sendNotification('initialized', {});
+
+    const legend = initResult?.capabilities?.semanticTokensProvider?.legend;
+    return { connection, process: pyrightProcess, tokenLegend: legend };
+}
+
 describe('pyright MCP server', () => {
     let client: Client;
-    let mcpServer: Awaited<ReturnType<typeof createMcpServer>>;
+    let mcpServer: ReturnType<typeof createMcpServer>;
+    let pyrightProcess: ChildProcess;
 
     beforeAll(async () => {
+        // Spawn Pyright and get an initialized LSP connection
+        const pyright = await spawnAndInitPyright(LANGSERVER_PATH, FIXTURES_DIR);
+        pyrightProcess = pyright.process;
+
+        // Create MCP server with the external connection
         const [clientTransport, serverTransport] =
             InMemoryTransport.createLinkedPair();
 
-        mcpServer = await createMcpServer(LANGSERVER_PATH, FIXTURES_DIR);
+        mcpServer = createMcpServer(pyright.connection);
+        if (pyright.tokenLegend) {
+            mcpServer.setTokenLegend(pyright.tokenLegend);
+        }
         await mcpServer.server.connect(serverTransport);
 
         client = new Client({ name: 'test-client', version: '1.0.0' });
@@ -51,7 +123,21 @@ describe('pyright MCP server', () => {
 
     afterAll(async () => {
         await client.close();
-        await mcpServer.shutdown();
+        // Kill Pyright child process (lifecycle owned by caller now)
+        if (pyrightProcess) {
+            pyrightProcess.kill();
+            await new Promise<void>((resolve) => {
+                if (pyrightProcess.exitCode !== null) {
+                    resolve();
+                } else {
+                    pyrightProcess.on('close', () => resolve());
+                    setTimeout(() => {
+                        pyrightProcess.kill('SIGKILL');
+                        resolve();
+                    }, 2000);
+                }
+            });
+        }
     });
 
     it('lists the lsp tool', async () => {
