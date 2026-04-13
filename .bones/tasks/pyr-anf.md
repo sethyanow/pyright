@@ -9,6 +9,7 @@ parent: pyr-084
 
 
 
+
 ## Context
 
 Replace `bin/start-server.sh` (shell script) with a Node.js proxy that spawns Pyright and serves both LSP and MCP protocol modes. The proxy owns the Pyright child process via Unix socket + PID file. `--lsp` flag does LSP JSON-RPC passthrough, `--mcp` flag runs the existing MCP server. Any disconnect tears down Pyright.
@@ -189,3 +190,7 @@ proxy --mcp:
 
 - **Don't keep `createMcpServer` spawning its own Pyright as a fallback.** One spawn path (the proxy), not two. REASON: dual spawn paths mean dual lifecycle bugs.
 - **Don't use HTTP or TCP for the socket.** Unix domain socket only — no network exposure. REASON: dev tooling, localhost only, no security surface.
+
+## Log
+
+- [2026-04-13T13:41:52Z] [Seth] Completed: Node.js proxy with shared Pyright backend. Refactored createMcpServer to accept MessageConnection (no internal spawn). Proxy.ts handles --lsp (stdio relay) and --mcp (MessageConnection → createMcpServer). Unix socket bridge shares one Pyright across both modes. Broadcast approach for multiplexing (no ID rewriting needed — vscode-jsonrpc ignores unknown response IDs). 24 tests passing (7 new proxy tests + 8 existing MCP + 9 others). SRE found 3 critical gaps (existing test breakage, multiplexer unspecified, missing criterion) and 3 important gaps. Failure catalog identified 5 structural mitigations all implemented. Plugin validator confirmed lspServers config correct.
