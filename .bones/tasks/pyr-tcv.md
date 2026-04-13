@@ -43,12 +43,12 @@ The proxy architecture replaces the shell script entry point and shares a single
 
 ## Success Criteria
 
-- [ ] `bin/start-server.sh` replaced by Node.js proxy entry point
-- [ ] `--lsp` flag: LSP JSON-RPC passthrough working (diagnostics flow from dev Pyright)
-- [ ] `--mcp` flag: MCP server working (existing tool behavior preserved)
-- [ ] Shared Pyright backend via Unix socket + PID — verified one Pyright process serves both
-- [ ] Any disconnect tears down Pyright child process (no leaked PIDs)
-- [ ] Plugin `lspServers` config registered, stock `pyright-lsp` disabled, dev build provides Python LSP
+- [x] `bin/start-server.sh` replaced by Node.js proxy entry point
+- [x] `--lsp` flag: LSP JSON-RPC passthrough working (diagnostics flow from dev Pyright)
+- [x] `--mcp` flag: MCP server working (existing tool behavior preserved)
+- [x] Shared Pyright backend via Unix socket + PID — verified one Pyright process serves both
+- [x] Any disconnect tears down Pyright child process (no leaked PIDs)
+- [x] Plugin `lspServers` config registered, stock `pyright-lsp` disabled, dev build provides Python LSP
 - [ ] PostToolUse hook on Read for `.py` fires and injects `<file-intelligence>` block
 - [ ] `<file-intelligence>` includes code lens counts, semantic classifications, inferred types
 - [ ] All existing tests pass: `cd packages/pyright-internal && npm run test:norebuild`

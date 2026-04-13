@@ -272,3 +272,4 @@
 {"timestamp":"2026-04-13T13:05:35.251125+00:00","actor":"Seth","event_type":"closed","task_id":"pyr-a56","details":{"notes":null}}
 {"timestamp":"2026-04-13T13:05:35.251849+00:00","actor":"Seth","event_type":"gate_bypass","task_id":"pyr-a56","details":{"gate_type":"all_criteria_checked","param":null,"transition":"close"}}
 {"timestamp":"2026-04-13T13:15:24.502303+00:00","actor":"Seth","event_type":"updated","task_id":"pyr-anf","details":{"status":"active"}}
+{"timestamp":"2026-04-13T13:40:50.180622+00:00","actor":"Seth","event_type":"closed","task_id":"pyr-anf","details":{"notes":null}}

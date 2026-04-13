@@ -1,11 +1,12 @@
 ---
 id: pyr-anf
 title: Build Node.js proxy entry point with shared Pyright backend
-status: active
+status: closed
 type: task
 priority: 1
 parent: pyr-084
 ---
+
 
 
 ## Context
@@ -138,17 +139,17 @@ proxy --mcp:
 
 ## Success Criteria
 
-- [ ] `src/proxy.ts` exists and bundles to `dist/proxy.js`
-- [ ] `--lsp` mode: LSP initialize/shutdown handshake works
-- [ ] `--mcp` mode: MCP lsp() tool returns valid data
-- [ ] Both modes share one Pyright PID (verified by reading PID file from both)
-- [ ] PID file created on spawn, removed on disconnect
-- [ ] Pyright child process killed on any disconnect (verified by PID check)
-- [ ] `createMcpServer` accepts external `MessageConnection` (no internal spawn)
-- [ ] Existing mcp-server tests pass with refactored signature
-- [ ] Integration tests pass for both modes + shared PID test
-- [ ] Plugin `lspServers` config present in plugin.json with correct format
-- [ ] `npm run typecheck` clean
+- [x] `src/proxy.ts` exists and bundles to `dist/proxy.js`
+- [x] `--lsp` mode: LSP initialize/shutdown handshake works
+- [x] `--mcp` mode: MCP lsp() tool returns valid data
+- [x] Both modes share one Pyright PID (verified by reading PID file from both)
+- [x] PID file created on spawn, removed on disconnect
+- [x] Pyright child process killed on any disconnect (verified by PID check)
+- [x] `createMcpServer` accepts external `MessageConnection` (no internal spawn)
+- [x] Existing mcp-server tests pass with refactored signature
+- [x] Integration tests pass for both modes + shared PID test
+- [x] Plugin `lspServers` config present in plugin.json with correct format
+- [x] `npm run typecheck` clean
 
 ## Key Considerations
 
