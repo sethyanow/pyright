@@ -1,11 +1,13 @@
 ---
 id: pyr-noe
 title: 'Phase 5.5b Task 1: PostToolUse hook scaffold + codeLens file-intelligence'
-status: active
+status: closed
 type: task
 priority: 1
 parent: pyr-ilj
 ---
+
+
 
 
 
@@ -311,3 +313,4 @@ Verify the matcher format against Claude Code plugin docs — the exact matcher 
 - [2026-04-17T01:16:39Z] [Seth] Task scoped as walking skeleton for Phase 5.5b enrichment pipeline: PostToolUse on Read .py → direct Unix socket to shared Pyright → codeLens fetch/resolve → <file-intelligence> block. Direct-socket over MCP-stdio justified in Design. Open design question: exact hook output JSON shape for additionalContext injection — verify during implementation, STOP if not findable.
 - [2026-04-17T01:56:00Z] [Seth] SRE review (fresh session): Verified all file references & claims. Key gaps filled: (1) symbol name population — documentSymbol query + position correlation, since codeLens doesn't return names; (2) fixture: use committed fixtures/sample.py, not untracked _demo_codelens.py; (3) test setup: reuse spawnProxy helper from proxy.test.ts; (4) fixed createSocketBridge reference proxy.ts:290 → proxy.ts:88; (5) added command.title regex spec; (6) flagged third-client concurrency + cold-cache codeLens timeout as Key Considerations. No design changes — all gap-fills. Open question (hook output JSON shape) stays open for implementation-time resolution.
 - [2026-04-17T01:58:20Z] [Seth] Adversarial planning: Added failure catalog to Key Considerations covering request-ID collision on shared Pyright (structural proxy concern, mitigate via random ID offset in hook), inner-timeout must be < hook timeout (7s internal vs 10s outer), file content drift between Read and hook fire, special-char escaping in block output, 100-line output cap for large files, path normalization, concurrent hook invocations, and hooks.json merge (not overwrite). Added 4 new success criteria for escaping, cap, timeout-returns-empty, and SessionStart preservation.
+- [2026-04-18T19:48:46Z] [Seth] Debrief: walking skeleton delivered (format-block + socket-lsp-client + enrich-file). All 12 success criteria met. Tests: 47 pyright-mcp (17 new — 9 format-block unit + 4 socket-lsp-client integration + 5 enrich-file integration + 3 adversarial for Unicode/negative-line/relative-path); 2392 pyright-internal; typecheck clean. End-to-end scripted verify confirms sample.py produces Greeter refs=3 impls=2 block; non-Python returns {}. Reflections: vscode-jsonrpc CancellationToken only sends $/cancelRequest to peer and does NOT reject local promise — had to force-close the socket in the timer handler to unblock hung sendRequest. Saved as reference memory. Claude Code PostToolUse hook schema verified against code.claude.com docs. Saved as reference memory. One SRE claim-error fixed during review: createSocketBridge is proxy.ts:88 (not :290 which is createMessageConnection). Committed 89afff6bc, pushed to origin/dev.
