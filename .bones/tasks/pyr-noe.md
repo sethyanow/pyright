@@ -112,7 +112,9 @@ Key assertions: returns non-empty array; each item has `line` (number), `symbol`
 
 **Fixture:** Use the existing committed fixture `packages/pyright-mcp/src/tests/fixtures/sample.py` (ABC `Greeter` + `EnglishGreeter`/`SpanishGreeter`). **Do not** use `_demo_codelens.py` at repo root — it is untracked and unavailable to CI. If an isolated fixture is preferred (so adding tests in other phases doesn't conflict), create `packages/pyright-mcp/src/tests/fixtures/codelens/` with a `pyrightconfig.json` + `demo.py` mirroring the existing per-test fixture layout.
 
-**Test setup pattern:** Reuse `spawnProxy('lsp', stateDir)` from `proxy.test.ts:21` (via import or copy the helper). That helper spawns the built `dist/proxy.js --lsp`, which handles Pyright spawn + socket creation inside `PYRIGHT_PROXY_STATE_DIR`. Simpler than manually bridging `spawnAndInitPyright` to a socket. Resolve `socketPath = path.join(stateDir, 'pyright.sock')` and wait for it to exist (`fs.existsSync` poll) before calling `fetchCodeLenses`. This requires the proxy to be built (`dist/proxy.js`) before the test runs — the existing `package.json`'s `pretest` script already handles this.
+**Test setup pattern:** Reuse `spawnProxy('lsp', stateDir)` from `proxy.test.ts:21` (via import or copy the helper). That helper spawns the built `dist/proxy.js --lsp`, which handles Pyright spawn + socket creation inside `PYRIGHT_PROXY_STATE_DIR`. Simpler than manually bridging `spawnAndInitPyright` to a socket. Resolve `socketPath = path.join(stateDir, 'pyright.sock')` and wait for it to exist (`fs.existsSync` poll) before calling `fetchCodeLenses`.
+
+**CORRECTION (2026-04-18):** the test requires `dist/proxy.js` to exist, but `packages/pyright-mcp/package.json` has NO `pretest` script — I claimed otherwise during SRE and didn't verify. Tests currently pass only because prior `npm run webpack` work left a stale `dist/` on disk. A fresh clone running `npm test` will fail. Follow-up fix: add `"pretest": "npm run webpack"` (or equivalent) so tests are self-sufficient.
 
 Run: `cd packages/pyright-mcp && npx jest socket-lsp-client --forceExit` — expect file-not-found failure.
 

@@ -4,8 +4,10 @@ title: 'Phase 5.5b Task 2: extend file-intelligence with inlayHint enrichment'
 status: open
 type: task
 priority: 1
+depends_on: [pyr-klq]
 parent: pyr-ilj
 ---
+
 
 ## Context
 

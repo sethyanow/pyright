@@ -8,6 +8,7 @@
         "build": "tsc",
         "webpack": "webpack --mode development --progress",
         "clean": "shx rm -rf ./dist",
+        "pretest": "webpack --mode development",
         "test": "jest --forceExit"
     },
     "dependencies": {
