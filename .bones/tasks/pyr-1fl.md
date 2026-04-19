@@ -1,11 +1,12 @@
 ---
 id: pyr-1fl
 title: Build file_intelligence MCP tool
-status: active
+status: closed
 type: task
 priority: 1
 parent: pyr-ilj
 ---
+
 
 
 ## Context
