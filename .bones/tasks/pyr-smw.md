@@ -1,11 +1,16 @@
 ---
 id: pyr-smw
 title: Build PostToolUse enrichment hook for .py files
-status: open
+status: active
 type: task
 priority: 1
+owner: Seth
 parent: pyr-ilj
 ---
+
+
+
+
 
 ## Context
 
@@ -136,6 +141,16 @@ The hook is a **transient client** of the shared Pyright. It calls `ensurePyrigh
 
 **TDD Steps (each step is RED-GREEN-REFACTOR):**
 
+### Step 0: Make `ensurePyrightRunning` import-safe (prerequisite)
+
+`ensurePyrightRunning` is currently a module-local `async function` in `packages/pyright-mcp/src/proxy.ts:211`, and proxy.ts runs entry-point code at module top level (lines 343–366: argv parsing, `runLspMode`/`runMcpMode` dispatch, `process.exit(1)` on no mode). Importing it from the hook would crash the hook at import time.
+
+Required changes in `proxy.ts`:
+- Add `export` to `ensurePyrightRunning` (the only symbol the hook needs).
+- Wrap the entry-point block in `if (require.main === module) { ... }`. The guard MUST enclose BOTH the argv parsing AND `const stateDir = getStateDir();` (line 354) — because `getStateDir()` calls `process.exit(1)` when env vars are unset, leaving it outside the guard still crashes tests that import the module without those env vars.
+
+Regression gate: existing `proxy.test.ts` continues to pass. The test spawns the built bundle via `node dist/proxy.js`, so it exercises the CLI path — confirm the guard keeps that working.
+
 ### Step 1: Extract fetchFileIntelligence helper (REFACTOR-first, tests unchanged)
 
 This is pure code motion — the existing partial-failure + integration tests already cover the handler's behavior. Move the handler body into a new exported `fetchFileIntelligence` function. Handler becomes a wrapper. Run the full pyright-mcp suite; all existing tests must pass unchanged. This is the ONE exception to TDD-first in this plan: pure extraction with zero behavior change, gated by the existing 28+ tests.
@@ -162,22 +177,25 @@ Create `packages/pyright-mcp/src/hooks/enrich-file.ts` with `shouldEnrich` expor
 ### Step 4: Integration test for hook entry (RED)
 
 In `hook-enrich-file.test.ts`, add an integration test that:
-- Builds the hook (`npm run webpack` in pyright-mcp, or invokes webpack programmatically for the test)
-- Spawns `node dist/hooks/enrich-file.js` as a child process with `CLAUDE_PLUGIN_DATA` set to a tmpdir
-- Writes a PostToolUse JSON to its stdin for `Read` on `fixtures/sample.py`
-- Reads stdout, parses JSON
-- Asserts `hookSpecificOutput.additionalContext` contains `<file-intelligence` and `class Greeter`
+- Verifies `dist/hooks/enrich-file.js` exists (prerequisite: `npm run webpack` must have run against the updated `webpack.config.js` from Step 7 — integration test is wired to run AFTER Step 7 even though it's specified here as RED; alternative: in the test's `beforeAll`, invoke webpack synchronously as `proxy.test.ts` does). Follow the existing pattern in `proxy.test.ts` — do not reinvent build orchestration.
+- Spawns `node dist/hooks/enrich-file.js` as a child process with `PYRIGHT_PROXY_STATE_DIR` set to a tmpdir (preferred over `CLAUDE_PLUGIN_DATA` in tests — see `getStateDir` in proxy.ts, which checks `PYRIGHT_PROXY_STATE_DIR` first).
+- Writes a PostToolUse JSON to its stdin for `Read` on the absolute path of `packages/pyright-mcp/src/tests/fixtures/sample.py`.
+- Reads stdout, parses JSON.
+- Asserts `hookSpecificOutput.additionalContext` contains `<file-intelligence` and `class Greeter`.
 
 Expected to fail — main flow is stubbed to emit `{}`.
 
 ### Step 5: Implement connection + call to fetchFileIntelligence (GREEN)
 
 Wire the main flow:
-- readStdinJson helper (promise that collects stdin to EOF and parses)
-- connectAndInit: create socket, wrap in MessageConnection, send initialize, capture legend from response
-- Call fetchFileIntelligence
-- Write output
-- All error paths swallow and emit `{}`
+- `readStdinJson` helper: accumulate `process.stdin.on('data')` chunks, parse on `'end'`. stdin arrives already flowing (Claude Code writes then closes).
+- `connectAndInit(socketPath)`: `net.createConnection(socketPath)`, wrap in `StreamMessageReader`/`StreamMessageWriter`, `createMessageConnection`, call `.listen()`, `sendRequest('initialize', CAPS)`, then `sendNotification('initialized', {})` per LSP spec. Capture legend from `initResult.capabilities.semanticTokensProvider.legend`. Returns `{ connection, legend, openedUris: new Set<string>() }`.
+- **Capabilities block must be identical to the proxy's MCP mode** — copy verbatim from `packages/pyright-mcp/src/proxy.ts` `runMcpMode` (the `initialize` call's `capabilities` object). Mismatched capabilities trigger re-negotiation.
+- Call `fetchFileIntelligence` with the MessageConnection, filePath, legend, openedUris.
+- `writeOutput(obj)` = `process.stdout.write(JSON.stringify(obj))` (no trailing newline required, Claude Code parses end-of-stream).
+- All error paths swallow and emit `{}`.
+- If `legend` is missing after initialize → emit `{}` (see failure catalog "Dependency Treachery: initialize fails or returns no legend").
+- **Soft-timeout (per failure catalog "Temporal Betrayal: hook hangs past Claude Code's 60s kill"):** Wrap `main()`'s async work in `Promise.race` against a 45s timer. On timeout, resolve by writing `{}` and calling `process.exit(0)`. Prefer a single top-level race over scattered per-op timeouts.
 
 ### Step 6: Unit tests for error paths (RED-GREEN cycles)
 
@@ -191,6 +209,10 @@ Each failing → implement minimal guard → passes.
 ### Step 7: Webpack wiring
 
 Update `webpack.config.js`: add `'hooks/enrich-file': './src/hooks/enrich-file.ts'` to the `entry` object. Run `npm run webpack` to verify `dist/hooks/enrich-file.js` is produced.
+
+### Step 8a: SessionStart build check for hook dist
+
+Update `packages/pyright-mcp/hooks/scripts/check-build.sh` to emit a warning when `dist/hooks/enrich-file.js` is missing — mirror the existing `dist/mcp-server.js` check. Without this, a user who forgets to rebuild sees opaque per-tool-call hook errors instead of a single SessionStart warning. No new success criterion required — a regression test here would be disproportionate; manual verification is acceptable (touch/remove the file, run the script, confirm warning text).
 
 ### Step 8: hooks.json registration
 
@@ -223,15 +245,16 @@ All must be clean.
 
 ## Success Criteria
 
-- [ ] `fetchFileIntelligence` helper extracted; MCP handler is a thin wrapper; all existing pyright-mcp tests pass unchanged
-- [ ] `shouldEnrich()` gates correctly: Read/Edit/Write times absolute .py path only; .pyi, .txt, relative paths, other tools rejected
-- [ ] Hook entry point `src/hooks/enrich-file.ts` reads PostToolUse JSON, invokes fetchFileIntelligence when gate passes, emits `hookSpecificOutput.additionalContext` with the `<file-intelligence>` block
-- [ ] Hook swallows all errors (invalid JSON, missing env, socket failure, LSP error, timeout) and emits `{}` with `process.exit(0)`
-- [ ] Integration test spawns built hook, feeds PostToolUse JSON for sample.py, verifies additionalContext contains class Greeter enrichment
-- [ ] `webpack.config.js` includes `hooks/enrich-file` entry; `npm run webpack` produces `dist/hooks/enrich-file.js`
-- [ ] `hooks.json` PostToolUse entry matches `Read|Edit|Write` and points to the compiled hook
-- [ ] `npm run typecheck` clean
-- [ ] Full pyright-mcp test suite passes: `./node_modules/.bin/jest --forceExit`
+- [x] `ensurePyrightRunning` exported from `proxy.ts` with entry-point block guarded by `require.main === module`; `proxy.test.ts` passes unchanged
+- [x] `fetchFileIntelligence` helper extracted; MCP handler is a thin wrapper; all existing pyright-mcp tests pass unchanged
+- [x] `shouldEnrich()` gates correctly: Read/Edit/Write times absolute .py path only; .pyi, .txt, relative paths, other tools rejected
+- [x] Hook entry point `src/hooks/enrich-file.ts` reads PostToolUse JSON, invokes fetchFileIntelligence when gate passes, emits `hookSpecificOutput.additionalContext` with the `<file-intelligence>` block
+- [x] Hook swallows all errors (invalid JSON, missing env, socket failure, LSP error, timeout) and emits `{}` with `process.exit(0)`
+- [x] Integration test spawns built hook, feeds PostToolUse JSON for sample.py, verifies additionalContext contains class Greeter enrichment
+- [x] `webpack.config.js` includes `hooks/enrich-file` entry; `npm run webpack` produces `dist/hooks/enrich-file.js`
+- [x] `hooks.json` PostToolUse entry matches `Read|Edit|Write` and points to the compiled hook
+- [x] `npm run typecheck` clean
+- [x] Full pyright-mcp test suite passes: `./node_modules/.bin/jest --forceExit`
 
 ## Anti-Patterns
 
@@ -289,3 +312,32 @@ All must be clean.
 - Betrayal: agent doing a large refactor, 50 files touched in a minute
 - Consequence: 50 transient hook processes, each doing initialize + 3 LSP requests
 - Mitigation: accept for MVP. If problematic, a later task can add process-level dedup (e.g., per-file cooldown written to a state file).
+
+**State Corruption: `proxy.ts` module top-level side effects leak into hook imports**
+- Assumption: Wrapping only the mode-dispatch block in `require.main === module` is sufficient to make proxy.ts import-safe.
+- Betrayal: `const stateDir = getStateDir();` at line 354 runs unconditionally on import, and `getStateDir()` calls `process.exit(1)` when `PYRIGHT_PROXY_STATE_DIR` / `CLAUDE_PLUGIN_DATA` are both unset. The hook ships `CLAUDE_PLUGIN_DATA` via Claude Code, but any unit test importing from proxy.ts would crash.
+- Consequence: Importing `ensurePyrightRunning` from proxy.ts in a test would kill the jest worker on load with exit code 1.
+- Mitigation: Move the `const stateDir = getStateDir();` line INSIDE the `require.main === module` guard block. The module must be side-effect-free on import.
+
+**Dependency Treachery: hook dist missing at plugin load**
+- Assumption: Users run `npm run webpack` after install; `dist/hooks/enrich-file.js` exists when Claude Code loads the plugin.
+- Betrayal: User installs the plugin fresh and Claude Code tries to fire the PostToolUse hook, but the dist bundle doesn't exist.
+- Consequence: `node ${CLAUDE_PLUGIN_ROOT}/dist/hooks/enrich-file.js` fails with `Error: Cannot find module` — non-zero exit → user-visible hook error on every file Read/Edit/Write. Violates the "invisible on failure" contract.
+- Mitigation: Extend `hooks/scripts/check-build.sh` (SessionStart hook) to also warn when `dist/hooks/enrich-file.js` is missing, so the user is told about the gap at session start rather than discovering it per-tool-invocation.
+
+**Temporal Betrayal: hook hangs past Claude Code's 60s kill**
+- Assumption: Pyright responds within 30s (per the existing internal timeout on each LSP branch).
+- Betrayal: Socket connect hangs (ensurePyrightRunning test-connect blocks on a stale-but-alive socket), OR initialize sits in Pyright's queue behind another client's expensive analysis, OR net.createConnection hangs with no error.
+- Consequence: Hook exceeds hooks.json's 60s timeout → Claude Code kills it and surfaces "hook timed out" to the user. Non-silent failure.
+- Mitigation: Wrap the entire `main()` body in a `Promise.race` against a 45s soft-timeout that resolves by writing `{}` to stdout and calling `process.exit(0)`. 45s is well below the 60s hooks.json kill window and matches the spirit of "invisible on failure."
+
+**Input Hostility: stdin pathologies**
+- Assumption: Claude Code writes valid PostToolUse JSON and closes stdin cleanly.
+- Betrayal: stdin closed before any bytes arrive (empty payload), or never closed (hook hangs on `end` event), or streams gigabytes (hypothetical misuse).
+- Consequence: `JSON.parse('')` throws; hang waiting for end; unbounded memory growth.
+- Mitigation: outer try/catch handles parse errors → emit `{}`. For hang: the 45s soft-timeout above bounds waiting. Memory: trust the caller; PostToolUse payloads are <2KB in practice.
+
+## Log
+
+- [2026-04-19T21:35:32Z] [Seth] SRE review (fresh session). Verified: all skeleton claims against codebase (proxy.ts ensurePyrightRunning at 210-249, mcp-server.ts file_intelligence handler, hooks.json SessionStart only, webpack 3 entries, plugin.json LSP+MCP wiring). Memory references current: reference_claude_code_hook_schema, reference_proxy_architecture, reference_pyright_inlay_behavior. Critical gap filled: ensurePyrightRunning is NOT exported and proxy.ts has CLI entry-point code at module top level (lines 343-366) that runs on import — added Step 0 prerequisite: export + require.main guard. Added: (1) Initialize must follow-up with sendNotification('initialized', {}); (2) capabilities block copy verbatim from proxy.ts runMcpMode; (3) integration test uses PYRIGHT_PROXY_STATE_DIR tmpdir (test-preferred env); (4) new SC checkbox for Step 0. No design changes; all SRE additions are execution gap fills.
+- [2026-04-19T21:37:44Z] [Seth] Adversarial planning (Step 1a). Walked all six categories across new components (Step 0 guard, readStdinJson, connectAndInit, main flow). Added 5 failure catalog entries: (1) proxy.ts getStateDir() at module top level must also be inside require.main guard, not just argv dispatch; (2) hook dist missing at plugin load → user-visible error per-tool → extend check-build.sh; (3) hook hangs past Claude Code's 60s kill → 45s main() soft-timeout; (4) stdin pathologies (empty/never-closed/oversized) → relies on soft-timeout + try/catch; (5) restated State Corruption around import side effects. Added Step 8a (check-build.sh update). Tightened Step 0 wording re: guard enclosure. Mitigations are structural, not defensive.

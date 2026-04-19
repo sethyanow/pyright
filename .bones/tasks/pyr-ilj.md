@@ -37,7 +37,7 @@ R5, R6, R7 from parent epic pyr-tcv.
 
 - [x] Sub-task A complete: `semanticTokensProvider` tokenModifiers legend includes `abstract`, `protocol`, `override`; walker emits them correctly
 - [x] Sub-task B complete: `file_intelligence` MCP tool returns formatted `<file-intelligence>` block for a given `.py` path
-- [ ] Sub-task C complete: PostToolUse hook on Read/Edit/Write for `.py` invokes the tool and injects the result
+- [x] Sub-task C complete: PostToolUse hook on Read/Edit/Write for `.py` invokes the tool and injects the result
 - [x] Block includes: codeLens reference/implementation counts, semantic classifications from `tokenModifiers`, inlay Type hints for unannotated variables/returns
 - [x] Format is compact, line-anchored, scannable
 - [x] Full test suite passes: `cd packages/pyright-internal && npm run test:norebuild`

@@ -208,7 +208,7 @@ interface PyrightBackend {
     isOwner: boolean;
 }
 
-async function ensurePyrightRunning(stateDir: string): Promise<PyrightBackend> {
+export async function ensurePyrightRunning(stateDir: string): Promise<PyrightBackend> {
     const pidPath = getPidPath(stateDir);
     const socketPath = getSocketPath(stateDir);
     const existingPid = readPid(pidPath);
@@ -340,27 +340,29 @@ async function runMcpMode(stateDir: string): Promise<void> {
 
 // --- Entry point ---
 
-const mode = process.argv.includes('--lsp')
-    ? 'lsp'
-    : process.argv.includes('--mcp')
-      ? 'mcp'
-      : null;
+if (require.main === module) {
+    const mode = process.argv.includes('--lsp')
+        ? 'lsp'
+        : process.argv.includes('--mcp')
+          ? 'mcp'
+          : null;
 
-if (!mode) {
-    process.stderr.write('Usage: proxy.js --lsp | --mcp\n');
-    process.exit(1);
-}
-
-const stateDir = getStateDir();
-
-if (mode === 'lsp') {
-    runLspMode(stateDir).catch((err) => {
-        process.stderr.write(`proxy --lsp error: ${(err as Error).message}\n`);
+    if (!mode) {
+        process.stderr.write('Usage: proxy.js --lsp | --mcp\n');
         process.exit(1);
-    });
-} else {
-    runMcpMode(stateDir).catch((err) => {
-        process.stderr.write(`proxy --mcp error: ${(err as Error).message}\n`);
-        process.exit(1);
-    });
+    }
+
+    const stateDir = getStateDir();
+
+    if (mode === 'lsp') {
+        runLspMode(stateDir).catch((err) => {
+            process.stderr.write(`proxy --lsp error: ${(err as Error).message}\n`);
+            process.exit(1);
+        });
+    } else {
+        runMcpMode(stateDir).catch((err) => {
+            process.stderr.write(`proxy --mcp error: ${(err as Error).message}\n`);
+            process.exit(1);
+        });
+    }
 }

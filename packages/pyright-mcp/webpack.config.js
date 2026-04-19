@@ -13,6 +13,7 @@ module.exports = (_, { mode }) => {
             'mcp-server': './src/mcp-server.ts',
             'lsp-client': './src/lsp-client.ts',
             proxy: './src/proxy.ts',
+            'hooks/enrich-file': './src/hooks/enrich-file.ts',
         },
         target: 'node',
         output: {

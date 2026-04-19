@@ -10,6 +10,12 @@ if [ ! -f "${MCP_SERVER}" ]; then
     echo "Warning: MCP server not built. Run: cd packages/pyright-mcp && npm run build"
 fi
 
+# Check PostToolUse enrichment hook dist
+ENRICH_HOOK="${PLUGIN_ROOT}/dist/hooks/enrich-file.js"
+if [ ! -f "${ENRICH_HOOK}" ]; then
+    echo "Warning: Enrichment hook not built. Run: cd packages/pyright-mcp && npm run webpack"
+fi
+
 # Check langserver: env var → CWD-relative
 if [ -n "${PYRIGHT_LANGSERVER_PATH:-}" ]; then
     if [ ! -f "${PYRIGHT_LANGSERVER_PATH}" ]; then
