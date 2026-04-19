@@ -50,10 +50,10 @@ The proxy architecture replaces the shell script entry point and shares a single
 - [x] Shared Pyright backend via Unix socket + PID — verified one Pyright process serves both
 - [x] Any disconnect tears down Pyright child process (no leaked PIDs)
 - [x] Plugin `lspServers` config registered, stock `pyright-lsp` disabled, dev build provides Python LSP
-- [ ] PostToolUse hook on Read/Edit/Write for `.py` fires and injects the `<file-intelligence>` block returned by the `file_intelligence` MCP tool
-- [ ] Block includes codeLens counts, semantic classifications from Pyright `tokenModifiers` (abstract/protocol/override — explicit + implicit), inlay Type hints for unannotated symbols
-- [ ] All existing tests pass: `cd packages/pyright-internal && npm run test:norebuild`
-- [ ] `npm run typecheck` clean
+- [x] PostToolUse hook on Read/Edit/Write for `.py` fires and injects the `<file-intelligence>` block returned by the `file_intelligence` MCP tool
+- [x] Block includes codeLens counts, semantic classifications from Pyright `tokenModifiers` (abstract/protocol/override — explicit + implicit), inlay Type hints for unannotated symbols
+- [x] All existing tests pass: `cd packages/pyright-internal && npm run test:norebuild`
+- [x] `npm run typecheck` clean
 
 ## Anti-Patterns (FORBIDDEN)
 
