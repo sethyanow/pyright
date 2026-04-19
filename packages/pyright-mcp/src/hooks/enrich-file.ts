@@ -1,6 +1,6 @@
 import path from 'path';
-import { fetchFileIntelligence } from './socket-lsp-client';
-import { formatFileIntelligenceBlock } from './format-block';
+import { fetchCodeLenses } from './socket-lsp-client';
+import { formatFileIntelligence } from './format-block';
 
 export interface PostToolUseInput {
     session_id: string;
@@ -44,10 +44,10 @@ export async function enrichFile(input: PostToolUseInput): Promise<HookOutput> {
     const socketPath = resolveSocketPath();
     if (!socketPath) return {};
 
-    const intel = await fetchFileIntelligence(socketPath, filePath);
-    if (intel.codeLenses.length === 0 && intel.inlayHints.length === 0) return {};
+    const lenses = await fetchCodeLenses(socketPath, filePath);
+    if (lenses.length === 0) return {};
 
-    const block = formatFileIntelligenceBlock(filePath, intel);
+    const block = formatFileIntelligence(filePath, lenses);
     return {
         hookSpecificOutput: {
             hookEventName: 'PostToolUse',
