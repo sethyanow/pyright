@@ -1,12 +1,13 @@
 ---
 id: pyr-xi9
 title: Extend pyright-internal semanticTokens tokenModifiers
-status: active
+status: closed
 type: task
 priority: 1
 owner: Seth
 parent: pyr-ilj
 ---
+
 
 
 

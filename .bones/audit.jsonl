@@ -317,3 +317,7 @@
 {"timestamp":"2026-04-19T18:43:20.198525+00:00","actor":"Seth","event_type":"dep_added","task_id":"pyr-ilj","details":{"kind":"blocks","to":"pyr-xi9"}}
 {"timestamp":"2026-04-19T19:12:08.329113+00:00","actor":"Seth","event_type":"claimed","task_id":"pyr-xi9","details":{"actor":"Seth"}}
 {"timestamp":"2026-04-19T19:40:08.353426+00:00","actor":"Seth","event_type":"logged","task_id":"pyr-xi9","details":{"message":"Complete. Implemented tokenModifiers ['abstract', 'protocol', 'override']. Key decisions: (1) classes get abstract only if they DECLARE abstract methods, not just inherit ABCMeta; (2) dunder methods excluded from implicit override detection (found during adversarial testing). 2 fourslash tests added. All 2394 tests pass."}}
+{"timestamp":"2026-04-19T19:40:34.736695+00:00","actor":"Seth","event_type":"closed","task_id":"pyr-xi9","details":{"notes":null}}
+{"timestamp":"2026-04-19T19:44:16.773442+00:00","actor":"Seth","event_type":"created","task_id":"pyr-1fl","details":{}}
+{"timestamp":"2026-04-19T19:44:22.972398+00:00","actor":"Seth","event_type":"dep_added","task_id":"pyr-ilj","details":{"kind":"parent-child","to":"pyr-1fl"}}
+{"timestamp":"2026-04-19T19:44:22.972849+00:00","actor":"Seth","event_type":"dep_added","task_id":"pyr-ilj","details":{"kind":"blocks","to":"pyr-1fl"}}
