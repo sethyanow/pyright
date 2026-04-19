@@ -21,6 +21,7 @@ import {
     StreamMessageReader,
     StreamMessageWriter,
 } from 'vscode-jsonrpc/node';
+import { JsonRpcDemux } from './jsonrpc-demux';
 import { createMcpServer } from './mcp-server';
 import { resolveLangserverPath } from './resolve-langserver-path';
 
@@ -90,33 +91,25 @@ function createSocketBridge(
     socketPath: string
 ): Promise<net.Server> {
     return new Promise((resolve, reject) => {
-        const clients = new Set<net.Socket>();
-
-        const server = net.createServer((client) => {
-            clients.add(client);
-
-            client.on('data', (data) => {
-                try {
-                    pyrightProcess.stdin!.write(data);
-                } catch { /* Pyright stdin closed */ }
-            });
-
-            client.on('close', () => {
-                clients.delete(client);
-            });
-
-            client.on('error', () => {
-                clients.delete(client);
-            });
+        const demux = new JsonRpcDemux({
+            pyrightStdin: pyrightProcess.stdin!,
+            pyrightStdout: pyrightProcess.stdout!,
+            onPyrightExit: () => {
+                // Pyright died; the parent's cleanup-on-exit handler will tear down
+                // the rest of the proxy. Nothing further to do here — the demux has
+                // already synthesized error responses for pending client requests.
+            },
         });
 
-        // Forward Pyright stdout to all socket clients
-        pyrightProcess.stdout!.on('data', (data: Buffer) => {
-            for (const client of clients) {
-                try {
-                    client.write(data);
-                } catch { /* client disconnected */ }
-            }
+        const server = net.createServer((client) => {
+            demux.addClient(client);
+        });
+
+        // Keep the demux alive for the lifetime of the server.
+        (server as net.Server & { _demux?: JsonRpcDemux })._demux = demux;
+
+        server.on('close', () => {
+            demux.dispose();
         });
 
         server.on('error', reject);

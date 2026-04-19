@@ -399,3 +399,112 @@ describe('proxy --mcp mode', () => {
         expect(isProcessAlive(pyrightPid)).toBe(false);
     }, 30_000);
 });
+
+describe('proxy three-client ID isolation (R8)', () => {
+    let stateDir: string;
+    let bootstrapProc: ChildProcess | null = null;
+    const rawSockets: import('net').Socket[] = [];
+
+    beforeEach(() => {
+        stateDir = createTempStateDir();
+    });
+
+    afterEach(async () => {
+        for (const s of rawSockets) {
+            try { s.destroy(); } catch { /* ignore */ }
+        }
+        rawSockets.length = 0;
+        if (bootstrapProc && bootstrapProc.exitCode === null) {
+            await killProxy(bootstrapProc);
+        }
+        bootstrapProc = null;
+    });
+
+    it('three concurrent clients with overlapping request IDs each receive their own response (no cross-talk)', async () => {
+        // Spawn --lsp to bootstrap a shared Pyright via the proxy
+        const bootstrap = spawnProxy('lsp', stateDir);
+        bootstrapProc = bootstrap.process;
+
+        const rootUri = `file://${FIXTURES_DIR}`;
+        await bootstrap.connection.sendRequest('initialize', {
+            processId: process.pid,
+            rootUri,
+            rootPath: FIXTURES_DIR,
+            workspaceFolders: [{ uri: rootUri, name: 'fixtures' }],
+            capabilities: {
+                workspace: { symbol: { dynamicRegistration: false }, workspaceFolders: true },
+            },
+        });
+        bootstrap.connection.sendNotification('initialized', {});
+
+        await waitForPidFile(stateDir);
+
+        // Let Pyright finish background analysis so workspace/symbol returns non-empty
+        for (let i = 0; i < 50; i++) {
+            const symbols = await bootstrap.connection.sendRequest('workspace/symbol', { query: 'Greeter' });
+            if (Array.isArray(symbols) && symbols.length > 0) break;
+            await new Promise((r) => setTimeout(r, 200));
+        }
+
+        // Open three RAW socket connections against pyright.sock and wrap each in its own
+        // MessageConnection. Each client's ID counter starts at 0 independently — the
+        // pre-demux bridge would cross-talk responses. The demux must isolate.
+        const socketPath = path.join(stateDir, 'pyright.sock');
+        const net = await import('net');
+        const clients: MessageConnection[] = [];
+        for (let i = 0; i < 3; i++) {
+            const sock = net.createConnection(socketPath);
+            rawSockets.push(sock);
+            await new Promise<void>((res, rej) => {
+                sock.once('connect', () => res());
+                sock.once('error', rej);
+            });
+            sock.on('error', () => {});
+            const conn = createMessageConnection(
+                new StreamMessageReader(sock),
+                new StreamMessageWriter(sock)
+            );
+            conn.listen();
+            // Each new client sends initialize; cached response from the demux returns
+            // immediately without hitting Pyright a second time.
+            await conn.sendRequest('initialize', {
+                processId: process.pid,
+                rootUri,
+                rootPath: FIXTURES_DIR,
+                workspaceFolders: [{ uri: rootUri, name: `raw-${i}` }],
+                capabilities: {
+                    workspace: { symbol: { dynamicRegistration: false }, workspaceFolders: true },
+                },
+            });
+            clients.push(conn);
+        }
+
+        // Fire three concurrent workspace/symbol requests with distinct queries.
+        // MessageConnection assigns each call's ID from its own counter (starting at 0),
+        // so the three requests collide on the wire if the proxy is a byte-tee.
+        const queries = ['Greeter', 'EnglishGreeter', 'SpanishGreeter'];
+        const results = await Promise.all(
+            clients.map((conn, i) =>
+                conn.sendRequest<any[]>('workspace/symbol', { query: queries[i] })
+            )
+        );
+
+        // Each client's response should contain ITS OWN query's symbols, not another's.
+        expect(results[0].some((s: any) => s.name === 'Greeter')).toBe(true);
+        expect(results[1].some((s: any) => s.name === 'EnglishGreeter')).toBe(true);
+        expect(results[2].some((s: any) => s.name === 'SpanishGreeter')).toBe(true);
+
+        // No leaked responses — each client got exactly one
+        expect(results[0].length).toBeGreaterThan(0);
+        expect(results[1].length).toBeGreaterThan(0);
+        expect(results[2].length).toBeGreaterThan(0);
+
+        // Cleanup
+        for (const conn of clients) {
+            try { conn.dispose(); } catch { /* ignore */ }
+        }
+        await bootstrap.connection.sendRequest('shutdown');
+        bootstrap.connection.sendNotification('exit');
+        bootstrap.connection.dispose();
+    }, 60_000);
+});
