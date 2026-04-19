@@ -4,7 +4,7 @@ title: 'Phase 5.5b: Enrichment Hooks + File Intelligence'
 status: open
 type: epic
 priority: 1
-depends_on: [pyr-084, pyr-noe, pyr-bay, pyr-xi9]
+depends_on: [pyr-084, pyr-xi9]
 parent: pyr-tcv
 ---
 
