@@ -1,10 +1,11 @@
 ---
 id: pyr-klq
 title: Proxy bridge is byte-level tee, not JSON-RPC demux — request-ID collision on shared Pyright
-status: active
+status: closed
 type: bug
 priority: 0
 ---
+
 
 
 

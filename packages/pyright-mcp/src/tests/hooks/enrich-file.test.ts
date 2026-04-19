@@ -7,14 +7,19 @@ import { enrichFile, PostToolUseInput } from '../../hooks/enrich-file';
 const PROXY_PATH = path.resolve(__dirname, '../../../dist/proxy.js');
 const FIXTURES_DIR = path.resolve(__dirname, '../fixtures');
 const SAMPLE_FILE = path.resolve(FIXTURES_DIR, 'sample.py');
+const PYRIGHT_INTERNAL_SAMPLES_DIR = path.resolve(
+    __dirname,
+    '../../../../pyright-internal/src/tests/samples'
+);
+const LARGE_WORKSPACE_TARGET = path.join(PYRIGHT_INTERNAL_SAMPLES_DIR, 'abstractClass1.py');
 
 function createTempStateDir(): string {
     return mkdtempSync(path.join(tmpdir(), 'pyright-enrich-test-'));
 }
 
-function spawnLspProxy(stateDir: string): ChildProcess {
+function spawnLspProxy(stateDir: string, workspaceCwd: string = FIXTURES_DIR): ChildProcess {
     const proc = spawn('node', [PROXY_PATH, '--lsp'], {
-        cwd: FIXTURES_DIR,
+        cwd: workspaceCwd,
         stdio: ['pipe', 'pipe', 'pipe'],
         env: { ...process.env, PYRIGHT_PROXY_STATE_DIR: stateDir },
     });
@@ -144,4 +149,60 @@ describe('enrichFile', () => {
         const out = await enrichFile(input);
         expect(out).toEqual({});
     });
+});
+
+// Large-workspace hook path. Exercises proxy + socket + enrichment end-to-end
+// against the pyright-internal samples dir (1,200+ user-code .py files, no
+// pyrightconfig narrowing the scope). Verifies the 7s socket-lsp-client inner
+// timeout is not silently dropping results on cold cache. Env-gated to keep
+// default CI fast.
+//
+//   PYRIGHT_MCP_PERF=1 npx jest --testPathPattern=enrich-file --forceExit
+
+const perfDescribe = process.env.PYRIGHT_MCP_PERF === '1' ? describe : describe.skip;
+
+perfDescribe('enrichFile against large samples workspace (PYRIGHT_MCP_PERF=1)', () => {
+    let stateDir: string;
+    let proxyProc: ChildProcess | null = null;
+
+    beforeEach(() => {
+        stateDir = createTempStateDir();
+    });
+
+    afterEach(async () => {
+        if (proxyProc && proxyProc.exitCode === null) {
+            await killProxy(proxyProc);
+        }
+        proxyProc = null;
+    });
+
+    it('emits non-empty file-intelligence block on cold cache within hook budget', async () => {
+        proxyProc = spawnLspProxy(stateDir, PYRIGHT_INTERNAL_SAMPLES_DIR);
+        await waitForSocket(stateDir);
+
+        process.env.PYRIGHT_PROXY_STATE_DIR = stateDir;
+
+        const input: PostToolUseInput = {
+            session_id: 's1',
+            transcript_path: '/tmp/transcript.jsonl',
+            cwd: PYRIGHT_INTERNAL_SAMPLES_DIR,
+            permission_mode: 'default',
+            hook_event_name: 'PostToolUse',
+            tool_name: 'Read',
+            tool_input: { file_path: LARGE_WORKSPACE_TARGET },
+            tool_response: { filePath: LARGE_WORKSPACE_TARGET, content: '' },
+            tool_use_id: 'toolu_perf',
+        };
+
+        const t0 = Date.now();
+        const out = await enrichFile(input);
+        const elapsed = Date.now() - t0;
+
+        process.stderr.write(`[perf] enrichFile cold-cache large workspace: ${elapsed}ms\n`);
+
+        expect(out.hookSpecificOutput).toBeDefined();
+        const context = out.hookSpecificOutput!.additionalContext;
+        expect(context).toContain('<file-intelligence');
+        expect(context).toContain('AbstractClassA');
+    }, 60_000);
 });
