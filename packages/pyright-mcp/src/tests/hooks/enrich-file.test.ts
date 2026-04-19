@@ -7,6 +7,7 @@ import { enrichFile, PostToolUseInput } from '../../hooks/enrich-file';
 const PROXY_PATH = path.resolve(__dirname, '../../../dist/proxy.js');
 const FIXTURES_DIR = path.resolve(__dirname, '../fixtures');
 const SAMPLE_FILE = path.resolve(FIXTURES_DIR, 'sample.py');
+const INLAY_ONLY_FILE = path.resolve(FIXTURES_DIR, 'inlay_only.py');
 const PYRIGHT_INTERNAL_SAMPLES_DIR = path.resolve(
     __dirname,
     '../../../../pyright-internal/src/tests/samples'
@@ -94,6 +95,31 @@ describe('enrichFile', () => {
         expect(out.hookSpecificOutput!.hookEventName).toBe('PostToolUse');
         expect(out.hookSpecificOutput!.additionalContext).toContain('<file-intelligence');
         expect(out.hookSpecificOutput!.additionalContext).toContain('Greeter');
+        // Inlay data must flow through — sample.py has unannotated add/multiply
+        // returning int and result/product = int, so an inlay-style label
+        // (`-> int` or `: int`) must appear. The bare word "int" is a false positive
+        // (it matches "intelligence" in the tag), so the regex requires the arrow or colon prefix.
+        expect(out.hookSpecificOutput!.additionalContext).toMatch(/(?:-> int|:\s+int)/);
+    }, 60_000);
+
+    it('emits a non-empty block when codeLens is empty but inlay is not (empty-suppression gate)', async () => {
+        // Regression: a pure-script Python file (no classes, no functions worth refs)
+        // produces zero codeLens but non-empty inlay. The hook must NOT suppress.
+        proxyProc = spawnLspProxy(stateDir);
+        await waitForSocket(stateDir);
+
+        process.env.PYRIGHT_PROXY_STATE_DIR = stateDir;
+        const out = await enrichFile(makeInput(INLAY_ONLY_FILE));
+
+        expect(out.hookSpecificOutput).toBeDefined();
+        const ctx = out.hookSpecificOutput!.additionalContext;
+        expect(ctx).toContain('<file-intelligence');
+        // At least one inlay line (an L-prefixed line with a `:` label but no
+        // refs=/impls= codeLens columns). Pyright may narrow literal assignments
+        // to `Literal[0]`-style labels, so we don't pin the specific type — just
+        // the shape: inlay line has `:` but no codeLens counters.
+        const inlayLinePattern = /L\d+\s+:.+(?<!refs=\d)(?<!impls=\d)$/m;
+        expect(ctx).toMatch(inlayLinePattern);
     }, 60_000);
 
     it('returns empty object for non-Python files', async () => {
