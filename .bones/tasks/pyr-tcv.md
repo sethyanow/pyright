@@ -28,9 +28,9 @@ R3. LSP passthrough mode: proxy forwards LSP JSON-RPC between Claude Code and th
 
 R4. Plugin LSP configuration (`lspServers` in plugin.json) registers the proxy as the Python language server for `.py` and `.pyi` files, replacing the stock `pyright-lsp` plugin.
 
-R5. PostToolUse hook on Read for `.py` files calls the MCP to fetch code lens, inlay hints, and semantic tokens for the read file and injects a `<file-intelligence>` block into conversation context.
+R5. PostToolUse hook on Read / Edit / Write for `.py` files calls the `file_intelligence` MCP tool and injects the returned `<file-intelligence>` block into conversation context. The MCP tool fetches codeLens, inlayHint, and semanticTokens from shared Pyright via the warm `lsp-client.ts` MessageConnection and formats the block. The hook carries no logic.
 
-R6. `<file-intelligence>` format: single block combining code lens (reference counts, implementation counts), semantic classification (ABC, Protocol, override), and inlay hints (inferred types for unannotated variables/returns). Compact, line-anchored, scannable.
+R6. `<file-intelligence>` format: single block combining codeLens (reference counts, implementation counts), semantic classifications (abstract, protocol, override — emitted by Pyright via `semanticTokensProvider` tokenModifiers; `override` covers both explicit `@override` and implicit parent-shadowing), and inlay Type hints (inferred types for unannotated variables/returns). Compact, line-anchored, scannable.
 
 R7. All existing tests pass. MCP tool behavior unchanged. Fourslash tests unaffected.
 
@@ -50,14 +50,13 @@ The proxy architecture replaces the shell script entry point and shares a single
 - [x] Shared Pyright backend via Unix socket + PID — verified one Pyright process serves both
 - [x] Any disconnect tears down Pyright child process (no leaked PIDs)
 - [x] Plugin `lspServers` config registered, stock `pyright-lsp` disabled, dev build provides Python LSP
-- [ ] PostToolUse hook on Read for `.py` fires and injects `<file-intelligence>` block
-- [ ] `<file-intelligence>` includes code lens counts, semantic classifications, inferred types
+- [ ] PostToolUse hook on Read/Edit/Write for `.py` fires and injects the `<file-intelligence>` block returned by the `file_intelligence` MCP tool
+- [ ] Block includes codeLens counts, semantic classifications from Pyright `tokenModifiers` (abstract/protocol/override — explicit + implicit), inlay Type hints for unannotated symbols
 - [ ] All existing tests pass: `cd packages/pyright-internal && npm run test:norebuild`
 - [ ] `npm run typecheck` clean
 
 ## Anti-Patterns (FORBIDDEN)
 
-- **Don't modify the Pyright language server itself for enrichment.** Enrichment happens at the proxy/hook layer. The language server stays clean. REASON: proxy is swappable, language server serves all clients equally.
 - **Don't count connections for lifecycle.** Any disconnect kills Pyright. No reference counting. REASON: simpler, no leaked processes, warmup is cheap.
 - **Don't inject enrichments as fake diagnostics at the LSP level.** Use hooks. REASON: fake diagnostics would pollute every LSP client, not just Claude Code. Hooks target the agent specifically.
 - **Don't daemon-ize the proxy.** No persistent background process, no service management. Spawn on connect, teardown on disconnect. REASON: dev tooling, not infrastructure.
@@ -73,15 +72,16 @@ Enrichment is a separate concern from the proxy. A PostToolUse hook on Read for 
 ```
 Claude Code
     │
-    ├── stdio (LSP) ──→  proxy --lsp  ──┐
-    │                                    ├──→  Unix socket  ──→  Pyright (one process)
-    └── stdio (MCP) ──→  proxy --mcp  ──┘
-                              │
-                              └──→  PostToolUse hook (Read .py)
-                                        │
-                                        └──→  MCP lsp() tool
-                                                │
-                                                └──→  <file-intelligence> block
+    ├── stdio (LSP) ──→ proxy --lsp ──┐
+    │                                  ├──→ Unix socket ──→ Pyright (one process)
+    ├── stdio (MCP) ──→ proxy --mcp ──┘       └── codeLens, inlayHint, semanticTokens
+    │                        │                   with tokenModifiers (abstract/protocol/override)
+    │                        ├── lsp() tool (raw passthrough)
+    │                        └── file_intelligence(path) tool
+    │                                ├── warm MessageConnection → shared Pyright
+    │                                └── returns formatted <file-intelligence>
+    │                                       ↑
+    └── PostToolUse hook (Read/Edit/Write .py) ─┘   (thin: calls file_intelligence, injects result)
 ```
 
 ## Phases
@@ -130,7 +130,7 @@ Code lens, inlay hints, and semantic tokens are implemented but only accessible 
 One Pyright instance is cheaper than two. The type cache, parsed files, and binding state are shared. Two instances would double memory and cold-start time. The proxy is trivial — route stdio to a Unix socket.
 
 ### Why hooks over diagnostic injection
-Hooks target the agent specifically. Diagnostic injection would pollute every LSP client and require client detection at the language server level. The hook layer is clean separation: language server provides data, hook layer decides presentation.
+The PostToolUse hook targets the agent specifically — fires on Read/Edit/Write for `.py` in Claude Code and injects `<file-intelligence>` into conversation context. Diagnostic injection at the LSP level would pollute every LSP client and require client detection at the language server level. The hook is the delivery trigger; it carries no logic. The `file_intelligence` MCP tool holds all fetching and formatting, which also makes the same enrichment available cross-agent for any MCP client that calls it directly. Semantic classifications (abstract/protocol/override) live in pyright-internal via `tokenModifiers` — benefits every LSP client, not only MCP consumers.
 
 ### Why teardown on any disconnect
 Connection counting is a state management problem that doesn't need to exist. Pyright cold-starts in <2s for a dev workspace. The simplicity of "spawn on connect, kill on disconnect" eliminates an entire class of leaked-process bugs.

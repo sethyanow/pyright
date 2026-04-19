@@ -312,3 +312,6 @@
 {"timestamp":"2026-04-19T03:54:13.427816+00:00","actor":"Seth","event_type":"logged","task_id":"pyr-x2v","details":{"message":"R5 verified: enrichFile on cold-cache large workspace (samples dir, 1284 files, fresh proxy state dir) = 337ms. Block contains AbstractClassA content and file-intelligence tags. Well under the 7s socket-lsp-client inner timeout. No silent [] degradation observed."}}
 {"timestamp":"2026-04-19T04:00:26.177765+00:00","actor":"Seth","event_type":"logged","task_id":"pyr-x2v","details":{"message":"All success criteria verified and checked off. Tests committed (1f4368290) and pushed. Closing task."}}
 {"timestamp":"2026-04-19T04:00:26.374985+00:00","actor":"Seth","event_type":"closed","task_id":"pyr-x2v","details":{"notes":null}}
+{"timestamp":"2026-04-19T18:43:16.471898+00:00","actor":"Seth","event_type":"created","task_id":"pyr-xi9","details":{}}
+{"timestamp":"2026-04-19T18:43:20.197923+00:00","actor":"Seth","event_type":"dep_added","task_id":"pyr-ilj","details":{"kind":"parent-child","to":"pyr-xi9"}}
+{"timestamp":"2026-04-19T18:43:20.198525+00:00","actor":"Seth","event_type":"dep_added","task_id":"pyr-ilj","details":{"kind":"blocks","to":"pyr-xi9"}}
