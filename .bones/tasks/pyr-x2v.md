@@ -1,10 +1,12 @@
 ---
 id: pyr-x2v
 title: Verify codeLens/resolve performance on cold cache with large workspace
-status: active
+status: closed
 type: task
 priority: 2
 ---
+
+
 
 
 
@@ -142,3 +144,4 @@ Grouped by component. Each entry: Assumption → Betrayal → Consequence → Mi
 - [2026-04-19T03:47:18Z] [Seth] Reframed criteria per user feedback: measurement is diagnostic input, not a success gate. Structural tests only - non-null result (no MCP timeout), non-empty hook block, fourslash regression greens. Numbers go in log as context. Acceptance demo = agent performs Read in this session; hook block appears. Proceeding to TDD.
 - [2026-04-19T03:52:14Z] [Seth] BASELINE captured (perf test PASS on first run): cold-cache codeLens/resolve implementations=652ms, references=56ms against samples workspace (1284 .py files, no pyrightconfig narrowing scope). Well under MCP 30s outer timeout and hook 7s inner timeout. BFS pre-filter (commit de968173a) is working as designed at scale. Test committed as regression guard: packages/pyright-mcp/src/tests/codeLensPerf.test.ts (env-gated PYRIGHT_MCP_PERF=1).
 - [2026-04-19T03:54:13Z] [Seth] R5 verified: enrichFile on cold-cache large workspace (samples dir, 1284 files, fresh proxy state dir) = 337ms. Block contains AbstractClassA content and file-intelligence tags. Well under the 7s socket-lsp-client inner timeout. No silent [] degradation observed.
+- [2026-04-19T04:00:26Z] [Seth] All success criteria verified and checked off. Tests committed (1f4368290) and pushed. Closing task.
