@@ -324,4 +324,78 @@ describe('pyright MCP server', () => {
         });
         expect(result.isError).toBe(true);
     }, 10_000);
+
+    describe('file_intelligence tool', () => {
+        it('registers the tool', async () => {
+            const result = await client.listTools();
+            const toolNames = result.tools.map((t) => t.name);
+            expect(toolNames).toContain('file_intelligence');
+        });
+
+        it('returns a <file-intelligence> block with semantic + codeLens + inlay enrichments for sample.py', async () => {
+            const samplePath = path.resolve(FIXTURES_DIR, 'sample.py');
+            const result = await client.callTool({
+                name: 'file_intelligence',
+                arguments: { path: samplePath },
+            });
+            expect(result.isError).not.toBe(true);
+            const content = result.content as Array<{ type: string; text: string }>;
+            expect(content.length).toBeGreaterThan(0);
+            const block = content[0].text;
+
+            // Wrapper shape
+            expect(block.startsWith(`<file-intelligence path="${samplePath}">`)).toBe(true);
+            expect(block.trimEnd().endsWith('</file-intelligence>')).toBe(true);
+
+            // Semantic classifications (sub-task A output: abstract/protocol/override)
+            // Greeter declares @abstractmethod → class Greeter carries [abstract]
+            expect(block).toMatch(/class Greeter \[abstract\] refs=\d+ impls=\d+/);
+            // Greeter.greet is itself @abstractmethod
+            expect(block).toMatch(/method greet \[abstract\]/);
+            // EnglishGreeter.greet implicitly overrides Greeter.greet → [override]
+            expect(block).toMatch(/method greet \[override\]/);
+
+            // Inlay Type hints for unannotated symbols — multiply has annotated
+            // params so Pyright can infer return type; add has unannotated params
+            // so Pyright leaves the return type as Unknown (no inlay).
+            expect(block).toMatch(/function multiply[^\n]*: int/);
+            // Variable-level inlays — `result = add(...)` and `product = multiply(...)`.
+            expect(block).toMatch(/variable result : Literal\[3\]/);
+            expect(block).toMatch(/variable product : int/);
+
+            // Parameter-name inlays (kind 2) must not appear. Their labels end
+            // with `=` (e.g., `x=`) which would look like `variable foo x=` in a
+            // leaked line. Rule: no emission line should end with a `=` token.
+            for (const line of block.split('\n')) {
+                if (!line.startsWith('L')) continue;
+                // Split final token off the line — flag if it looks like `name=`
+                const lastToken = line.trim().split(/\s+/).pop() ?? '';
+                expect(lastToken).not.toMatch(/^[a-zA-Z_]\w*=$/);
+            }
+        }, 30_000);
+
+        it('returns isError for a non-.py path', async () => {
+            const result = await client.callTool({
+                name: 'file_intelligence',
+                arguments: { path: '/tmp/not-python.txt' },
+            });
+            expect(result.isError).toBe(true);
+        });
+
+        it('returns isError for a relative path', async () => {
+            const result = await client.callTool({
+                name: 'file_intelligence',
+                arguments: { path: 'relative/sample.py' },
+            });
+            expect(result.isError).toBe(true);
+        });
+
+        it('returns isError for a non-existent absolute .py path', async () => {
+            const result = await client.callTool({
+                name: 'file_intelligence',
+                arguments: { path: '/tmp/does-not-exist-xyz-123.py' },
+            });
+            expect(result.isError).toBe(true);
+        });
+    });
 });
