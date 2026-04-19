@@ -4,9 +4,11 @@ title: 'Phase 5.5b: Enrichment Hooks + File Intelligence'
 status: open
 type: epic
 priority: 1
-depends_on: [pyr-084, pyr-noe, pyr-bay]
+depends_on: [pyr-084, pyr-noe, pyr-bay, pyr-47m]
 parent: pyr-tcv
 ---
+
+
 
 
 
@@ -22,13 +24,13 @@ R5, R6, R7 from parent epic pyr-tcv.
 
 ## Success Criteria
 
-- [ ] PostToolUse hook on Read fires for `.py` files
-- [ ] Hook calls MCP `lsp()` tool for codeLens, inlayHint, semanticTokens
-- [ ] `<file-intelligence>` block injected into agent context
-- [ ] Block includes: reference counts, implementation counts, semantic classifications (ABC, Protocol, override), inferred types for unannotated variables/returns
-- [ ] Format is compact, line-anchored, scannable (per the design conversation)
-- [ ] Full test suite passes: `cd packages/pyright-internal && npm run test:norebuild`
-- [ ] `npm run typecheck` clean
+- [x] PostToolUse hook on Read fires for `.py` files
+- [ ] Hook calls MCP `lsp()` tool for codeLens, inlayHint, semanticTokens <!-- codeLens+inlayHint done (pyr-noe, pyr-bay); semanticTokens pending Task 3 -->
+- [x] `<file-intelligence>` block injected into agent context
+- [ ] Block includes: reference counts, implementation counts, semantic classifications (ABC, Protocol, override), inferred types for unannotated variables/returns <!-- refs/impls/inferred types done; ABC/Protocol/override pending Task 3 -->
+- [x] Format is compact, line-anchored, scannable (per the design conversation)
+- [x] Full test suite passes: `cd packages/pyright-internal && npm run test:norebuild`
+- [x] `npm run typecheck` clean
 
 ## Gate
 
