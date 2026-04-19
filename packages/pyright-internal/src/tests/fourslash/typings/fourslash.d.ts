@@ -358,6 +358,9 @@ declare namespace _ {
             endMarker: string,
             map: { [marker: string]: string }
         ): void;
+        verifySemanticTokensWithModifiers(map: {
+            [marker: string]: { type: string; modifiers: string[] };
+        }): void;
         verifyInlayHints(map: {
             [marker: string]: {
                 label: string;

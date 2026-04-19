@@ -17,7 +17,8 @@ import { DeclarationType } from '../analyzer/declaration';
 import * as ParseTreeUtils from '../analyzer/parseTreeUtils';
 import { ParseTreeWalker } from '../analyzer/parseTreeWalker';
 import { TypeEvaluator } from '../analyzer/typeEvaluatorTypes';
-import { ClassType, isClass, isModule } from '../analyzer/types';
+import { ClassType, FunctionType, isClass, isFunction, isModule } from '../analyzer/types';
+import { lookUpClassMember, MemberAccessFlags } from '../analyzer/typeUtils';
 import { throwIfCancellationRequested } from '../common/cancellationUtils';
 import { ProgramView } from '../common/extensibility';
 import { convertOffsetToPosition } from '../common/positionUtils';
@@ -53,12 +54,23 @@ export const tokenLegend = {
         SemanticTokenTypes.operator,
         SemanticTokenTypes.decorator,
     ],
-    tokenModifiers: [] as string[],
+    tokenModifiers: ['abstract', 'protocol', 'override'] as string[],
 };
 
 function _getTokenTypeIndex(tokenType: string): number {
     const index = tokenLegend.tokenTypes.indexOf(tokenType as SemanticTokenTypes);
     return index >= 0 ? index : -1;
+}
+
+function _getModifierBitset(...modifiers: string[]): number {
+    let bitset = 0;
+    for (const mod of modifiers) {
+        const idx = tokenLegend.tokenModifiers.indexOf(mod);
+        if (idx >= 0) {
+            bitset |= 1 << idx;
+        }
+    }
+    return bitset;
 }
 
 export class SemanticTokensProvider {
@@ -112,9 +124,9 @@ class SemanticTokenWalker extends ParseTreeWalker {
             return false;
         }
 
-        const tokenType = this._classifyName(node);
-        if (tokenType) {
-            this._pushToken(node, tokenType);
+        const classification = this._classifyName(node);
+        if (classification) {
+            this._pushToken(node, classification.tokenType, classification.modifiers);
         }
 
         return false; // NameNode has no children
@@ -127,15 +139,15 @@ class SemanticTokenWalker extends ParseTreeWalker {
         this.walk(node.d.leftExpr);
 
         // Classify the member name
-        const tokenType = this._classifyName(node.d.member);
-        if (tokenType) {
-            this._pushToken(node.d.member, tokenType);
+        const classification = this._classifyName(node.d.member);
+        if (classification) {
+            this._pushToken(node.d.member, classification.tokenType, classification.modifiers);
         }
 
         return false; // We handled children manually
     }
 
-    private _classifyName(node: NameNode): string | undefined {
+    private _classifyName(node: NameNode): { tokenType: string; modifiers: number } | undefined {
         const declInfo = this._evaluator.getDeclInfoForNameNode(node);
 
         if (!declInfo || declInfo.decls.length === 0) {
@@ -150,7 +162,7 @@ class SemanticTokenWalker extends ParseTreeWalker {
         if (decl.type === DeclarationType.Alias) {
             const type = this._evaluator.getType(node);
             if (type && isModule(type)) {
-                return SemanticTokenTypes.namespace;
+                return { tokenType: SemanticTokenTypes.namespace, modifiers: 0 };
             }
 
             const resolved = this._evaluator.resolveAliasDeclaration(decl, /* resolveLocalNames */ true);
@@ -163,27 +175,75 @@ class SemanticTokenWalker extends ParseTreeWalker {
 
         // Check for decorator context
         if (node.parent?.nodeType === ParseNodeType.Decorator) {
-            return SemanticTokenTypes.decorator;
+            return { tokenType: SemanticTokenTypes.decorator, modifiers: 0 };
         }
 
         switch (decl.type) {
             case DeclarationType.Class:
-            case DeclarationType.SpecialBuiltInClass:
-                return SemanticTokenTypes.class;
+            case DeclarationType.SpecialBuiltInClass: {
+                const classType = this._evaluator.getType(node);
+                const mods: string[] = [];
+                if (classType && isClass(classType)) {
+                    if (ClassType.isProtocolClass(classType)) {
+                        mods.push('protocol');
+                    }
+                    // Check if class declares any abstract methods (not just inherits ABCMeta)
+                    if (this._classDeclaresAbstractMethods(classType)) {
+                        mods.push('abstract');
+                    }
+                }
+                return { tokenType: SemanticTokenTypes.class, modifiers: _getModifierBitset(...mods) };
+            }
 
             case DeclarationType.Function: {
                 const enclosingClass = ParseTreeUtils.getEnclosingClass(decl.node, /* stopAtFunction */ true);
-                return enclosingClass ? SemanticTokenTypes.method : SemanticTokenTypes.function;
+                const tokenType = enclosingClass ? SemanticTokenTypes.method : SemanticTokenTypes.function;
+                const mods: string[] = [];
+
+                const funcType = this._evaluator.getType(node);
+                if (funcType && isFunction(funcType)) {
+                    // Check for @abstractmethod
+                    if (FunctionType.isAbstractMethod(funcType)) {
+                        mods.push('abstract');
+                    }
+
+                    // Check for explicit @override or implicit override
+                    if (FunctionType.isOverridden(funcType)) {
+                        mods.push('override');
+                    } else if (enclosingClass) {
+                        // Check for implicit override (method shadows parent without @override)
+                        // Exclude dunder methods — they're expected to shadow built-in methods
+                        const methodName = node.d.value;
+                        const isDunder = methodName.startsWith('__') && methodName.endsWith('__');
+                        if (!isDunder) {
+                            const enclosingClassType = this._evaluator.getType(enclosingClass.d.name);
+                            if (enclosingClassType && isClass(enclosingClassType)) {
+                                // Look up in parent classes only (skip the declaring class)
+                                const parentMember = lookUpClassMember(
+                                    enclosingClassType,
+                                    methodName,
+                                    MemberAccessFlags.Default,
+                                    enclosingClassType
+                                );
+                                if (parentMember) {
+                                    mods.push('override');
+                                }
+                            }
+                        }
+                    }
+                }
+
+                return { tokenType, modifiers: _getModifierBitset(...mods) };
             }
 
             case DeclarationType.Param:
-                return SemanticTokenTypes.parameter;
+                return { tokenType: SemanticTokenTypes.parameter, modifiers: 0 };
 
             case DeclarationType.TypeParam:
-                return SemanticTokenTypes.typeParameter;
+                return { tokenType: SemanticTokenTypes.typeParameter, modifiers: 0 };
 
             case DeclarationType.TypeAlias:
-                return SemanticTokenTypes.type;
+                return { tokenType: SemanticTokenTypes.type, modifiers: 0 };
 
             case DeclarationType.Variable: {
                 // Check for enum member or property: variable directly inside a class (not inside a method)
@@ -191,15 +251,15 @@ class SemanticTokenWalker extends ParseTreeWalker {
                 if (enclosingClass) {
                     const classType = this._evaluator.getType(enclosingClass.d.name);
                     if (classType && isClass(classType) && ClassType.isEnumClass(classType)) {
-                        return SemanticTokenTypes.enumMember;
+                        return { tokenType: SemanticTokenTypes.enumMember, modifiers: 0 };
                     }
-                    return SemanticTokenTypes.property;
+                    return { tokenType: SemanticTokenTypes.property, modifiers: 0 };
                 }
-                return SemanticTokenTypes.variable;
+                return { tokenType: SemanticTokenTypes.variable, modifiers: 0 };
             }
 
             case DeclarationType.Intrinsic:
-                return SemanticTokenTypes.variable;
+                return { tokenType: SemanticTokenTypes.variable, modifiers: 0 };
 
             default:
                 return undefined;
@@ -219,7 +279,24 @@ class SemanticTokenWalker extends ParseTreeWalker {
         );
     }
 
-    private _pushToken(node: NameNode, tokenType: string): void {
+    private _classDeclaresAbstractMethods(classType: ClassType): boolean {
+        // Check if this class directly declares any abstract methods
+        // (not just inherited abstract status from ABCMeta)
+        for (const [, symbol] of classType.shared.fields) {
+            const decls = symbol.getDeclarations();
+            for (const decl of decls) {
+                if (decl.type === DeclarationType.Function) {
+                    const funcType = this._evaluator.getTypeOfFunction(decl.node);
+                    if (funcType && FunctionType.isAbstractMethod(funcType.functionType)) {
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
+    }
+
+    private _pushToken(node: NameNode, tokenType: string, modifiers: number = 0): void {
         const position = convertOffsetToPosition(node.start, this._lines);
 
         // Range filtering
@@ -239,6 +316,6 @@ class SemanticTokenWalker extends ParseTreeWalker {
             return;
         }
 
-        this._builder.push(position.line, position.character, node.d.value.length, tokenTypeIndex, 0);
+        this._builder.push(position.line, position.character, node.d.value.length, tokenTypeIndex, modifiers);
     }
 }

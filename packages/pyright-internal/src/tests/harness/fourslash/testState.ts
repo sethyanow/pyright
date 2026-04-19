@@ -1722,6 +1722,94 @@ export class TestState {
         }
     }
 
+    verifySemanticTokensWithModifiers(map: { [marker: string]: { type: string; modifiers: string[] } }) {
+        this.analyze();
+
+        const markers = this.getMarkers();
+        assert(markers.length > 0, 'No markers found');
+
+        const fileName = markers[0].fileName;
+        const uri = Uri.file(fileName, this.serviceProvider);
+
+        const provider = new SemanticTokensProvider(this.program, uri, CancellationToken.None);
+        const result = provider.getTokens();
+        assert(result, 'SemanticTokensProvider returned no result');
+
+        // Decode the delta-encoded token array
+        // Each token is 5 numbers: deltaLine, deltaStartChar, length, tokenType, tokenModifiers
+        const data = result.data;
+        const decoded: { line: number; char: number; length: number; tokenType: string; modifiers: string[] }[] = [];
+
+        let prevLine = 0;
+        let prevChar = 0;
+
+        for (let i = 0; i < data.length; i += 5) {
+            const deltaLine = data[i];
+            const deltaStartChar = data[i + 1];
+            const length = data[i + 2];
+            const tokenTypeIndex = data[i + 3];
+            const tokenModifiersBitset = data[i + 4];
+
+            const line = prevLine + deltaLine;
+            const char = deltaLine > 0 ? deltaStartChar : prevChar + deltaStartChar;
+
+            // Decode modifiers bitset into array of modifier names
+            const modifiers: string[] = [];
+            for (let bit = 0; bit < tokenLegend.tokenModifiers.length; bit++) {
+                if (tokenModifiersBitset & (1 << bit)) {
+                    modifiers.push(tokenLegend.tokenModifiers[bit]);
+                }
+            }
+
+            decoded.push({
+                line,
+                char,
+                length,
+                tokenType: tokenLegend.tokenTypes[tokenTypeIndex] ?? `unknown(${tokenTypeIndex})`,
+                modifiers,
+            });
+
+            prevLine = line;
+            prevChar = char;
+        }
+
+        // For each marker, find the token at that position and assert type and modifiers
+        for (const marker of markers) {
+            const name = this.getMarkerName(marker);
+
+            if (!(name in map)) {
+                continue;
+            }
+
+            const expected = map[name];
+            const position = this.convertOffsetToPosition(fileName, marker.position);
+
+            const token = decoded.find((t) => t.line === position.line && t.char === position.character);
+
+            assert(
+                token,
+                `${name}: no semantic token found at line ${position.line}, char ${position.character}. ` +
+                    `Decoded tokens: ${JSON.stringify(decoded.filter((t) => t.line === position.line))}`
+            );
+            assert.strictEqual(
+                token.tokenType,
+                expected.type,
+                `${name}: expected token type '${expected.type}' but got '${token.tokenType}' ` +
+                    `at line ${position.line}, char ${position.character}`
+            );
+
+            // Assert modifiers match (order-independent)
+            const expectedMods = [...expected.modifiers].sort();
+            const actualMods = [...token.modifiers].sort();
+            assert.deepStrictEqual(
+                actualMods,
+                expectedMods,
+                `${name}: expected modifiers [${expectedMods.join(', ')}] but got [${actualMods.join(', ')}] ` +
+                    `at line ${position.line}, char ${position.character}`
+            );
+        }
+    }
+
     verifyInlayHints(map: { [marker: string]: { label: string; kind: 'type' | 'parameter' } }) {
         this.analyze();
 
