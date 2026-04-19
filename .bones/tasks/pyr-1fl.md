@@ -9,6 +9,7 @@ parent: pyr-ilj
 
 
 
+
 ## Context
 
 Sub-task B of Phase 5.5b (pyr-ilj). Sub-task A (pyr-xi9) shipped `tokenModifiers` for `abstract`, `protocol`, `override` in pyright-internal. This sub-task consumes those modifiers.
@@ -273,3 +274,7 @@ cd /Volumes/code/pyright && npm run typecheck
 - Betrayal: File was opened earlier with version 1; disk content has changed; we skip didOpen; Pyright returns analysis of stale content
 - Consequence: counts/classifications/hints reflect pre-edit state
 - Mitigation: ACCEPTED out of scope. Sub-task C hook fires PostToolUse (after Read/Edit/Write), so by the time the hook calls this tool, disk content is canonical and Pyright will have received a didChange from the LSP passthrough path. Direct MCP callers can re-invoke `lsp()` with `textDocument/didChange` if they need freshness — not this tool's job.
+
+## Log
+
+- [2026-04-19T21:08:00Z] [Seth] Closed. Debrief: 2 design corrections surfaced during integration (def-site gate for reference-site modifier noise; leftmost-eligible inlay attribution — not rightmost). Skeleton example used '-> int' but Pyright emits ':int' verbatim (verified inlayHintProvider.ts:114,143). Toolchain: npx jest pulls separate jest without ts-jest config, must use local binary. Memory updated: reference_pyright_inlay_behavior.md corrected (only :T), reference_pyright_semantic_modifier_noise.md added (ref-site gating), feedback_use_local_jest_not_npx.md added.
