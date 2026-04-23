@@ -4,9 +4,10 @@ title: 'Phase 5.5: LSP Proxy + Enrichment Hooks'
 status: open
 type: epic
 priority: 1
-depends_on: [pyr-yh8, pyr-084, pyr-ilj, pyr-klq, pyr-oq2]
+depends_on: [pyr-yh8, pyr-084, pyr-ilj, pyr-klq]
 parent: pyr-otr
 ---
+
 
 
 

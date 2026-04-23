@@ -4,8 +4,11 @@ title: 'Phase 5.5b Acceptance: Enrichment Hooks + File Intelligence'
 status: open
 type: task
 priority: 1
+depends_on: [pyr-oq2]
 parent: pyr-ilj
 ---
+
+
 
 
 

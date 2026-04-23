@@ -1,12 +1,13 @@
 ---
 id: pyr-oq2
 title: Semantic walker emits [override] on classes with no parent class
-status: active
+status: closed
 type: bug
 priority: 1
 owner: Seth
 parent: pyr-a7n
 ---
+
 
 
 
