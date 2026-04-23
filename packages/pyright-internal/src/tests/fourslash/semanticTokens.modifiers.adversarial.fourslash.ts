@@ -69,6 +69,16 @@
 ////     def /*childA*/a(self) -> None: pass
 ////     @override
 ////     def /*childB*/b(self) -> None: pass
+////
+//// # pyr-oq2: standalone class whose method structurally matches a Protocol's
+//// # method. With NO inheritance relationship, the `override` modifier must
+//// # not be emitted — structural compliance is not override.
+//// class /*structProto*/StructProto(Protocol):
+////     def /*structProtoMethod*/structured(self, x: int) -> int: ...
+////
+//// class /*structStandalone*/StructStandalone:
+////     def /*structNonOverride*/structured(self, x: int) -> int:
+////         return x
 
 {
     helper.verifySemanticTokensWithModifiers({
@@ -116,5 +126,11 @@
         multiOverrideChild: { type: 'class', modifiers: [] },
         childA: { type: 'method', modifiers: ['override'] },
         childB: { type: 'method', modifiers: ['override'] },
+
+        // pyr-oq2: structural-only match to Protocol ≠ override
+        structProto: { type: 'class', modifiers: ['protocol'] },
+        structProtoMethod: { type: 'method', modifiers: [] },
+        structStandalone: { type: 'class', modifiers: [] },
+        structNonOverride: { type: 'method', modifiers: [] },
     });
 }

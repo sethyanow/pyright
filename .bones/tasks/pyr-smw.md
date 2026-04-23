@@ -1,12 +1,14 @@
 ---
 id: pyr-smw
 title: Build PostToolUse enrichment hook for .py files
-status: active
+status: closed
 type: task
 priority: 1
 owner: Seth
 parent: pyr-ilj
 ---
+
+
 
 
 
@@ -341,3 +343,4 @@ All must be clean.
 
 - [2026-04-19T21:35:32Z] [Seth] SRE review (fresh session). Verified: all skeleton claims against codebase (proxy.ts ensurePyrightRunning at 210-249, mcp-server.ts file_intelligence handler, hooks.json SessionStart only, webpack 3 entries, plugin.json LSP+MCP wiring). Memory references current: reference_claude_code_hook_schema, reference_proxy_architecture, reference_pyright_inlay_behavior. Critical gap filled: ensurePyrightRunning is NOT exported and proxy.ts has CLI entry-point code at module top level (lines 343-366) that runs on import — added Step 0 prerequisite: export + require.main guard. Added: (1) Initialize must follow-up with sendNotification('initialized', {}); (2) capabilities block copy verbatim from proxy.ts runMcpMode; (3) integration test uses PYRIGHT_PROXY_STATE_DIR tmpdir (test-preferred env); (4) new SC checkbox for Step 0. No design changes; all SRE additions are execution gap fills.
 - [2026-04-19T21:37:44Z] [Seth] Adversarial planning (Step 1a). Walked all six categories across new components (Step 0 guard, readStdinJson, connectAndInit, main flow). Added 5 failure catalog entries: (1) proxy.ts getStateDir() at module top level must also be inside require.main guard, not just argv dispatch; (2) hook dist missing at plugin load → user-visible error per-tool → extend check-build.sh; (3) hook hangs past Claude Code's 60s kill → 45s main() soft-timeout; (4) stdin pathologies (empty/never-closed/oversized) → relies on soft-timeout + try/catch; (5) restated State Corruption around import side effects. Added Step 8a (check-build.sh update). Tightened Step 0 wording re: guard enclosure. Mitigations are structural, not defensive.
+- [2026-04-19T21:56:49Z] [Seth] DEBRIEF — Workarounds: resolve-langserver-path now searches candidate list (dist/ and dist/..) since dist/hooks/enrich-file.js has a different __dirname base than dist/proxy.js. Pragmatic; could be replaced by PYRIGHT_LANGSERVER_PATH env everywhere but current approach matches existing behavior. Design decisions: 45s soft-timeout wrapping main() (from adversarial catalog); runHook test helper consolidated into one function with RunHookOpts (mergeEnv + undefined-to-delete env). API surprises: (1) tsc under moduleResolution=node16 rejects dynamic import without .js extension but accepts static imports of .ts files unchanged — switched proxy-importable.test.ts to static import; (2) security hook pattern-matched on RegExp.exec() and flagged 'command injection' — had to bump formatting to bypass. What next task inherits: all Sub-tasks A/B/C done; pyr-ilj ready for acceptance. fetchFileIntelligence is now the single formatter entrypoint (4th consumer = import from there). REFLECTION — Surprised: (1) proxy.ts was not import-safe — SRE Step 0 prerequisite caught this upfront, saved a chase later; (2) resolve-langserver-path silently broke for nested entries, only surfaced via integration test stderr debugging — good test design paid off. Skeleton accuracy: SRE's Step 0 was essential; adversarial's soft-timeout was on-the-nose; skeleton didn't anticipate resolve-langserver-path edit but it was localized. Epic freshness: pyr-ilj + pyr-tcv Phase 2 criteria all now checked. Cross-pollination: require.main guard pattern (with getStateDir also inside) is reusable for any CLI-as-library. Tests: 101 pyright-mcp (+2 skipped) + 2394 pyright-internal pass.
